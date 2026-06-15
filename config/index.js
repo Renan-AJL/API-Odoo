@@ -57,14 +57,21 @@ const config = {
   mtls: {
     cert: process.env.ITAU_CERT_CRT || '',
     key: process.env.ITAU_CERT_KEY || '',
+    ca: process.env.ITAU_CERT_CA || '',
   },
 
   mockMode: process.env.MOCK_MODE === 'true',
 
   createMtlsConfig() {
     const hasCert = !!(this.mtls.cert && this.mtls.key);
-    if (!hasCert) return { cert: null, key: null, hasMtls: false };
-    return { cert: this.mtls.cert, key: this.mtls.key, hasMtls: true };
+    if (!hasCert) return { cert: null, key: null, ca: null, hasMtls: false };
+    // Append CA to cert chain if available
+    let fullCert = this.mtls.cert;
+    if (this.mtls.ca) {
+      fullCert = fullCert + '\n' + this.mtls.ca;
+      console.log('[CONFIG] CA cert incluido na cadeia mTLS (' + this.mtls.ca.length + ' chars)');
+    }
+    return { cert: fullCert, key: this.mtls.key, hasMtls: true };
   },
 
   // --- Odoo ---
