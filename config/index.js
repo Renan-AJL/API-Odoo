@@ -22,7 +22,7 @@ const config = {
   // --- Geral ---
   port: parseInt(process.env.PORT, 10) || 3000,
   nodeEnv: process.env.NODE_ENV || 'production',
-  middlewareApiKey: process.env.MIDDLEWARE_API_KEY || 'change-me-unified-key',
+  middlewareApiKey: process.env.MIDDLEWARE_API_KEY || process.env.API_SECRET_KEY || 'change-me-unified-key',
   rateLimitPerMinute: parseInt(process.env.RATE_LIMIT_PER_MINUTE, 10) || 60,
   debug: process.env.DEBUG === 'true',
 
@@ -30,16 +30,16 @@ const config = {
   itau: {
     clientId: process.env.ITAU_CLIENT_ID || '',
     clientSecret: process.env.ITAU_CLIENT_SECRET || '',
-    tokenUrl: process.env.ITAU_TOKEN_URL || (isSandbox
+    tokenUrl: process.env.ITAU_TOKEN_URL || process.env.ITAU_TOKEN_PRODUCAO_URL || (isSandbox
       ? 'https://sandbox.devportal.itau.com.br/itau-ep9-gtw-autenticacao-ext/oauth/v2/token'
       : 'https://sts.itau.com.br/api/oauth/token'),
-    bolecodeBaseUrl: process.env.ITAU_BOLECODE_URL || (isSandbox
+    bolecodeBaseUrl: process.env.ITAU_BOLECODE_URL || process.env.ITAU_PRODUCAO_URL || (isSandbox
       ? 'https://sandbox.devportal.itau.com.br/itau-ep9-gtw-cash-management-ext-v2/v2'
       : 'https://api.itau.com.br/cash_management/v2'),
-    pixBaseUrl: process.env.ITAU_PIX_URL || (isSandbox
+    pixBaseUrl: process.env.ITAU_PIX_URL || process.env.ITAU_PIX_BASE_URL || (isSandbox
       ? 'https://sandbox.devportal.itau.com.br/itau-ep9-gtw-pix-ext-v2'
       : 'https://api.itau.com.br/pix/v2'),
-    pixChave: process.env.ITAU_PIX_CHAVE || '',
+    pixChave: process.env.ITAU_PIX_CHAVE || process.env.ITAU_PIX_KEY || '',
   },
 
   banco: {
