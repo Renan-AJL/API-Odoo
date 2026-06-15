@@ -4,7 +4,7 @@ LABEL maintainer="odoo-middleware-unified"
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
 COPY config/ ./config/
 COPY middleware/ ./middleware/
