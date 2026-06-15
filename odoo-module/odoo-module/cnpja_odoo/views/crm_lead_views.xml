@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ==================== CRM LEAD - FORMULÁRIO ==================== -->
+
+    <record id="crm_lead_form_cnpja" model="ir.ui.view">
+        <field name="name">crm.lead.form.cnpja</field>
+        <field name="model">crm.lead</field>
+        <field name="inherit_id" ref="crm.crm_lead_view_form"/>
+        <field name="arch" type="xml">
+
+            <!-- Botões de consulta no header do lead -->
+            <xpath expr="//div[@name='button_box']" position="inside">
+                <button class="oe_stat_button btn-success"
+                        name="action_consultar_cnpj_crm"
+                        type="object"
+                        icon="fa-search"
+                        string="Consultar CNPJ"/>
+                <button class="oe_stat_button"
+                        name="action_consultar_cnpj_crm"
+                        type="object"
+                        icon="fa-refresh"
+                        string="Reconsultar"
+                        attrs="{'invisible': [('cnpja_consulted', '=', False)]}"/>
+            </xpath>
+
+            <!-- CNPJ antes do nome do parceiro -->
+            <xpath expr="//field[@name='partner_name']" position="before">
+                <field name="cnpj_cpf"
+                       placeholder="Digite o CNPJ (14 digitos) para auto-consulta"/>
+            </xpath>
+
+            <!-- Aba CNP Já no lead -->
+            <xpath expr="//page[@name='lead_info']" position="after">
+                <page name="cnpja_crm_data" string="CNP Já - Dados Cadastrais">
+                    <group name="cnpja_crm_main" string="Dados da Empresa">
+                        <group>
+                            <field name="cnpj_cpf" readonly="1"/>
+                            <field name="l10n_br_ie_code"
+                                   placeholder="Inscricao Estadual"/>
+                            <field name="l10n_br_taxpayer"/>
+                            <field name="l10n_br_tax_regime"/>
+                            <field name="has_ie" invisible="1"/>
+                            <field name="cnpjja_consulted" invisible="1"/>
+                        </group>
+                        <group>
+                            <div class="alert" role="alert"
+                                 style="background-color: #fff3cd; border: 1px solid #ffc107; padding: 10px; margin-top: 15px;">
+                                <strong>REGRA DE IMPOSTO:</strong><br/>
+                                <span attrs="{'invisible': [('has_ie', '=', True)]}">
+                                    • <b>SEM IE → 19%</b> (Nao contribuinte / Isento)
+                                </span>
+                                <span attrs="{'invisible': [('has_ie', '=', False)]}">
+                                    • <b>COM IE → 12%</b> (Contribuinte do ICMS)
+                                </span><br/>
+                                <small>Aliquota atual: <b><field name="aliquota_icms" widget="radio" nolabel="1"/></b>%</small>
+                            </div>
+                            <field name="natureza_juridica" readonly="1"/>
+                            <field name="is_mei"/>
+                            <field name="cnae" readonly="1"/>
+                        </group>
+                    </group>
+                </page>
+            </xpath>
+
+        </field>
+    </record>
+
+    <!-- Visão de lista do CRM -->
+    <record id="crm_lead_tree_cnpja" model="ir.ui.view">
+        <field name="name">crm.lead.tree.cnpja</field>
+        <field name="model">crm.lead</field>
+        <field name="inherit_id" ref="crm.crm_lead_view_tree"/>
+        <field name="arch" type="xml">
+            <field name="partner_name" position="after">
+                <field name="cnpj_cpf" optional="show"/>
+                <field name="l10n_br_ie_code" optional="show"/>
+                <field name="aliquota_icms" widget="badge"
+                       decoration-success="aliquota_icms == '12'"
+                       decoration-danger="aliquota_icms == '19'"
+                       optional="show"/>
+            </field>
+        </field>
+    </record>
+
+    <!-- Pesquisa no CRM -->
+    <record id="crm_lead_search_cnpja" model="ir.ui.view">
+        <field name="name">crm.lead.search.cnpja</field>
+        <field name="model">crm.lead</field>
+        <field name="inherit_id" ref="crm.crm_lead_view_search"/>
+        <field name="arch" type="xml">
+            <field name="name" position="after">
+                <field name="cnpj_cpf"/>
+                <field name="l10n_br_ie_code"/>
+            </field>
+            <xpath expr="//filter" position="inside">
+                <filter name="crm_possui_ie" string="Possui IE"
+                        domain="[('has_ie', '=', True)]"/>
+                <filter name="crm_sem_ie" string="Sem IE (19%)"
+                        domain="[('has_ie', '=', False)]"/>
+                <separator/>
+                <filter name="crm_aliq_12" string="ICMS 12%"
+                        domain="[('aliquota_icms', '=', '12')]"/>
+                <filter name="crm_aliq_19" string="ICMS 19%"
+                        domain="[('aliquota_icms', '=', '19')]"/>
+                <separator/>
+                <filter name="crm_contribuinte" string="Contribuinte ICMS"
+                        domain="[('l10n_br_taxpayer', '=', '1')]"/>
+                <filter name="crm_nao_contribuinte" string="Nao Contribuinte"
+                        domain="[('l10n_br_taxpayer', '=', '3')]"/>
+                <separator/>
+                <filter name="crm_consultado" string="Consultados CNP Já"
+                        domain="[('cnpja_consulted', '=', True)]"/>
+            </xpath>
+            <xpath expr="//group" position="inside">
+                <filter name="crm_group_aliquota" string="Aliquota ICMS"
+                        context="{'group_by': 'aliquota_icms'}"/>
+                <filter name="crm_group_taxpayer" string="Tipo Contribuinte"
+                        context="{'group_by': 'l10n_br_taxpayer'}"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Pipeline/Kanban com badges -->
+    <record id="crm_lead_kanban_cnpja" model="ir.ui.view">
+        <field name="name">crm.lead.kanban.cnpja</field>
+        <field name="model">crm.lead</field>
+        <field name="inherit_id" ref="crm.crm_lead_view_kanban"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[hasclass('o_kanban_record_body')]" position="inside">
+                <div t-if="record.cnpj_cpf.raw_value" class="oe_kanban_bottom_left">
+                    <span class="badge badge-secondary">
+                        <t t-esc="record.cnpj_cpf.value"/>
+                    </span>
+                    <span t-attf-class="badge #{'badge-success' if record.aliquota_icms.raw_value == '12' else 'badge-danger'}">
+                        ICMS <t t-esc="record.aliquota_icms.value"/>%
+                    </span>
+                </div>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
