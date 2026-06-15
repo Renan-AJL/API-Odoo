@@ -26,19 +26,13 @@ const config = {
   rateLimitPerMinute: parseInt(process.env.RATE_LIMIT_PER_MINUTE, 10) || 60,
   debug: process.env.DEBUG === 'true',
 
-  // --- Itau ---
+  // --- Itau (URLs identicas ao itau-odoo original) ---
   itau: {
     clientId: process.env.ITAU_CLIENT_ID || '',
     clientSecret: process.env.ITAU_CLIENT_SECRET || '',
-    tokenUrl: process.env.ITAU_TOKEN_URL || process.env.ITAU_TOKEN_PRODUCAO_URL || (isSandbox
-      ? 'https://sandbox.devportal.itau.com.br/itau-ep9-gtw-autenticacao-ext/oauth/v2/token'
-      : 'https://sts.itau.com.br/api/oauth/token'),
-    bolecodeBaseUrl: process.env.ITAU_BOLECODE_URL || process.env.ITAU_PRODUCAO_URL || (isSandbox
-      ? 'https://sandbox.devportal.itau.com.br/itau-ep9-gtw-cash-management-ext-v2/v2'
-      : 'https://api.itau.com.br/cash_management/v2'),
-    pixBaseUrl: process.env.ITAU_PIX_URL || process.env.ITAU_PIX_BASE_URL || (isSandbox
-      ? 'https://sandbox.devportal.itau.com.br/itau-ep9-gtw-pix-ext-v2'
-      : 'https://api.itau.com.br/pix/v2'),
+    tokenUrl: process.env.ITAU_TOKEN_URL || process.env.ITAU_TOKEN_PRODUCAO_URL || 'https://sts.itau.com.br/api/oauth/token',
+    bolecodeBaseUrl: process.env.ITAU_BOLECODE_URL || 'https://secure.api.itau/pix_recebimentos_conciliacoes/v2',
+    pixBaseUrl: process.env.ITAU_PIX_URL || process.env.ITAU_PIX_BASE_URL || '',
     pixChave: process.env.ITAU_PIX_CHAVE || process.env.ITAU_PIX_KEY || '',
   },
 
