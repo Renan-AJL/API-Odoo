@@ -5,9 +5,16 @@ const config = require('../config');
 async function callBolecode(accessToken, endpoint, payload) {
   const mtls = config.createMtlsConfig();
   const baseUrl = config.itau.bolecodeBaseUrl;
-  const httpsAgent = mtls.hasMtls ? new https.Agent({ cert: mtls.cert, key: mtls.key }) : undefined;
   const url = baseUrl + endpoint;
-  console.log('[ITAU-API] BoleCode POST', endpoint);
+
+  // api.itau.com.br usa OAuth2 bearer + x-itau-apikey (sem mTLS)
+  // secure.api.itau usa mTLS
+  const useMtls = mtls.hasMtls && baseUrl.includes('secure.api.itau');
+  const httpsAgent = useMtls ? new https.Agent({ cert: mtls.cert, key: mtls.key }) : undefined;
+
+  console.log('[ITAU-API] BoleCode POST', url);
+  console.log('[ITAU-API] mTLS para BoleCode:', useMtls ? 'SIM' : 'NAO (OAuth2 only)');
+
   const headers = {
     'Authorization': 'Bearer ' + accessToken,
     'Content-Type': 'application/json; charset=utf-8',
@@ -34,9 +41,14 @@ async function callBolecode(accessToken, endpoint, payload) {
 async function callBolecodeGet(accessToken, endpoint) {
   const mtls = config.createMtlsConfig();
   const baseUrl = config.itau.bolecodeBaseUrl;
-  const httpsAgent = mtls.hasMtls ? new https.Agent({ cert: mtls.cert, key: mtls.key }) : undefined;
   const url = baseUrl + endpoint;
-  console.log('[ITAU-API] BoleCode GET', endpoint);
+
+  const useMtls = mtls.hasMtls && baseUrl.includes('secure.api.itau');
+  const httpsAgent = useMtls ? new https.Agent({ cert: mtls.cert, key: mtls.key }) : undefined;
+
+  console.log('[ITAU-API] BoleCode GET', url);
+  console.log('[ITAU-API] mTLS para BoleCode GET:', useMtls ? 'SIM' : 'NAO');
+
   const headers = {
     'Authorization': 'Bearer ' + accessToken,
     'Accept': 'application/json',
@@ -64,9 +76,12 @@ async function callPix(method, endpoint, payload) {
   const accessToken = await getAccessToken();
   const mtls = config.createMtlsConfig();
   const baseUrl = config.itau.pixBaseUrl;
-  const httpsAgent = mtls.hasMtls ? new https.Agent({ cert: mtls.cert, key: mtls.key }) : undefined;
   const url = baseUrl + endpoint;
-  console.log('[ITAU-API] PIX ' + method, endpoint);
+
+  const useMtls = mtls.hasMtls && baseUrl.includes('secure.api.itau');
+  const httpsAgent = useMtls ? new https.Agent({ cert: mtls.cert, key: mtls.key }) : undefined;
+
+  console.log('[ITAU-API] PIX ' + method, url);
   const headers = {
     'Authorization': 'Bearer ' + accessToken,
     'Content-Type': 'application/json; charset=utf-8',
