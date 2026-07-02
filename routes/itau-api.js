@@ -11,6 +11,116 @@ const { apiKeyAuth } = require('../middleware/auth');
 const { emitirBoleto, parseFormaPagamento } = require('../services/itau-boleto');
 const { storeBoleto, generatePdf, generatePdfFromFields } = require('../services/pdf-boleto');
 const { pushBoletosToOdoo } = require('../services/odoo-push');
+const { criarLinkPagamento } = require('../services/itau-link-pagamento');
+const config = require('../config');
+
+// --- Deteccao de cartao por bandeira ---
+var BANDEIRAS = ['VISA', 'MASTER', 'ELO', 'AMEX', 'HIPERCARD', 'HIPER'];
+
+function detectarCartao(formaPag) {
+  if (!formaPag) return null;
+  var n = formaPag.trim().toUpperCase();
+  for (var i = 0; i < BANDEIRAS.length; i++) {
+    var b = BANDEIRAS[i];
+    if (n.indexOf(b) === 0 || n.indexOf(b + ' ') === 0) {
+      var debito = n.indexOf('DEBITO') >= 0 || n.indexOf('DEB') >= 0;
+      var parcelas = 1;
+      var match = n.match(/(\d+)\s*(VEZES|X|VEZ)/);
+      if (match) parcelas = parseInt(match[1]);
+      return { bandeira: b, parcelas: parcelas, debito: debito };
+    }
+  }
+  // Generico: CARTAO, CARTAO CREDITO, CREDITO, etc.
+  if (n.indexOf('CART') === 0 || n.indexOf('CREDITO') === 0) {
+    var debito = n.indexOf('DEBITO') >= 0 || n.indexOf('DEB') >= 0;
+    var parcelas = 1;
+    var match = n.match(/(\d+)\s*(VEZES|X|VEZ)/);
+    if (match) parcelas = parseInt(match[1]);
+    return { bandeira: 'CARTAO', parcelas: parcelas, debito: debito };
+  }
+  return null;
+}
+
+// --- Handler de pagamento em cartao ---
+async function handleCartao(req, res, d, cartaoInfo) {
+  var fat = d.fatura || {};
+  var faturaName = fat.name || fat.seu_numero || d.fatura_name || '';
+  var faturaId = (fat.id || d.fatura_id) ? parseInt(String(fat.id || d.fatura_id)) : 0;
+  var valorTotal = parseFloat(fat.valor_nominal || d.fatura_valor) || 0;
+  var pag = d.pagador || {};
+
+  console.log('[API/CARTAO] Fatura:', faturaName, '| Valor:', valorTotal, '| Bandeira:', cartaoInfo.bandeira);
+
+  if (valorTotal <= 0) {
+    return res.json({ success: false, message: 'Valor invalido para pagamento em cartao' });
+  }
+
+  if (!config.rede.pv || !config.rede.chaveIntegracao) {
+    console.error('[API/CARTAO] Rede nao configurada. PV:', config.rede.pv ? 'OK' : 'faltando',
+      '| Chave:', config.rede.chaveIntegracao ? 'OK' : 'faltando');
+    return res.json({
+      success: false,
+      message: 'Rede nao configurada. Defina REDE_PV e REDE_CHAVE_INTEGRACAO nas variaveis de ambiente.',
+    });
+  }
+
+  try {
+    var linkResult = await criarLinkPagamento({
+      valor: valorTotal,
+      seu_numero: faturaName || String(Date.now()),
+      descricao: 'Fatura ' + faturaName,
+      parcelas: cartaoInfo.parcelas,
+      nome_pagador: pag.nome || d.pagador_nome || '',
+      cpf_cnpj_pagador: pag.cpf_cnpj || d.pagador_cpf || '',
+      email_pagador: pag.email || '',
+      expiracao: 7 * 86400,
+    });
+
+    var checkoutUrl = linkResult.link || '';
+
+    if (!checkoutUrl) {
+      console.error('[API/CARTAO] Checkout criado mas sem URL. Resposta bruta:', JSON.stringify(linkResult.raw));
+      return res.json({
+        success: false,
+        message: 'Checkout criado porem sem URL de pagamento. Verificar resposta da Rede.',
+        detail: linkResult.raw,
+      });
+    }
+
+    console.log('[API/CARTAO] Checkout URL gerada:', checkoutUrl.substring(0, 80) + '...');
+
+    res.json({
+      success: true,
+      data: {
+        forma_pagamento: d.forma_pagamento,
+        total_parcelas: 1,
+        valor_total: valorTotal.toFixed(2),
+        fatura_name: faturaName || '(nao informado)',
+        fatura_id: faturaId || 0,
+        pagamentos: [{
+          tipo: cartaoInfo.debito ? 'cartao_debito' : 'cartao_credito',
+          parcela: 1,
+          total_parcelas: 1,
+          valor_titulo: valorTotal.toFixed(2),
+          bandeira: cartaoInfo.bandeira,
+          parcelas: cartaoInfo.parcelas,
+          pix_copia_cola: checkoutUrl,
+          link_checkout: checkoutUrl,
+          checkout_id: linkResult.id || '',
+        }],
+        odoo_push: 'nao_aplicavel',
+      }
+    });
+
+  } catch (err) {
+    console.error('[API/CARTAO] ERRO:', err.message);
+    if (err.detail) console.error('[API/CARTAO] Detalhes:', JSON.stringify(err.detail));
+    res.json({
+      success: false,
+      message: 'Erro ao gerar link de pagamento: ' + (err.message || 'Erro desconhecido'),
+    });
+  }
+}
 
 function calcDataVenc(base, dias) {
   var db = base ? new Date(base + 'T12:00:00') : new Date();
@@ -29,7 +139,15 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
 
     console.log('[API] === NOVA REQUISICAO DE PAGAMENTO ===');
     console.log('[API] Body keys:', Object.keys(d).join(', '));
-    console.log('[API] forma_pagamento:', d.forma_pagamento);
+    var formaPag = d.forma_pagamento || '';
+    console.log('[API] forma_pagamento:', formaPag);
+
+    // === DETECTAR PAGAMENTO EM CARTAO ===
+    var cartaoInfo = detectarCartao(formaPag);
+    if (cartaoInfo) {
+      console.log('[API] Pagamento em cartao detectado:', cartaoInfo.bandeira, cartaoInfo.parcelas, 'x');
+      return await handleCartao(req, res, d, cartaoInfo);
+    }
 
     var fat = d.fatura || {};
     var fatNameFromNested = fat.name || fat.seu_numero || '';

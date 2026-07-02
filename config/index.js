@@ -54,6 +54,38 @@ const config = {
     ca: process.env.ITAU_CERT_CA || '',
   },
 
+  // --- Rede (Cartao de Credito / Checkout) ---
+  rede: {
+    pv: process.env.REDE_PV || '',
+    chaveIntegracao: process.env.REDE_CHAVE_INTEGRACAO || '',
+    softDescriptor: process.env.REDE_SOFT_DESCRIPTOR || 'AJL FERRO',
+  },
+
+  redeBaseUrl: (function() {
+    var amb = process.env.REDE_AMBIENTE || 'producao';
+    return amb === 'sandbox'
+      ? 'https://sandbox.userede.com.br'
+      : 'https://api.userede.com.br';
+  })(),
+
+  linkPagamento: {
+    pv: process.env.REDE_PV || '',
+    clientId: process.env.REDE_PV || '',
+    clientSecret: process.env.REDE_CHAVE_INTEGRACAO || '',
+    apiUrl: (function() {
+      var amb = process.env.REDE_AMBIENTE || 'producao';
+      return amb === 'sandbox'
+        ? 'https://sandbox.userede.com.br'
+        : 'https://api.userede.com.br';
+    })(),
+    tokenUrl: (function() {
+      var amb = process.env.REDE_AMBIENTE || 'producao';
+      return amb === 'sandbox'
+        ? 'https://sandbox.userede.com.br/oauth/token'
+        : 'https://api.userede.com.br/oauth/token';
+    })(),
+  },
+
   mockMode: process.env.MOCK_MODE === 'true',
 
   createMtlsConfig() {
@@ -81,6 +113,8 @@ const config = {
 // Warnings
 if (!config.itau.pixChave) console.warn('[CONFIG] ITAU_PIX_CHAVE nao definida!');
 if (!config.itau.clientId) console.warn('[CONFIG] ITAU_CLIENT_ID nao definida!');
+if (!config.rede.pv) console.warn('[CONFIG] REDE_PV nao definida - checkout cartao indisponivel');
+if (!config.rede.chaveIntegracao) console.warn('[CONFIG] REDE_CHAVE_INTEGRACAO nao definida - checkout cartao indisponivel');
 if (!config.cnpjaApiToken && !process.env.CONSULTAR_IO_TOKEN) {
   console.warn('[CONFIG] Sem CNPJA_API_TOKEN nem CONSULTAR_IO_TOKEN - IE ficara indisponivel');
 }
