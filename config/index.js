@@ -75,14 +75,14 @@ const config = {
     apiUrl: (function() {
       var amb = process.env.REDE_AMBIENTE || 'producao';
       return amb === 'sandbox'
-        ? 'https://sandbox.userede.com.br'
-        : 'https://api.userede.com.br';
+        ? 'https://sandbox.userede.com.br/erede/v2'
+        : 'https://api.userede.com.br/erede/v2';
     })(),
     tokenUrl: (function() {
       var amb = process.env.REDE_AMBIENTE || 'producao';
       return amb === 'sandbox'
-        ? 'https://sandbox.userede.com.br/oauth/token'
-        : 'https://api.userede.com.br/oauth/token';
+        ? 'https://sandbox.userede.com.br/redelabs/oauth2/token'
+        : 'https://api.userede.com.br/redelabs/oauth2/token';
     })(),
   },
 

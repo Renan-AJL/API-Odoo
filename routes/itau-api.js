@@ -74,6 +74,7 @@ async function handleCartao(req, res, d, cartaoInfo) {
       cpf_cnpj_pagador: pag.cpf_cnpj || d.pagador_cpf || '',
       email_pagador: pag.email || '',
       expiracao: 7 * 86400,
+      host: req.protocol + '://' + req.get('host'),
     });
 
     var checkoutUrl = linkResult.link || '';
@@ -409,6 +410,36 @@ router.post('/regen', async function(req, res) {
   } catch(e) {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.send('ERRO|' + e.message);
+  }
+});
+
+// === CHECKOUT DE CARTAO ===
+var checkoutPage = require('../views/checkout-page');
+var linkPagService = require('../services/itau-link-pagamento');
+
+// GET /api/v1/itau/checkout/:orderId - Pagina de pagamento
+router.get('/checkout/:orderId', function(req, res) {
+  var order = linkPagService.consultarPedido(req.params.orderId);
+  if (!order) {
+    res.status(404).send('Pedido nao encontrado ou expirado');
+    return;
+  }
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(checkoutPage.checkoutHtml(order));
+});
+
+// POST /api/v1/itau/checkout/:orderId/pay - Processar pagamento
+router.post('/checkout/:orderId/pay', async function(req, res) {
+  try {
+    var result = await linkPagService.processarPagamento(req.params.orderId, req.body);
+    res.json(result);
+  } catch (err) {
+    var status = err.status || 500;
+    res.status(status).json({
+      autorizado: false,
+      returnMessage: err.message,
+      detail: err.detail,
+    });
   }
 });
 

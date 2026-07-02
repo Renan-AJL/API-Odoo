@@ -1,228 +1,197 @@
 // ============================================
-// SERVICO DE LINK DE PAGAMENTO - REDE CHECKOUT
+// SERVICO DE CHECKOUT CARTAO - REDE E.REede
 // ============================================
-// Cria checkout de cartao de credito/debito
-// via e.Rede (Rede Itau E-Commerce PV)
-// Portal: https://developer.userede.com.br
+// Cria checkout hospedado para cartao
+// API e.Rede W3.0: /redelabs/oauth2/token + /erede/v2/transactions
 
 const axios = require('axios');
 const config = require('../config');
 const logger = require('../utils/logger');
 
-// Cache do token OAuth2 da Rede
-let linkTokenCache = {
-  accessToken: null,
-  expiresAt: null,
-  isLoading: false,
-};
+// Cache do token OAuth2
+let tokenCache = { accessToken: null, expiresAt: null, isLoading: false };
+
+// Store de pedidos de checkout pendentes (em memoria)
+const pendingOrders = new Map();
 
 /**
- * Obtem token OAuth2 da Rede (e.Rede W3.0)
- * Auth: Basic Auth com PV:ChaveIntegracao
+ * Obtem token OAuth2 da Rede e.Rede
+ * Endpoint correto: /redelabs/oauth2/token
  */
-async function getLinkToken() {
-  const now = Date.now();
-
-  // Retorna token em cache se ainda valido (com margem de 30s)
-  if (linkTokenCache.accessToken && linkTokenCache.expiresAt && now < linkTokenCache.expiresAt - 30000) {
-    logger.debug('Token Rede obtido do cache');
-    return linkTokenCache.accessToken;
+async function getRedeToken() {
+  var now = Date.now();
+  if (tokenCache.accessToken && tokenCache.expiresAt && now < tokenCache.expiresAt - 30000) {
+    return tokenCache.accessToken;
   }
-
-  // Evita multiplas requisicoes simultaneas
-  if (linkTokenCache.isLoading) {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return getLinkToken();
+  if (tokenCache.isLoading) {
+    await new Promise(function(resolve) { setTimeout(resolve, 500); });
+    return getRedeToken();
   }
-
-  linkTokenCache.isLoading = true;
+  tokenCache.isLoading = true;
 
   try {
-    const tokenUrl = config.linkPagamento.tokenUrl;
-    const pv = config.linkPagamento.pv;
-    const chave = config.linkPagamento.clientSecret;
+    var pv = config.linkPagamento.pv;
+    var chave = config.linkPagamento.clientSecret;
+    if (!pv || !chave) throw new Error('REDE_PV e REDE_CHAVE_INTEGRACAO nao configurados');
 
-    if (!pv || !chave) {
-      throw new Error('REDE_PV e REDE_CHAVE_INTEGRACAO devem estar configurados');
-    }
+    logger.info('Obtendo token e.Rede (' + config.linkPagamento.tokenUrl + ')...');
 
-    logger.info('Solicitando token Rede e.Rede (' + config.redeBaseUrl + ')...');
-
-    const params = new URLSearchParams();
+    var params = new URLSearchParams();
     params.append('grant_type', 'client_credentials');
 
-    // e.Rede usa Basic Auth: PV como username, Chave de Integracao como password
-    const response = await axios.post(tokenUrl, params, {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      auth: {
-        username: pv,
-        password: chave,
-      },
+    var response = await axios.post(config.linkPagamento.tokenUrl, params, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      auth: { username: pv, password: chave },
       timeout: 30000,
     });
 
-    const data = response.data;
+    var data = response.data;
+    if (!data.access_token) throw new Error('Token nao retornado');
 
-    if (!data.access_token) {
-      throw new Error('Token nao retornado pela API Rede');
-    }
+    tokenCache.accessToken = data.access_token;
+    tokenCache.expiresAt = now + (data.expires_in * 1000);
+    tokenCache.isLoading = false;
 
-    linkTokenCache.accessToken = data.access_token;
-    linkTokenCache.expiresAt = now + (data.expires_in * 1000);
-    linkTokenCache.isLoading = false;
-
-    logger.info('Token Rede obtido com sucesso. Expira em ' + data.expires_in + 's');
+    logger.info('Token e.Rede OK, expira em ' + data.expires_in + 's');
     return data.access_token;
-
   } catch (error) {
-    linkTokenCache.isLoading = false;
-    linkTokenCache.accessToken = null;
-    linkTokenCache.expiresAt = null;
-
-    const msg = error.response
+    tokenCache.isLoading = false;
+    tokenCache.accessToken = null;
+    var msg = error.response
       ? 'Erro ' + error.response.status + ': ' + JSON.stringify(error.response.data)
       : error.message;
-
-    logger.error('Falha ao obter token Rede: ' + msg);
-    throw new Error('Falha na autenticacao Rede: ' + msg);
+    logger.error('Falha token e.Rede: ' + msg);
+    throw new Error('Autenticacao Rede falhou: ' + msg);
   }
 }
 
 /**
- * Retorna headers autenticados para Rede
- */
-async function getLinkAuthHeaders() {
-  const token = await getLinkToken();
-  return {
-    'Authorization': 'Bearer ' + token,
-    'Content-Type': 'application/json',
-  };
-}
-
-/**
- * CRIAR link de checkout de cartao (e.Rede Checkout)
- *
- * @param {Object} dadosLink - Dados para criar o checkout
- * @param {number} dadosLink.valor - Valor total (ex: 150.00)
- * @param {string} dadosLink.seu_numero - Numero de referencia (ID fatura Odoo)
- * @param {string} dadosLink.descricao - Descricao do pagamento
- * @param {number} dadosLink.parcelas - Numero de parcelas (default: 1)
- * @param {string} dadosLink.nome_pagador - Nome do pagador (opcional)
- * @param {string} dadosLink.cpf_cnpj_pagador - CPF/CNPJ do pagador (opcional)
- * @param {string} dadosLink.email_pagador - Email do pagador (opcional)
- * @param {number} dadosLink.expiracao - Expiracao em segundos (default: 7 dias)
- * @returns {Promise<Object>} { id, link, raw }
+ * Cria um pedido de checkout e retorna o link para a pagina de pagamento
+ * A pagina de checkout fica hospedada no proprio servidor
  */
 async function criarLinkPagamento(dadosLink) {
-  logger.info('Criando link de pagamento cartao (Rede Checkout)...');
+  logger.info('Criando checkout de cartao...');
 
-  const headers = await getLinkAuthHeaders();
-  const baseUrl = config.linkPagamento.apiUrl;
-  const pv = config.linkPagamento.pv;
+  var orderId = dadosLink.seu_numero || ('ORD-' + Date.now());
+  var valor = dadosLink.valor || 0;
+  var descricao = dadosLink.descricao || 'Pagamento';
+  var parcelas = dadosLink.parcelas || 12; // maximo de parcelas permitido
 
-  if (!pv) {
-    throw { status: 500, message: 'REDE_PV nao configurado' };
+  if (valor <= 0) throw { status: 400, message: 'Valor invalido' };
+  if (!config.rede.pv || !config.rede.chaveIntegracao) {
+    throw { status: 500, message: 'Rede nao configurada. Defina REDE_PV e REDE_CHAVE_INTEGRACAO.' };
   }
 
-  const payload = {
+  // Armazena o pedido pendente
+  var orderData = {
+    id: orderId,
+    valor: valor,
+    descricao: descricao,
+    maxParcelas: parcelas,
+    nome_pagador: dadosLink.nome_pagador || '',
+    cpf_cnpj_pagador: dadosLink.cpf_cnpj_pagador || '',
+    fatura_name: dadosLink.seu_numero || '',
+    criado_em: new Date().toISOString(),
+    status: 'pendente',
+  };
+  pendingOrders.set(orderId, orderData);
+
+  // Limpa pedidos antigos (mais de 24h)
+  var cutoff = Date.now() - 86400000;
+  for (var [key, val] of pendingOrders) {
+    if (new Date(val.criado_em).getTime() < cutoff) pendingOrders.delete(key);
+  }
+
+  // O link e a URL da propria pagina de checkout hospedada
+  var host = dadosLink.host || '';
+  var checkoutUrl = host + '/api/v1/itau/checkout/' + orderId;
+
+  logger.info('Checkout criado: ' + orderId + ' -> ' + checkoutUrl);
+  return { id: orderId, link: checkoutUrl, raw: { orderId: orderId, checkoutUrl: checkoutUrl } };
+}
+
+/**
+ * Processa o pagamento do cartao via API e.Rede
+ * Chamado quando o cliente submete o formulario de checkout
+ */
+async function processarPagamento(orderId, cartaoData) {
+  var order = pendingOrders.get(orderId);
+  if (!order) throw { status: 404, message: 'Pedido nao encontrado ou expirado' };
+  if (order.status !== 'pendente') throw { status: 400, message: 'Pedido ja foi processado' };
+
+  var token = await getRedeToken();
+  var pv = config.linkPagamento.pv;
+
+  var payload = {
     capture: true,
-    merchantOrderId: dadosLink.seu_numero || String(Date.now()),
-    amount: Math.round(dadosLink.valor * 100), // Valor em centavos
+    merchantOrderId: orderId,
+    amount: Math.round(order.valor * 100),
     currency: 'BRL',
-    installments: dadosLink.parcelas || 1,
-    softDescriptor: config.rede.softDescriptor || 'LOJA',
+    installments: parseInt(cartaoData.parcelas) || 1,
+    softDescriptor: (config.rede.softDescriptor || 'LOJA').substring(0, 13),
+    card: {
+      cardNumber: cartaoData.numero.replace(/\D/g, ''),
+      holder: cartaoData.titular,
+      expirationDate: (cartaoData.validade_mes || '') + '/' + (cartaoData.validade_ano || ''),
+      securityCode: cartaoData.cvv,
+    },
   };
 
-  // Dados do cliente
-  if (dadosLink.nome_pagador || dadosLink.cpf_cnpj_pagador || dadosLink.email_pagador) {
-    payload.customer = {};
-    if (dadosLink.nome_pagador) payload.customer.name = dadosLink.nome_pagador;
-    if (dadosLink.email_pagador) payload.customer.email = dadosLink.email_pagador;
-    if (dadosLink.cpf_cnpj_pagador) {
-      var doc = dadosLink.cpf_cnpj_pagador.replace(/\D/g, '');
-      if (doc.length > 0) payload.customer.document = doc;
-    }
-  }
-
-  // URLs de retorno
-  var host = dadosLink.host || '';
-  if (host) {
-    payload.settings = {
-      returnUrl: host + '/retorno',
-      cancelUrl: host + '/cancelamento',
-    };
-  }
+  logger.info('Processando pagamento: ' + orderId + ' R$' + order.valor + ' ' + payload.installments + 'x');
 
   try {
-    // e.Rede Checkout API: POST /checkout/v1/orders/{pv}
-    const response = await axios.post(
-      baseUrl + '/checkout/v1/orders/' + pv,
+    var response = await axios.post(
+      config.linkPagamento.apiUrl + '/transactions',
       payload,
-      { headers, timeout: 30000 }
+      {
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json',
+        },
+        timeout: 30000,
+      }
     );
 
-    const resultado = response.data;
-    // A URL de checkout pode vir em diferentes campos dependendo da versao da API
-    var link = resultado.checkoutUrl
-      || resultado.paymentUrl
-      || resultado.url
-      || resultado.link
-      || (resultado.links && resultado.links.checkout)
-      || '';
+    var result = response.data;
+    var autorizado = result.returnCode === '00' || result.returnCode === '174';
+    order.status = autorizado ? 'pago' : 'negado';
+    order.resultado = result;
+    pendingOrders.set(orderId, order);
 
-    logger.info('Link de pagamento criado: ' + (resultado.orderId || resultado.id || 'sem ID')
-      + ' -> ' + (link ? 'URL recebida' : 'SEM URL - verificar formato da resposta'));
+    logger.info('Pagamento ' + orderId + ': ' + result.returnCode + ' - ' + result.returnMessage);
 
     return {
-      id: resultado.orderId || resultado.id || '',
-      link: link,
-      raw: resultado,
+      autorizado: autorizado,
+      returnCode: result.returnCode,
+      returnMessage: result.returnMessage,
+      tid: result.tid,
+      nsu: result.nsu,
+      authorizationCode: result.authorizationCode,
+      brand: result.brand ? result.brand.name : '',
     };
-
   } catch (error) {
-    const status = error.response?.status;
-    const errData = error.response?.data;
-    logger.error('Falha ao criar link de pagamento: ' + status + ' - ' + JSON.stringify(errData));
+    var status = error.response ? error.response.status : 502;
+    var errData = error.response ? error.response.data : {};
+    logger.error('Falha pagamento: ' + status + ' - ' + JSON.stringify(errData));
     throw {
-      status: status || 502,
-      message: (errData && (errData.message || errData.mensagem)) || 'Erro ao criar link de pagamento cartao',
+      status: status,
+      message: (errData.message || errData.mensagem) || 'Erro ao processar pagamento',
       detail: errData,
     };
   }
 }
 
 /**
- * CONSULTAR pedido de checkout pelo ID
+ * Consulta pedido de checkout
  */
-async function consultarLinkPagamento(idLink) {
-  logger.info('Consultando checkout ' + idLink + '...');
-  const headers = await getLinkAuthHeaders();
-  const baseUrl = config.linkPagamento.apiUrl;
-  const pv = config.linkPagamento.pv;
-
-  try {
-    const response = await axios.get(
-      baseUrl + '/checkout/v1/orders/' + pv + '/' + idLink,
-      { headers, timeout: 30000 }
-    );
-    return response.data;
-  } catch (error) {
-    const status = error.response?.status;
-    const errData = error.response?.data;
-    logger.error('Falha ao consultar checkout: ' + status + ' - ' + JSON.stringify(errData));
-    throw {
-      status: status || 502,
-      message: (errData && errData.mensagem) || 'Erro ao consultar checkout',
-      detail: errData,
-    };
-  }
+function consultarPedido(orderId) {
+  return pendingOrders.get(orderId) || null;
 }
 
 module.exports = {
-  getLinkToken,
-  getLinkAuthHeaders,
+  getRedeToken,
   criarLinkPagamento,
-  consultarLinkPagamento,
+  processarPagamento,
+  consultarPedido,
+  pendingOrders,
 };
