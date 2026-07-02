@@ -1,69 +1,16 @@
 // ============================================
-// SERVICO DE CHECKOUT CARTAO - REDE E.REede
+// SERVICO DE CHECKOUT CARTAO - REDE E.REDE W3.0
 // ============================================
-// Cria checkout hospedado para cartao
-// API e.Rede W3.0: /redelabs/oauth2/token + /erede/v2/transactions
+// e.Rede W3.0 usa Basic Auth (PV:Chave) direto
+// nas requisicoes, NAO precisa de OAuth/token.
+// Referencia: documentacao e.Rede W3.0
 
 const axios = require('axios');
 const config = require('../config');
 const logger = require('../utils/logger');
 
-// Cache do token OAuth2
-let tokenCache = { accessToken: null, expiresAt: null, isLoading: false };
-
 // Store de pedidos de checkout pendentes (em memoria)
 const pendingOrders = new Map();
-
-/**
- * Obtem token OAuth2 da Rede e.Rede
- * Endpoint correto: /redelabs/oauth2/token
- */
-async function getRedeToken() {
-  var now = Date.now();
-  if (tokenCache.accessToken && tokenCache.expiresAt && now < tokenCache.expiresAt - 30000) {
-    return tokenCache.accessToken;
-  }
-  if (tokenCache.isLoading) {
-    await new Promise(function(resolve) { setTimeout(resolve, 500); });
-    return getRedeToken();
-  }
-  tokenCache.isLoading = true;
-
-  try {
-    var pv = config.linkPagamento.pv;
-    var chave = config.linkPagamento.clientSecret;
-    if (!pv || !chave) throw new Error('REDE_PV e REDE_CHAVE_INTEGRACAO nao configurados');
-
-    logger.info('Obtendo token e.Rede (' + config.linkPagamento.tokenUrl + ')...');
-
-    var params = new URLSearchParams();
-    params.append('grant_type', 'client_credentials');
-
-    var response = await axios.post(config.linkPagamento.tokenUrl, params, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      auth: { username: pv, password: chave },
-      timeout: 30000,
-    });
-
-    var data = response.data;
-    if (!data.access_token) throw new Error('Token nao retornado');
-
-    tokenCache.accessToken = data.access_token;
-    tokenCache.expiresAt = now + (data.expires_in * 1000);
-    tokenCache.isLoading = false;
-
-    logger.info('Token e.Rede OK, expira em ' + data.expires_in + 's');
-    return data.access_token;
-  } catch (error) {
-    tokenCache.isLoading = false;
-    tokenCache.accessToken = null;
-    var msg = error.response
-      ? 'Erro ' + error.response.status + ': ' + JSON.stringify(error.response.data)
-      : error.message;
-    logger.error('Falha token e.Rede: ' + msg);
-    throw new Error('Autenticacao Rede falhou: ' + msg);
-  }
-}
 
 /**
  * Cria um pedido de checkout e retorna o link para a pagina de pagamento
@@ -75,7 +22,7 @@ async function criarLinkPagamento(dadosLink) {
   var orderId = dadosLink.seu_numero || ('ORD-' + Date.now());
   var valor = dadosLink.valor || 0;
   var descricao = dadosLink.descricao || 'Pagamento';
-  var parcelas = dadosLink.parcelas || 12; // maximo de parcelas permitido
+  var parcelas = dadosLink.parcelas || 12;
 
   if (valor <= 0) throw { status: 400, message: 'Valor invalido' };
   if (!config.rede.pv || !config.rede.chaveIntegracao) {
@@ -111,21 +58,23 @@ async function criarLinkPagamento(dadosLink) {
 }
 
 /**
- * Processa o pagamento do cartao via API e.Rede
- * Chamado quando o cliente submete o formulario de checkout
+ * Processa o pagamento do cartao via API e.Rede W3.0
+ * Autenticacao: Basic Auth (PV:ChaveIntegracao) direto na requisicao
+ * Endpoint: POST /erede/v2/transactions
  */
 async function processarPagamento(orderId, cartaoData) {
   var order = pendingOrders.get(orderId);
   if (!order) throw { status: 404, message: 'Pedido nao encontrado ou expirado' };
   if (order.status !== 'pendente') throw { status: 400, message: 'Pedido ja foi processado' };
 
-  var token = await getRedeToken();
-  var pv = config.linkPagamento.pv;
+  var pv = config.rede.pv;
+  var chave = config.rede.chaveIntegracao;
 
+  // e.Rede W3.0 payload
   var payload = {
     capture: true,
     merchantOrderId: orderId,
-    amount: Math.round(order.valor * 100),
+    amount: Math.round(order.valor * 100), // centavos
     currency: 'BRL',
     installments: parseInt(cartaoData.parcelas) || 1,
     softDescriptor: (config.rede.softDescriptor || 'LOJA').substring(0, 13),
@@ -137,20 +86,21 @@ async function processarPagamento(orderId, cartaoData) {
     },
   };
 
-  logger.info('Processando pagamento: ' + orderId + ' R$' + order.valor + ' ' + payload.installments + 'x');
+  var apiUrl = config.redeBaseUrl + '/erede/v2/transactions';
+  logger.info('Processando pagamento e.Rede W3.0: ' + orderId + ' R$' + order.valor + ' ' + payload.installments + 'x');
+  logger.info('Endpoint: ' + apiUrl + ' | PV: ' + pv.substring(0, 4) + '***');
 
   try {
-    var response = await axios.post(
-      config.linkPagamento.apiUrl + '/transactions',
-      payload,
-      {
-        headers: {
-          'Authorization': 'Bearer ' + token,
-          'Content-Type': 'application/json',
-        },
-        timeout: 30000,
-      }
-    );
+    var response = await axios.post(apiUrl, payload, {
+      auth: {
+        username: pv,
+        password: chave,
+      },
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      timeout: 30000,
+    });
 
     var result = response.data;
     var autorizado = result.returnCode === '00' || result.returnCode === '174';
@@ -172,10 +122,11 @@ async function processarPagamento(orderId, cartaoData) {
   } catch (error) {
     var status = error.response ? error.response.status : 502;
     var errData = error.response ? error.response.data : {};
-    logger.error('Falha pagamento: ' + status + ' - ' + JSON.stringify(errData));
+    var errBody = typeof errData === 'string' ? errData : JSON.stringify(errData);
+    logger.error('Falha pagamento e.Rede: ' + status + ' - ' + errBody);
     throw {
       status: status,
-      message: (errData.message || errData.mensagem) || 'Erro ao processar pagamento',
+      message: (errData.message || errData.mensagem || errData.returnMessage) || 'Erro ao processar pagamento',
       detail: errData,
     };
   }
@@ -189,7 +140,6 @@ function consultarPedido(orderId) {
 }
 
 module.exports = {
-  getRedeToken,
   criarLinkPagamento,
   processarPagamento,
   consultarPedido,

@@ -68,23 +68,7 @@ const config = {
       : 'https://api.userede.com.br';
   })(),
 
-  linkPagamento: {
-    pv: process.env.REDE_PV || '',
-    clientId: process.env.REDE_PV || '',
-    clientSecret: process.env.REDE_CHAVE_INTEGRACAO || '',
-    apiUrl: (function() {
-      var amb = process.env.REDE_AMBIENTE || 'producao';
-      return amb === 'sandbox'
-        ? 'https://sandbox.userede.com.br/erede/v2'
-        : 'https://api.userede.com.br/erede/v2';
-    })(),
-    tokenUrl: (function() {
-      var amb = process.env.REDE_AMBIENTE || 'producao';
-      return amb === 'sandbox'
-        ? 'https://sandbox.userede.com.br/redelabs/oauth2/token'
-        : 'https://api.userede.com.br/redelabs/oauth2/token';
-    })(),
-  },
+  // redeBaseUrl ja definido acima (api.userede.com.br para producao)
 
   mockMode: process.env.MOCK_MODE === 'true',
 

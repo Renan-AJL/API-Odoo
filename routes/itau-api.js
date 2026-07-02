@@ -159,7 +159,6 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
     var dataVencBase = fat.data_vencimento || d.fatura_vencimento || '';
 
     var pag = d.pagador || {};
-    var formaPag = d.forma_pagamento || '';
 
     var plano = parseFormaPagamento(formaPag);
     console.log('[API] Plano parsed:', JSON.stringify(plano));
