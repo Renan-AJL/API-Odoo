@@ -12,6 +12,7 @@ COPY routes/ ./routes/
 COPY services/ ./services/
 COPY utils/ ./utils/
 COPY assets/ ./assets/
+COPY views/ ./views/
 COPY server.js ./
 
 EXPOSE $PORT
