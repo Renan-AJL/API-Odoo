@@ -71,6 +71,8 @@ const itauApiRoutes = require('./routes/itau-api');
 const itauBoletosRoutes = require('./routes/itau-boletos');
 const itauWebhookRoutes = require('./routes/itau-webhook');
 const itauTokenRoutes = require('./routes/itau-token');
+const teDeliveryRoutes = require('./routes/delivery');
+const teWebhookRoutes = require('./routes/webhook-te');
 
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/cnpj', cnpjRoutes);
@@ -78,6 +80,10 @@ app.use('/api/v1/itau', itauApiRoutes);
 app.use('/api/v1/itau/boletos', itauBoletosRoutes);
 app.use('/api/v1/itau/webhook', itauWebhookRoutes);
 app.use('/api/v1/itau/token', itauTokenRoutes);
+
+// --- TudoEntregue ---
+app.use('/api/v1/te', teDeliveryRoutes);
+app.use('/api/v1/te', teWebhookRoutes);
 
 // --- Root ---
 app.get('/', (req, res) => {
@@ -98,6 +104,10 @@ app.get('/', (req, res) => {
         api: config.cnpjaApiBase,
         commercial: config.cnpjaUsingCommercial,
       },
+      tudoentregue: {
+        status: config.isTeConfigured ? 'configurado' : 'nao_configurado',
+        baseUrl: config.tudoentregue.baseUrl,
+      },
     },
     endpoints: {
       health: 'GET /api/v1/health',
@@ -106,6 +116,11 @@ app.get('/', (req, res) => {
       itau_gerar: 'POST /api/v1/itau/gerar',
       itau_pdf_txid: 'GET /api/v1/itau/boletos/pdf/:txid',
       itau_webhook_pix: 'POST /api/v1/itau/webhook/pix-confirmacao',
+      te_send: 'POST /api/v1/te/deliveries/send',
+      te_sync_unsynced: 'POST /api/v1/te/deliveries/sync-unsynced',
+      te_status: 'GET /api/v1/te/deliveries/status/:orderNumber',
+      te_pull: 'GET /api/v1/te/deliveries/pull',
+      te_webhook: 'POST /api/v1/te/webhook/tudoentregue',
     },
     auth: 'Envie header X-API-Key para autenticacao.',
   });
@@ -145,6 +160,13 @@ app.listen(PORT, () => {
   console.log('  [CNP JA]');
   console.log('  API:', config.cnpjaApiBase);
   console.log('  Token:', config.cnpjaApiToken ? 'COMERCIAL' : 'PUBLICA (sem IE)');
+  console.log('  ---');
+  console.log('  [TUDOENTREGUE]');
+  console.log('  Status:', config.isTeConfigured ? 'CONFIGURADO' : 'NAO CONFIGURADO');
+  console.log('  Base URL:', config.tudoentregue.baseUrl);
+  if (config.isTeConfigured) {
+    console.log('  AppKey: ***' + config.tudoentregue.appKey.substring(config.tudoentregue.appKey.length - 4));
+  }
   console.log('===========================================================');
   console.log('');
 });
