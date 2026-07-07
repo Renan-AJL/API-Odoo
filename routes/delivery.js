@@ -25,14 +25,9 @@ router.post('/send', async function(req, res) {
     var pickingId = req.body.picking_id;
     if (!pickingId) return res.status(400).json({ success: false, error: 'picking_id obrigatorio' });
 
-    var client = odooTe.getClient();
-    await client.authenticate();
-    var pickings = await client.execute('stock.picking', 'read', [[pickingId]], {
-      fields: odooTe.FIELDS['stock.picking'],
-    });
-    if (!pickings || !pickings.length) return res.status(404).json({ success: false, error: 'Picking nao encontrado' });
+    var picking = await odooTe.readPicking(pickingId);
+    if (!picking) return res.status(404).json({ success: false, error: 'Picking nao encontrado' });
 
-    var picking = pickings[0];
     var partnerId = picking.partner_id ? picking.partner_id[0] : null;
     if (!partnerId) return res.status(400).json({ success: false, error: 'Picking sem parceiro' });
 
@@ -40,10 +35,7 @@ router.post('/send', async function(req, res) {
     var saleId = picking.sale_id ? picking.sale_id[0] : null;
     var saleOrder = null;
     if (saleId) {
-      var orders = await client.execute('sale.order', 'read', [[saleId]], {
-        fields: odooTe.FIELDS['sale.order'],
-      });
-      saleOrder = orders ? orders[0] : null;
+      saleOrder = await odooTe.readSaleOrder(saleId);
     }
 
     var delivery = mapper.odooToTeDelivery(picking, partner, saleOrder);
@@ -167,11 +159,7 @@ async function runAutoSync() {
         var saleId = picking.sale_id ? picking.sale_id[0] : null;
         var saleOrder = null;
         if (saleId) {
-          var odooClient = odooTe.getClient();
-          var orders = await odooClient.execute('sale.order', 'read', [[saleId]], {
-            fields: odooTe.FIELDS['sale.order'],
-          });
-          saleOrder = orders ? orders[0] : null;
+          saleOrder = await odooTe.readSaleOrder(saleId);
         }
 
         var delivery = mapper.odooToTeDelivery(picking, partner, saleOrder);
@@ -232,5 +220,5 @@ async function runAutoSync() {
   return results;
 }
 
+router._runAutoSync = runAutoSync;
 module.exports = router;
-module.exports.runAutoSync = runAutoSync;

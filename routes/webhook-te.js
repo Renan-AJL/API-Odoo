@@ -13,12 +13,18 @@ var odooTe = require('../services/odoo-te');
 var mapper = require('../services/mapper-te');
 
 function teAuth(req, res, next) {
-  var appKey = req.headers['appkey'] || req.headers['AppKey'];
-  var reqKey = req.headers['requesterkey'] || req.headers['RequesterKey'];
+  // Express lowercases all headers, entao usamos minusculo
+  var appKey = req.headers['appkey'];
+  var reqKey = req.headers['requesterkey'];
+
+  // Debug: logar todos os headers recebidos na primeira vez
+  logger.info('[TE-WEBHOOK] Headers recebidos: ' + JSON.stringify(Object.keys(req.headers).filter(function(h) { return h.toLowerCase().includes('key') || h.toLowerCase().includes('app'); })));
+
   if (appKey === config.tudoentregue.appKey && reqKey === config.tudoentregue.requesterKey) {
     return next();
   }
-  logger.warn('[TE-WEBHOOK] Autenticacao falhou - AppKey: ' + (appKey ? '***' + appKey.slice(-4) : 'vazio'));
+  logger.warn('[TE-WEBHOOK] Auth falhou - Recebido AppKey: ' + (appKey ? '***' + String(appKey).slice(-4) : 'vazio') + ' | Esperado: ***' + config.tudoentregue.appKey.slice(-4));
+  logger.warn('[TE-WEBHOOK] Auth falhou - Recebido ReqKey: ' + (reqKey ? '***' + String(reqKey).slice(-4) : 'vazio') + ' | Esperado: ***' + config.tudoentregue.requesterKey.slice(-4));
   // Retorna 200 mesmo assim para evitar retries
   return res.status(200).json({ received: true, auth: false });
 }

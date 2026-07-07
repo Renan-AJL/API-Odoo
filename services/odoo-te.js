@@ -1,15 +1,14 @@
 /**
- * services/odoo-te.js - Odoo JSON-RPC client para TudoEntregue
- * Le/gravas campos x_studio_te_* nos modelos:
- *   res.partner, sale.order, stock.picking, purchase.order, account.move
+ * services/odoo-te.js - Odoo XML-RPC client para TudoEntregue
+ * Usa XML-RPC (igual odoo-push.js) pois JSON-RPC nao funciona no Odoo SaaS
  */
+var xmlrpc = require('xmlrpc');
 var config = require('../config');
 var logger = require('../utils/logger');
-var OdooClient = require('./odoo-api').OdooClient;
 
-// Campos TE por modelo
 var PARTNER_FIELDS = [
-  'id', 'name', 'x_studio_te_codigo', 'x_studio_te_razao_social',
+  'id', 'name', 'city', 'state_id', 'zip', 'phone', 'mobile', 'email', 'cnpj_cpf', 'vat',
+  'x_studio_te_codigo', 'x_studio_te_razao_social',
   'x_studio_te_cnpj_cpf', 'x_studio_te_inscricao_estadual',
   'x_studio_te_telefone', 'x_studio_te_email', 'x_studio_te_logradouro',
   'x_studio_te_numero', 'x_studio_te_complemento', 'x_studio_te_bairro',
@@ -46,145 +45,161 @@ var FIELDS = {
   'stock.picking': PICKING_FIELDS,
 };
 
-function getClient() {
-  var c = new OdooClient();
-  return c;
+// --- XML-RPC connection (singleton) ---
+var _cached = null; // { uid, common, models }
+
+function getConn() {
+  if (_cached && _cached.uid) return _cached;
+
+  var odooConfig = config.odoo;
+  var base = odooConfig.url.replace(/\/+$/, '');
+  var host = base.replace('https://', '').replace('http://', '');
+
+  var common = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/common', port: 443 });
+  var models = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/object', port: 443 });
+
+  _cached = {
+    uid: null,
+    common: common,
+    models: models,
+    db: odooConfig.db,
+    password: odooConfig.password,
+  };
+  return _cached;
 }
 
-async function ensureAuth(client) {
-  if (!client.uid) {
-    await client.authenticate();
-  }
+function authenticate() {
+  return new Promise(function(resolve, reject) {
+    var conn = getConn();
+    conn.common.methodCall('authenticate', [conn.db, config.odoo.user, conn.password, {}], function(err, uid) {
+      if (err) {
+        reject(new Error('Auth Odoo falhou: ' + (err.message || JSON.stringify(err))));
+      } else if (uid === false || uid === null) {
+        reject(new Error('Auth Odoo: credenciais invalidas (UID=false)'));
+      } else {
+        conn.uid = uid;
+        logger.info('[ODOO-TE] Autenticado. UID: ' + uid);
+        resolve(uid);
+      }
+    });
+  });
 }
 
-/**
- * Busca pickings de saida nao sincronizados com TE
- */
+function ensureAuth() {
+  var conn = getConn();
+  if (conn.uid) return Promise.resolve(conn.uid);
+  return authenticate();
+}
+
+function executeKw(model, method, args, kwargs) {
+  return new Promise(function(resolve, reject) {
+    ensureAuth().then(function(uid) {
+      var conn = getConn();
+      var params = [conn.db, uid, conn.password, model, method, args || []];
+      if (kwargs) params.push(kwargs);
+      conn.models.methodCall('execute_kw', params, function(err, result) {
+        if (err) {
+          reject(new Error(model + '.' + method + ': ' + (err.message || JSON.stringify(err))));
+        } else {
+          resolve(result);
+        }
+      });
+    }).catch(reject);
+  });
+}
+
+// --- Public API ---
+
 async function getUnsyncedPickings() {
-  var client = getClient();
-  await ensureAuth(client);
-  var ids = await client.execute('stock.picking', 'search', [[
+  var ids = await executeKw('stock.picking', 'search', [[
     ['picking_type_code', '=', 'outgoing'],
     ['state', 'in', ['assigned', 'confirmed']],
     ['x_studio_te_sync', '=', false],
   ]]);
-  if (!ids.length) return [];
-  var pickings = await client.execute('stock.picking', 'read', [ids], { fields: PICKING_FIELDS });
+  if (!ids || !ids.length) return [];
+  var pickings = await executeKw('stock.picking', 'read', [ids], { fields: PICKING_FIELDS });
   return pickings || [];
 }
 
-/**
- * Busca sale.orders nao sincronizados com TE
- */
 async function getUnsyncedSaleOrders() {
-  var client = getClient();
-  await ensureAuth(client);
-  var ids = await client.execute('sale.order', 'search', [[
+  var ids = await executeKw('sale.order', 'search', [[
     ['state', 'in', ['sale', 'done']],
     ['x_studio_te_sync', '=', false],
   ]]);
-  if (!ids.length) return [];
-  var orders = await client.execute('sale.order', 'read', [ids], { fields: SALE_ORDER_FIELDS });
+  if (!ids || !ids.length) return [];
+  var orders = await executeKw('sale.order', 'read', [ids], { fields: SALE_ORDER_FIELDS });
   return orders || [];
 }
 
-/**
- * Marca pickings como sincronizados + grava te_order_id
- */
 async function markPickingsSynced(pickingIds, teOrderId) {
-  var client = getClient();
-  await ensureAuth(client);
   var vals = { x_studio_te_sync: true };
   if (teOrderId) vals.x_studio_te_order_id = String(teOrderId);
-  await client.execute('stock.picking', 'write', [pickingIds, vals]);
-  logger.info('[ODOO-TE] ' + pickingIds.length + ' picking(s) marcado(s) como sync | te_order_id=' + teOrderId);
+  await executeKw('stock.picking', 'write', [pickingIds, vals]);
+  logger.info('[ODOO-TE] ' + pickingIds.length + ' picking(s) sync | te_order_id=' + teOrderId);
 }
 
-/**
- * Marca sale orders como sincronizados + grava te_order_id
- */
 async function markSaleOrdersSynced(orderIds, teOrderId) {
-  var client = getClient();
-  await ensureAuth(client);
   var vals = { x_studio_te_sync: true };
   if (teOrderId) vals.x_studio_te_order_id = String(teOrderId);
-  await client.execute('sale.order', 'write', [orderIds, vals]);
-  logger.info('[ODOO-TE] ' + orderIds.length + ' sale.order(s) marcado(s) como sync | te_order_id=' + teOrderId);
+  await executeKw('sale.order', 'write', [orderIds, vals]);
+  logger.info('[ODOO-TE] ' + orderIds.length + ' sale.order(s) sync | te_order_id=' + teOrderId);
 }
 
-/**
- * Busca picking pelo te_order_id
- */
-async function findPickingByTeId(teOrderId) {
-  var client = getClient();
-  await ensureAuth(client);
-  var ids = await client.execute('stock.picking', 'search', [[
-    ['x_studio_te_order_id', '=', String(teOrderId)],
-  ]]);
-  if (!ids.length) return null;
-  var pickings = await client.execute('stock.picking', 'read', [ids], { fields: PICKING_FIELDS });
+async function readPicking(pickingId) {
+  var pickings = await executeKw('stock.picking', 'read', [[pickingId]], { fields: PICKING_FIELDS });
   return pickings ? pickings[0] : null;
 }
 
-/**
- * Busca sale.order pelo te_order_id
- */
-async function findSaleOrderByTeId(teOrderId) {
-  var client = getClient();
-  await ensureAuth(client);
-  var ids = await client.execute('sale.order', 'search', [[
-    ['x_studio_te_order_id', '=', String(teOrderId)],
-  ]]);
-  if (!ids.length) return null;
-  var orders = await client.execute('sale.order', 'read', [ids], { fields: SALE_ORDER_FIELDS });
+async function readSaleOrder(orderId) {
+  var orders = await executeKw('sale.order', 'read', [[orderId]], { fields: SALE_ORDER_FIELDS });
   return orders ? orders[0] : null;
 }
 
-/**
- * Atualiza campos TE de um picking
- */
+async function findPickingByTeId(teOrderId) {
+  var ids = await executeKw('stock.picking', 'search', [[
+    ['x_studio_te_order_id', '=', String(teOrderId)],
+  ]]);
+  if (!ids || !ids.length) return null;
+  var pickings = await executeKw('stock.picking', 'read', [ids], { fields: PICKING_FIELDS });
+  return pickings ? pickings[0] : null;
+}
+
+async function findSaleOrderByTeId(teOrderId) {
+  var ids = await executeKw('sale.order', 'search', [[
+    ['x_studio_te_order_id', '=', String(teOrderId)],
+  ]]);
+  if (!ids || !ids.length) return null;
+  var orders = await executeKw('sale.order', 'read', [ids], { fields: SALE_ORDER_FIELDS });
+  return orders ? orders[0] : null;
+}
+
 async function updatePickingTeData(pickingId, data) {
-  var client = getClient();
-  await ensureAuth(client);
-  await client.execute('stock.picking', 'write', [[pickingId], data]);
+  await executeKw('stock.picking', 'write', [[pickingId], data]);
   logger.info('[ODOO-TE] Picking ' + pickingId + ' atualizado: ' + JSON.stringify(Object.keys(data)));
 }
 
-/**
- * Atualiza campos TE de um sale.order
- */
 async function updateSaleOrderTeData(orderId, data) {
-  var client = getClient();
-  await ensureAuth(client);
-  await client.execute('sale.order', 'write', [[orderId], data]);
+  await executeKw('sale.order', 'write', [[orderId], data]);
   logger.info('[ODOO-TE] Sale Order ' + orderId + ' atualizado: ' + JSON.stringify(Object.keys(data)));
 }
 
-/**
- * Le dados do parceiro
- */
 async function getPartner(partnerId) {
-  var client = getClient();
-  await ensureAuth(client);
-  var partners = await client.execute('res.partner', 'read', [[partnerId]], { fields: PARTNER_FIELDS });
+  var partners = await executeKw('res.partner', 'read', [[partnerId]], { fields: PARTNER_FIELDS });
   return partners ? partners[0] : null;
 }
 
-/**
- * Posta mensagem no chatter de um registro (mail.thread)
- */
 async function postChatter(model, recordId, body) {
-  var client = getClient();
-  await ensureAuth(client);
   try {
-    await client.execute(model, 'message_post', [[recordId], Object.assign({}, {
+    await executeKw('mail.message', 'create', [{
+      model: model,
+      res_id: recordId,
       body: body,
-      message_type: 'notification',
+      message_type: 'comment',
       subtype_xmlid: 'mail.mt_note',
-    })]);
+    }]);
     logger.info('[ODOO-TE] Chatter postado em ' + model + ' ' + recordId);
   } catch (err) {
-    logger.error('[ODOO-TE] Falha ao postar chatter em ' + model + ' ' + recordId + ': ' + err.message);
+    logger.error('[ODOO-TE] Falha chatter ' + model + ' ' + recordId + ': ' + err.message);
   }
 }
 
@@ -199,5 +214,7 @@ module.exports = {
   updateSaleOrderTeData: updateSaleOrderTeData,
   getPartner: getPartner,
   postChatter: postChatter,
+  readPicking: readPicking,
+  readSaleOrder: readSaleOrder,
   FIELDS: FIELDS,
 };

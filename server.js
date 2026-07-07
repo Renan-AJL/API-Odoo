@@ -172,7 +172,7 @@ app.listen(PORT, () => {
     var syncIntervalMs = parseInt(process.env.TE_SYNC_INTERVAL_MS, 10) || 180000; // 3 min
     var firstRunDelay = 10000; // 10s apos start
 
-    var teAutoSync = require('./routes/delivery').runAutoSync;
+    var teAutoSync = require('./routes/delivery')._runAutoSync;
 
     setTimeout(function() {
       logger.info('[TE-AUTO-SYNC] Primeira execucao (delay=' + firstRunDelay + 'ms)');
