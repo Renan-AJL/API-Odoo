@@ -1,223 +1,158 @@
-// ============================================================
-// services/tudoentregue.js — Client completo da API TudoEntregue
-// Adaptado para usar config/ centralizado do projeto unificado
-// ============================================================
+/**
+ * services/tudoentregue.js - TudoEntregue API Client
+ * CRUD de entregas via /api/Entregas/*
+ * Headers: AppKey + RequesterKey
+ */
 const axios = require('axios');
 const config = require('../config');
-const { retryWithBackoff } = require('../utils/retry');
+const logger = require('../utils/logger');
+const { retry } = require('../utils/retry');
 
-// Constantes
-const API_LIMITS = {
-  MAX_PAYLOAD_BYTES: 1 * 1024 * 1024,
-  MAX_ORDERS_PER_REQUEST: 50,
+var SITUATION = {
+  PENDENTE: 1,
+  COLETADO: 2,
+  EM_TRANSITO: 3,
+  ENTREGUE: 4,
+  CANCELADO: 5,
+  PARCIALMENTE_ENTREGUE: 6,
+  DEVOLVIDO: 7,
+  PROBLEMA_NA_ENTREGA: 8,
+  AGENDADO: 9,
 };
 
-const SITUATION = {
-  AGUARDANDO: 0,
-  EM_ROTA: 1,
-  ENTREGUE: 3,
-  NAO_ENTREGUE: 5,
-  PARCIAL: 6,
-  CANCELADA: 8,
-  ATRASADA: 9,
-  EM_SEPARACAO: 10,
-  TRANSFERIDA: 11,
-  BAIXADA: 12,
+var SITUATION_LABELS = {};
+SITUATION_LABELS[SITUATION.PENDENTE] = 'Pendente';
+SITUATION_LABELS[SITUATION.COLETADO] = 'Coletado';
+SITUATION_LABELS[SITUATION.EM_TRANSITO] = 'Em Transito';
+SITUATION_LABELS[SITUATION.ENTREGUE] = 'Entregue';
+SITUATION_LABELS[SITUATION.CANCELADO] = 'Cancelado';
+SITUATION_LABELS[SITUATION.PARCIALMENTE_ENTREGUE] = 'Parcialmente Entregue';
+SITUATION_LABELS[SITUATION.DEVOLVIDO] = 'Devolvido';
+SITUATION_LABELS[SITUATION.PROBLEMA_NA_ENTREGA] = 'Problema na Entrega';
+SITUATION_LABELS[SITUATION.AGENDADO] = 'Agendado';
+
+var SITUATION_TO_ODOO_STATE = {};
+SITUATION_TO_ODOO_STATE[SITUATION.PENDENTE] = 'assigned';
+SITUATION_TO_ODOO_STATE[SITUATION.COLETADO] = 'confirmed';
+SITUATION_TO_ODOO_STATE[SITUATION.EM_TRANSITO] = 'in_transit';
+SITUATION_TO_ODOO_STATE[SITUATION.ENTREGUE] = 'done';
+SITUATION_TO_ODOO_STATE[SITUATION.CANCELADO] = 'cancel';
+SITUATION_TO_ODOO_STATE[SITUATION.PARCIALMENTE_ENTREGUE] = 'partial';
+SITUATION_TO_ODOO_STATE[SITUATION.DEVOLVIDO] = 'returned';
+SITUATION_TO_ODOO_STATE[SITUATION.PROBLEMA_NA_ENTREGA] = 'problem';
+SITUATION_TO_ODOO_STATE[SITUATION.AGENDADO] = 'scheduled';
+
+var ORDER_TYPES = {
+  VENDA: 'VENDA',
+  COMPRA: 'COMPRA',
+  TRANSFERENCIA: 'TRANSFERENCIA',
 };
 
-const SITUATION_LABELS = {
-  [SITUATION.AGUARDANDO]: 'Aguardando',
-  [SITUATION.EM_ROTA]: 'Em Rota',
-  [SITUATION.ENTREGUE]: 'Entregue',
-  [SITUATION.NAO_ENTREGUE]: 'Nao Entregue',
-  [SITUATION.PARCIAL]: 'Entrega Parcial',
-  [SITUATION.CANCELADA]: 'Cancelada',
-  [SITUATION.ATRASADA]: 'Atrasada',
-  [SITUATION.EM_SEPARACAO]: 'Em Separacao',
-  [SITUATION.TRANSFERIDA]: 'Transferida',
-  [SITUATION.BAIXADA]: 'Baixada',
-};
-
-const SITUATION_TO_ODOO_STATE = {
-  [SITUATION.AGUARDANDO]: 'assigned',
-  [SITUATION.EM_SEPARACAO]: 'assigned',
-  [SITUATION.EM_ROTA]: 'confirmed',
-  [SITUATION.ENTREGUE]: 'done',
-  [SITUATION.NAO_ENTREGUE]: 'done',
-  [SITUATION.PARCIAL]: 'done',
-  [SITUATION.CANCELADA]: 'cancel',
-  [SITUATION.TRANSFERIDA]: 'assigned',
-  [SITUATION.BAIXADA]: 'done',
-  [SITUATION.ATRASADA]: 'confirmed',
-};
-
-const ORDER_TYPES = {
-  ENTREGA: 1,
-  COLETA: 2,
-  DEVOLUCAO: 3,
-  TROCA: 4,
-  OUTROS: 5,
-};
-
-class TudoEntregueClient {
-  constructor() {
-    this.baseUrl = config.tudoentregue.baseUrl;
-    this.appKey = config.tudoentregue.appKey;
-    this.requesterKey = config.tudoentregue.requesterKey;
-    this.pageIntervalMs = config.tudoentregue.pageIntervalMs || 5000;
-    this.maxEmptyPages = config.tudoentregue.maxEmptyPages || 10;
-
-    this.httpClient = axios.create({
-      baseURL: this.baseUrl,
-      timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json',
-        'AppKey': this.appKey,
-        'RequesterKey': this.requesterKey,
-      },
-    });
-
-    this.httpClient.interceptors.request.use((cfg) => {
-      console.log(`[TE] ${cfg.method?.toUpperCase()} ${cfg.url}`);
-      return cfg;
-    });
-
-    this.httpClient.interceptors.response.use(
-      (res) => res,
-      (err) => {
-        const msg = err.response?.data?.Message || err.message;
-        console.error(`[TE] Error: ${err.config?.url} — ${msg}`);
-        return Promise.reject(err);
-      }
-    );
-  }
-
-  _validatePayload(data) {
-    const bytes = Buffer.byteLength(JSON.stringify(data), 'utf-8');
-    if (bytes > API_LIMITS.MAX_PAYLOAD_BYTES) {
-      throw new Error(`Payload excede 1MB (${(bytes / 1024).toFixed(0)}KB). Divida em lotes menores.`);
-    }
-  }
-
-  async _request(method, url, data = null, params = null) {
-    return retryWithBackoff(
-      () => this.httpClient.request({ method, url, data, params }),
-      {
-        maxRetries: 3,
-        shouldRetry: (err) => {
-          const status = err.response?.status;
-          return !status || status >= 500 || status === 429;
-        },
-      }
-    );
-  }
-
-  // -------------------------------------------------------
-  // POST /api/Entregas/Cadastro
-  // -------------------------------------------------------
-  async createDeliveries(deliveries) {
-    if (!Array.isArray(deliveries)) deliveries = [deliveries];
-    if (deliveries.length > API_LIMITS.MAX_ORDERS_PER_REQUEST) {
-      throw new Error(`Maximo ${API_LIMITS.MAX_ORDERS_PER_REQUEST} entregas por request. Enviado: ${deliveries.length}`);
-    }
-    this._validatePayload(deliveries);
-
-    const { data } = await this._request('POST', '/api/Entregas/Cadastro', deliveries);
-    console.log(`[TE] Cadastro: ${deliveries.length} entregas enviadas`);
-    return data;
-  }
-
-  // -------------------------------------------------------
-  // PUT /api/Entregas/Edicao
-  // -------------------------------------------------------
-  async editDeliveries(deliveries) {
-    if (!Array.isArray(deliveries)) deliveries = [deliveries];
-    if (deliveries.length > API_LIMITS.MAX_ORDERS_PER_REQUEST) {
-      throw new Error(`Maximo ${API_LIMITS.MAX_ORDERS_PER_REQUEST} entregas por edicao.`);
-    }
-    this._validatePayload(deliveries);
-
-    const { data } = await this._request('PUT', '/api/Entregas/Edicao', deliveries);
-    console.log(`[TE] Edicao: ${deliveries.length} entregas editadas`);
-    return data;
-  }
-
-  // -------------------------------------------------------
-  // DELETE /api/Entregas/Cancelamento
-  // -------------------------------------------------------
-  async cancelDeliveries(orders) {
-    if (!Array.isArray(orders)) orders = [orders];
-    const { data } = await this._request('DELETE', '/api/Entregas/Cancelamento', orders);
-    console.log(`[TE] Cancelamento: ${orders.length} entregas canceladas`);
-    return data;
-  }
-
-  // -------------------------------------------------------
-  // GET /api/Entregas
-  // -------------------------------------------------------
-  async getDeliveries(params = {}) {
-    const { data } = await this._request('GET', '/api/Entregas', null, { page: 1, ...params });
-    return data;
-  }
-
-  // -------------------------------------------------------
-  // GET /api/Entregas/Ocorrencia
-  // -------------------------------------------------------
-  async getDeliveriesWithOccurrence(params = {}) {
-    const { data } = await this._request('GET', '/api/Entregas/Ocorrencia', null, { page: 1, ...params });
-    return data;
-  }
-
-  // -------------------------------------------------------
-  // GET /api/Entregas/Situacao
-  // -------------------------------------------------------
-  async getSituations() {
-    const { data } = await this._request('GET', '/api/Entregas/Situacao');
-    return data;
-  }
-
-  // -------------------------------------------------------
-  // Paginacao automatica
-  // -------------------------------------------------------
-  async fetchAllPages(endpoint, params = {}) {
-    const allResults = [];
-    let page = 1;
-    let emptyCount = 0;
-
-    while (true) {
-      const response = await this._request('GET', endpoint, null, { ...params, page });
-      const items = response.data?.Result || [];
-
-      if (items.length === 0) {
-        emptyCount++;
-        if (emptyCount >= this.maxEmptyPages || !response.data?.HasNextPage) break;
-      } else {
-        emptyCount = 0;
-        allResults.push(...items);
-      }
-
-      if (!response.data?.HasNextPage) break;
-      page++;
-
-      if (page > 1) {
-        console.log(`[TE] Paginacao: esperando ${this.pageIntervalMs}ms antes da pagina ${page}`);
-        await new Promise((r) => setTimeout(r, this.pageIntervalMs));
-      }
-    }
-
-    console.log(`[TE] Paginacao finalizada: ${allResults.length} itens em ${page} paginas`);
-    return allResults;
-  }
+function getHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'AppKey': config.tudoentregue.appKey,
+    'RequesterKey': config.tudoentregue.requesterKey,
+  };
 }
 
-// Exporta singleton + constantes
-const client = new TudoEntregueClient();
+async function createDeliveries(deliveries) {
+  logger.info('[TE] Criando ' + deliveries.length + ' entrega(s)');
+  var resp = await retry(function() {
+    return axios.post(config.tudoentregue.baseUrl + '/api/Entregas', deliveries, {
+      headers: getHeaders(),
+      timeout: 30000,
+    });
+  }, { label: 'TE createDeliveries', maxRetries: 2 });
+  logger.info('[TE] Resposta create: ' + resp.status);
+  return resp.data;
+}
+
+async function editDeliveries(deliveries) {
+  logger.info('[TE] Editando ' + deliveries.length + ' entrega(s)');
+  var resp = await retry(function() {
+    return axios.put(config.tudoentregue.baseUrl + '/api/Entregas', deliveries, {
+      headers: getHeaders(),
+      timeout: 30000,
+    });
+  }, { label: 'TE editDeliveries', maxRetries: 2 });
+  logger.info('[TE] Resposta edit: ' + resp.status);
+  return resp.data;
+}
+
+async function cancelDeliveries(deliveries) {
+  logger.info('[TE] Cancelando ' + deliveries.length + ' entrega(s)');
+  var resp = await retry(function() {
+    return axios.put(config.tudoentregue.baseUrl + '/api/Entregas/CancelarEntregas', deliveries, {
+      headers: getHeaders(),
+      timeout: 30000,
+    });
+  }, { label: 'TE cancelDeliveries', maxRetries: 2 });
+  logger.info('[TE] Resposta cancel: ' + resp.status);
+  return resp.data;
+}
+
+async function getDeliveries(filter) {
+  var params = {};
+  if (filter) {
+    Object.keys(filter).forEach(function(k) { params[k] = filter[k]; });
+  }
+  var resp = await retry(function() {
+    return axios.get(config.tudoentregue.baseUrl + '/api/Entregas', {
+      headers: getHeaders(),
+      params: params,
+      timeout: 30000,
+    });
+  }, { label: 'TE getDeliveries', maxRetries: 2 });
+  return resp.data;
+}
+
+async function fetchAllPages(filter) {
+  var all = [];
+  var page = 1;
+  var pageSize = config.tudoentregue.pageSize || 50;
+  var emptyCount = 0;
+  var maxEmpty = config.tudoentregue.maxEmptyPages || 3;
+
+  while (true) {
+    var params = Object.assign({}, filter || {}, { pagina: page, tamanhoPagina: pageSize });
+    var data = await getDeliveries(params);
+    var items = Array.isArray(data) ? data : (data.data || data.entregas || []);
+    if (!items.length) {
+      emptyCount++;
+      if (emptyCount >= maxEmpty) break;
+    } else {
+      emptyCount = 0;
+      all = all.concat(items);
+    }
+    if (items.length < pageSize) break;
+    page++;
+    if (config.tudoentregue.pageIntervalMs) {
+      await new Promise(function(r) { setTimeout(r, config.tudoentregue.pageIntervalMs); });
+    }
+  }
+  return all;
+}
+
+async function getSituations() {
+  var resp = await retry(function() {
+    return axios.get(config.tudoentregue.baseUrl + '/api/Situacoes', {
+      headers: getHeaders(),
+      timeout: 15000,
+    });
+  }, { label: 'TE getSituations', maxRetries: 1 });
+  return resp.data;
+}
 
 module.exports = {
-  client,
-  SITUATION,
-  SITUATION_LABELS,
-  SITUATION_TO_ODOO_STATE,
-  ORDER_TYPES,
-  API_LIMITS,
+  createDeliveries: createDeliveries,
+  editDeliveries: editDeliveries,
+  cancelDeliveries: cancelDeliveries,
+  getDeliveries: getDeliveries,
+  fetchAllPages: fetchAllPages,
+  getSituations: getSituations,
+  SITUATION: SITUATION,
+  SITUATION_LABELS: SITUATION_LABELS,
+  SITUATION_TO_ODOO_STATE: SITUATION_TO_ODOO_STATE,
+  ORDER_TYPES: ORDER_TYPES,
 };

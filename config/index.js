@@ -87,23 +87,22 @@ const config = {
     password: process.env.ODOO_API_KEY || '',
   },
 
+  // --- TudoEntregue ---
+  tudoentregue: {
+    baseUrl: (process.env.TE_BASE_URL || 'https://app.tudoentregue.com.br').replace(/\/$/, ''),
+    appKey: process.env.TE_APP_KEY || '',
+    requesterKey: process.env.TE_REQUESTER_KEY || '',
+    pageSize: parseInt(process.env.TE_PAGE_SIZE, 10) || 50,
+    pageIntervalMs: parseInt(process.env.TE_PAGE_INTERVAL_MS, 10) || 200,
+    maxEmptyPages: parseInt(process.env.TE_MAX_EMPTY_PAGES, 10) || 3,
+  },
+  isTeConfigured: !!(process.env.TE_APP_KEY && process.env.TE_REQUESTER_KEY),
+
   // --- CNP Ja ---
   cnpjaApiBase: cnpjaApiBase,
   cnpjaApiToken: cnpjaApiToken,
   cnpjaUsingCommercial: !!cnpjaApiToken,
   cnpjaTimeout: parseInt(process.env.CNPJA_TIMEOUT, 10) || 15000,
-
-  // --- TudoEntregue ---
-  tudoentregue: {
-    baseUrl: process.env.TE_API_BASE_URL || 'https://api.tudoentregue.com.br',
-    appKey: process.env.TE_APPKEY || '',
-    requesterKey: process.env.TE_REQUESTER_KEY || '',
-    pageSize: parseInt(process.env.TE_PAGE_SIZE, 10) || 50,
-    pageIntervalMs: parseInt(process.env.TE_PAGE_INTERVAL_MS, 10) || 5000,
-    maxEmptyPages: parseInt(process.env.TE_MAX_EMPTY_PAGES, 10) || 10,
-  },
-
-  isTeConfigured: !!(process.env.TE_APPKEY && process.env.TE_REQUESTER_KEY),
 };
 
 // Warnings
@@ -114,7 +113,5 @@ if (!config.rede.chaveIntegracao) console.warn('[CONFIG] REDE_CHAVE_INTEGRACAO n
 if (!config.cnpjaApiToken && !process.env.CONSULTAR_IO_TOKEN) {
   console.warn('[CONFIG] Sem CNPJA_API_TOKEN nem CONSULTAR_IO_TOKEN - IE ficara indisponivel');
 }
-if (!config.tudoentregue.appKey) console.warn('[CONFIG] TE_APPKEY nao definida - TudoEntregue indisponivel');
-if (!config.tudoentregue.requesterKey) console.warn('[CONFIG] TE_REQUESTER_KEY nao definida - TudoEntregue indisponivel');
 
 module.exports = config;

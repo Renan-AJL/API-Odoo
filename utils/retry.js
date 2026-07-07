@@ -1,30 +1,24 @@
-// ============================================================
-// utils/retry.js — Retry com backoff exponencial
-// ============================================================
+/**
+ * retry.js - Exponential backoff retry utility
+ */
+const logger = require('./logger');
 
-async function retryWithBackoff(fn, opts = {}) {
-  const {
-    maxRetries = 3,
-    baseDelay = 1000,
-    maxDelay = 30000,
-    shouldRetry = () => true,
-  } = opts;
+async function retry(fn, opts) {
+  opts = opts || {};
+  var maxRetries = opts.maxRetries || 3;
+  var baseDelay = opts.baseDelay || 1000;
+  var label = opts.label || 'retry';
 
-  let lastError;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  for (var i = 0; i <= maxRetries; i++) {
     try {
       return await fn();
     } catch (err) {
-      lastError = err;
-      const canRetry = attempt < maxRetries && shouldRetry(err);
-      if (!canRetry) throw err;
-
-      const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
-      const jitter = delay * (0.5 + Math.random() * 0.5);
-      await new Promise((r) => setTimeout(r, jitter));
+      if (i === maxRetries) throw err;
+      var delay = baseDelay * Math.pow(2, i);
+      logger.warn(label + ' tentativa ' + (i + 1) + '/' + (maxRetries + 1) + ' falhou: ' + err.message + ' - retry em ' + delay + 'ms');
+      await new Promise(function(resolve) { setTimeout(resolve, delay); });
     }
   }
-  throw lastError;
 }
 
-module.exports = { retryWithBackoff };
+module.exports = { retry: retry };

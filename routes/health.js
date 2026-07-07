@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
     res.json({
       success: true,
       service: 'odoo-middleware-unified',
-      version: '1.0.0',
+      version: '1.1.0',
       status: 'healthy',
       timestamp: new Date().toISOString(),
       modules: {
@@ -33,6 +33,12 @@ router.get('/', async (req, res) => {
             consultar_io: !!process.env.CONSULTAR_IO_TOKEN,
             nfe_cadastro: 'disponivel',
           },
+        },
+        tudoentregue: {
+          status: config.isTeConfigured ? 'configurado' : 'nao_configurado',
+          base_url: config.tudoentregue.baseUrl,
+          app_key: config.tudoentregue.appKey ? '***' + config.tudoentregue.appKey.slice(-4) : 'N/A',
+          auto_sync: (config.isTeConfigured && config.odoo.enabled) ? 'ATIVO' : 'DESATIVADO',
         },
       },
       rate_limit: config.rateLimitPerMinute + ' req/min',
