@@ -177,7 +177,7 @@ async function safeWriteCustom(model, ids, vals) {
 }
 
 // --- Safe search com campo x_studio_te_sync ---
-var _syncFieldChecked = { 'stock.picking': false, 'sale.order': false };
+var _syncFieldChecked = { 'stock.picking': false, 'sale.order': false, 'account.move': false };
 
 async function safeSearchWithSync(model, baseDomain) {
   var domain = baseDomain.concat([['x_studio_te_sync', '=', false]]);
@@ -295,6 +295,95 @@ async function getPartner(partnerId) {
   return partners ? partners[0] : null;
 }
 
+// --- Faturas (account.move) ---
+
+var INVOICE_FIELDS = [
+  'id', 'name', 'state', 'move_type', 'partner_id',
+  'invoice_date', 'amount_total', 'payment_state',
+];
+
+var INVOICE_CUSTOM_FIELDS = [
+  'x_studio_te_sync', 'x_studio_te_order_id',
+];
+
+/**
+ * Busca faturas de saida postadas (NF emitida) que ainda nao foram enviadas ao TE
+ */
+async function getUnsyncedInvoices() {
+  var ids = await safeSearchWithSync('account.move', [
+    ['move_type', '=', 'out_invoice'],
+    ['state', '=', 'posted'],
+  ]);
+  if (!ids || !ids.length) return [];
+  var invoices = await safeReadCustom('account.move', ids, INVOICE_FIELDS, INVOICE_CUSTOM_FIELDS);
+  return invoices || [];
+}
+
+/**
+ * Dado um invoice_id, encontra o sale.order relacionado
+ * account.move.line -> sale_line_ids -> order_id
+ */
+async function findSaleOrderByInvoice(invoiceId) {
+  try {
+    // Tenta busca direta: sale.order onde invoice_ids contem esta fatura
+    var saleIds = await executeKw('sale.order', 'search', [[
+      ['invoice_ids', 'in', [invoiceId]],
+    ]]);
+    if (saleIds && saleIds.length) {
+      var orders = await executeKw('sale.order', 'read', [saleIds], { fields: ['id', 'name'] });
+      return orders ? orders[0] : null;
+    }
+  } catch (err) {
+    // invoice_ids pode nao existir, tenta via linhas
+    logger.warn('[ODOO-TE] Busca direta invoice->sale falhou, tentando via linhas: ' + err.message);
+  }
+
+  // Fallback: via account.move.line -> sale_line_ids -> order_id
+  try {
+    var lineIds = await executeKw('account.move.line', 'search', [[
+      ['move_id', '=', invoiceId],
+      ['sale_line_ids', '!=', false],
+    ]]);
+    if (lineIds && lineIds.length) {
+      var lines = await executeKw('account.move.line', 'read', [lineIds.slice(0, 1)], { fields: ['sale_line_ids'] });
+      if (lines && lines[0] && lines[0].sale_line_ids && lines[0].sale_line_ids.length) {
+        var saleLineId = lines[0].sale_line_ids[0];
+        // order_id vem do sale.order.line
+        var saleLines = await executeKw('sale.order.line', 'read', [[saleLineId]], { fields: ['order_id'] });
+        if (saleLines && saleLines[0] && saleLines[0].order_id) {
+          var orderId = saleLines[0].order_id[0];
+          var orders = await executeKw('sale.order', 'read', [[orderId]], { fields: ['id', 'name'] });
+          return orders ? orders[0] : null;
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn('[ODOO-TE] Busca via linhas tambem falhou: ' + err.message);
+  }
+
+  return null;
+}
+
+/**
+ * Dado um sale_order_id, encontra o picking de entrega relacionado
+ */
+async function findDeliveryPicking(saleOrderId) {
+  var ids = await executeKw('stock.picking', 'search', [[
+    ['sale_id', '=', saleOrderId],
+    ['picking_type_code', '=', 'outgoing'],
+  ]], { limit: 1 });
+  if (!ids || !ids.length) return null;
+  var pickings = await safeReadCustom('stock.picking', ids, PICKING_FIELDS, PICKING_CUSTOM_FIELDS);
+  return pickings ? pickings[0] : null;
+}
+
+async function markInvoiceSynced(invoiceIds, teOrderId) {
+  var vals = { x_studio_te_sync: true };
+  if (teOrderId) vals.x_studio_te_order_id = String(teOrderId);
+  await safeWriteCustom('account.move', invoiceIds, vals);
+  logger.info('[ODOO-TE] ' + invoiceIds.length + ' fatura(s) sync | te_order_id=' + teOrderId);
+}
+
 async function postChatter(model, recordId, body) {
   try {
     // Cria mensagem diretamente - campos minimos para funcionar no Odoo SaaS
@@ -312,8 +401,12 @@ async function postChatter(model, recordId, body) {
 module.exports = {
   getUnsyncedPickings: getUnsyncedPickings,
   getUnsyncedSaleOrders: getUnsyncedSaleOrders,
+  getUnsyncedInvoices: getUnsyncedInvoices,
+  findSaleOrderByInvoice: findSaleOrderByInvoice,
+  findDeliveryPicking: findDeliveryPicking,
   markPickingsSynced: markPickingsSynced,
   markSaleOrdersSynced: markSaleOrdersSynced,
+  markInvoiceSynced: markInvoiceSynced,
   findPickingByTeId: findPickingByTeId,
   findSaleOrderByTeId: findSaleOrderByTeId,
   updatePickingTeData: updatePickingTeData,
@@ -322,7 +415,4 @@ module.exports = {
   postChatter: postChatter,
   readPicking: readPicking,
   readSaleOrder: readSaleOrder,
-  // Expose para testes/diagnostico
-  PICKING_FIELDS: PICKING_FIELDS,
-  PICKING_CUSTOM_FIELDS: PICKING_CUSTOM_FIELDS,
 };

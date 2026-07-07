@@ -130,75 +130,112 @@ router.put('/cancel', async function(req, res) {
   }
 });
 
-// --- Auto-sync (poll Odoo + envia ao TE + chatter logging) ---
+// --- Auto-sync (poll faturas postadas + envia ao TE) ---
+// Fluxo: Fatura postada (NF emitida) -> Venda (sale.order) -> Picking de entrega -> TE
 async function runAutoSync() {
   var results = { synced: 0, errors: 0, details: [] };
   try {
-    var pickings = await odooTe.getUnsyncedPickings();
-    if (!pickings.length) {
-      logger.info('[TE-AUTO-SYNC] Nenhum picking pendente');
+    var invoices = await odooTe.getUnsyncedInvoices();
+    if (!invoices.length) {
+      logger.info('[TE-AUTO-SYNC] Nenhuma fatura pendente');
       return results;
     }
-    logger.info('[TE-AUTO-SYNC] ' + pickings.length + ' picking(s) pendente(s)');
+    logger.info('[TE-AUTO-SYNC] ' + invoices.length + ' fatura(s) pendente(s)');
 
-    for (var i = 0; i < pickings.length; i++) {
-      var picking = pickings[i];
+    for (var i = 0; i < invoices.length; i++) {
+      var invoice = invoices[i];
       try {
+        logger.info('[TE-AUTO-SYNC] Fatura ' + invoice.name + ' (id=' + invoice.id + ')');
+
+        // 1. Encontra a venda relacionada
+        var saleOrder = await odooTe.findSaleOrderByInvoice(invoice.id);
+        if (!saleOrder) {
+          logger.warn('[TE-AUTO-SYNC] Venda nao encontrada para fatura ' + invoice.name);
+          // Marca como sync para nao tentar de novo (fatura sem venda vinculada)
+          await odooTe.markInvoiceSynced([invoice.id], null);
+          results.details.push({ invoice: invoice.name, error: 'Venda nao encontrada' });
+          continue;
+        }
+        logger.info('[TE-AUTO-SYNC] Venda encontrada: ' + saleOrder.name);
+
+        // 2. Encontra o picking de entrega
+        var picking = await odooTe.findDeliveryPicking(saleOrder.id);
+        if (!picking) {
+          logger.warn('[TE-AUTO-SYNC] Picking de entrega nao encontrado para venda ' + saleOrder.name);
+          results.details.push({ invoice: invoice.name, sale: saleOrder.name, error: 'Picking nao encontrado' });
+          continue;
+        }
+        logger.info('[TE-AUTO-SYNC] Picking encontrado: ' + picking.name);
+
+        // 3. Le o partner completo
         var partnerId = picking.partner_id ? picking.partner_id[0] : null;
         if (!partnerId) {
-          results.errors++;
-          results.details.push({ picking: picking.name, error: 'Sem parceiro' });
+          results.details.push({ invoice: invoice.name, error: 'Picking sem parceiro' });
           continue;
         }
-
         var partner = await odooTe.getPartner(partnerId);
-        var saleId = picking.sale_id ? picking.sale_id[0] : null;
-        var saleOrder = null;
-        if (saleId) saleOrder = await odooTe.readSaleOrder(saleId);
 
-        var delivery = mapper.odooToTeDelivery(picking, partner, saleOrder, config.empresa.cnpj);
+        // 4. Mapeia para o formato TE
+        var saleFull = await odooTe.readSaleOrder(saleOrder.id);
+        var delivery = mapper.odooToTeDelivery(picking, partner, saleFull, config.empresa.cnpj);
         if (!delivery) {
-          results.errors++;
-          results.details.push({ picking: picking.name, error: 'Falha no mapeamento' });
+          results.details.push({ invoice: invoice.name, error: 'Falha no mapeamento' });
           continue;
         }
 
-        // Chatter: enviando
+        // 5. Chatter: enviando (na fatura, na venda e no picking)
         var chatterMsg = '<b>TudoEntregue - Enviando...</b><br/>';
+        chatterMsg += 'Fatura: ' + invoice.name + '<br/>';
         chatterMsg += 'Pedido: ' + delivery.OrderNumber + '<br/>';
         chatterMsg += 'Destinatario: ' + (delivery.DestinationAddress.Name || '') + '<br/>';
         chatterMsg += 'CNPJ/CPF: ' + (delivery.DestinationAddress.DocumentNumber || '') + '<br/>';
         chatterMsg += 'Cidade: ' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '<br/>';
         chatterMsg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '');
+        await odooTe.postChatter('account.move', invoice.id, chatterMsg);
         await odooTe.postChatter('stock.picking', picking.id, chatterMsg);
-        if (saleId) await odooTe.postChatter('sale.order', saleId, chatterMsg);
+        await odooTe.postChatter('sale.order', saleOrder.id, chatterMsg);
 
-        // Envia ao TE
+        // 6. Envia ao TE
         logger.info('[TE-AUTO-SYNC] Payload para TE: ' + JSON.stringify(delivery, null, 2));
         var teResult = await teApi.createOrders([delivery]);
         var teResp = Array.isArray(teResult) ? teResult[0] : teResult;
 
-        // Grava retorno
+        // 7. Grava retorno em todos os modelos
         if (teResp) {
           var odooData = mapper.teCreateToOdoo(teResp);
-          await odooTe.updatePickingTeData(picking.id, odooData);
+
+          // Marca fatura como sync
+          await odooTe.markInvoiceSynced([invoice.id], teResp.OrderID || null);
+
+          // Grava dados TE no picking e venda (se campos existem)
+          if (Object.keys(odooData).length) {
+            await odooTe.updatePickingTeData(picking.id, odooData);
+            await odooTe.updateSaleOrderTeData(saleOrder.id, odooData);
+          }
           await odooTe.markPickingsSynced([picking.id], teResp.OrderID || null);
-          if (saleId) await odooTe.markSaleOrdersSynced([saleId], teResp.OrderID || null);
+          await odooTe.markSaleOrdersSynced([saleOrder.id], teResp.OrderID || null);
 
           // Chatter: resultado
           var resultMsg = mapper.chatterCreateMessage(teResp, delivery);
+          await odooTe.postChatter('account.move', invoice.id, resultMsg);
           await odooTe.postChatter('stock.picking', picking.id, resultMsg);
-          if (saleId) await odooTe.postChatter('sale.order', saleId, resultMsg);
+          await odooTe.postChatter('sale.order', saleOrder.id, resultMsg);
         }
 
         results.synced++;
-        results.details.push({ picking: picking.name, te_id: teResp ? teResp.OrderID : null, status: 'ok' });
+        results.details.push({
+          invoice: invoice.name,
+          sale: saleOrder.name,
+          picking: picking.name,
+          te_id: teResp ? teResp.OrderID : null,
+          status: 'ok',
+        });
       } catch (err) {
         results.errors++;
-        var errMsg = '<b>TudoEntregue - ERRO no envio</b><br/>' + err.message;
-        await odooTe.postChatter('stock.picking', picking.id, errMsg).catch(function() {});
-        results.details.push({ picking: picking.name, error: err.message });
-        logger.error('[TE-AUTO-SYNC] Erro picking ' + picking.name + ': ' + err.message);
+        var errMsg = '<b>TudoEntregue - ERRO no envio</b><br/>Fatura: ' + invoice.name + '<br/>' + err.message;
+        await odooTe.postChatter('account.move', invoice.id, errMsg).catch(function() {});
+        results.details.push({ invoice: invoice.name, error: err.message });
+        logger.error('[TE-AUTO-SYNC] Erro fatura ' + invoice.name + ': ' + err.message);
       }
     }
   } catch (err) {
