@@ -174,6 +174,7 @@ async function runAutoSync() {
         if (saleId) await odooTe.postChatter('sale.order', saleId, chatterMsg);
 
         // Envia ao TE
+        logger.info('[TE-AUTO-SYNC] Payload para TE: ' + JSON.stringify(delivery, null, 2));
         var teResult = await teApi.createOrders([delivery]);
         var teResp = Array.isArray(teResult) ? teResult[0] : teResult;
 
