@@ -29,8 +29,8 @@ function odooToTeDelivery(picking, partner, saleOrder, companyCnpj) {
   var docNumber = (partner.x_studio_te_cnpj_cpf || partner.cnpj_cpf || partner.vat || '').replace(/\D/g, '');
   var docType = docNumber.length > 11 ? 'CNPJ' : 'CPF';
 
-  // Telefone destino - prioriza mobile (celular) sobre phone
-  var phone = (partner.x_studio_te_telefone || partner.mobile || partner.phone || '').replace(/\D/g, '');
+  // Telefone destino - usa phone do partner (campo mobile nao existe neste Odoo)
+  var phone = (partner.x_studio_te_telefone || partner.phone || '').replace(/\D/g, '');
   var phoneCountry = '55';
   var phoneNumber = phone;
   if (phone.length > 11 && phone.startsWith('55')) {

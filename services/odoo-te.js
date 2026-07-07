@@ -9,7 +9,7 @@ var logger = require('../utils/logger');
 // Apenas campos nativos do Odoo - campos x_studio_* serao lidos sob demanda
 // pois podem nao existir se o usuario ainda nao os criou no Studio
 var PARTNER_FIELDS = [
-  'id', 'name', 'city', 'state_id', 'zip', 'phone', 'mobile', 'email', 'cnpj_cpf', 'vat',
+  'id', 'name', 'city', 'state_id', 'zip', 'phone', 'email', 'cnpj_cpf', 'vat',
   'street', 'street2', 'number', 'district', 'country_id', 'l10n_br_city_id',
 ];
 
@@ -298,12 +298,11 @@ async function getPartner(partnerId) {
 
 async function postChatter(model, recordId, body) {
   try {
+    // Cria mensagem diretamente - campos minimos para funcionar no Odoo SaaS
     await executeKw('mail.message', 'create', [{
       model: model,
       res_id: recordId,
       body: body,
-      message_type: 'comment',
-      subtype_xmlid: 'mail.mt_note',
     }]);
     logger.info('[ODOO-TE] Chatter postado em ' + model + ' ' + recordId);
   } catch (err) {
