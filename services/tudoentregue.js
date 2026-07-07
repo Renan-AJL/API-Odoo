@@ -1,52 +1,60 @@
 /**
- * services/tudoentregue.js - TudoEntregue API Client
- * CRUD de entregas via /api/Entregas/*
- * Headers: AppKey + RequesterKey
+ * services/tudoentregue.js - TudoEntregue API Client v2
+ * Baseado na spec oficial Swagger v1.0.20
+ * Host: api.tudoentregue.com.br  basePath: /v1
+ * Auth: headers AppKey + RequesterKey
+ *
+ * Endpoints:
+ *   POST   /v1/orders              - Inclusao/Edicao de Entrega
+ *   POST   /v1/orders/delete      - Exclusao
+ *   PUT    /v1/orders/cancel      - Cancelamento
+ *   GET    /v1/orders/situation   - Consulta situacao
+ *   GET    /v1/orders/finish      - Consulta com ocorrencias
+ *   GET    /v1/tracking           - Acompanhamento
+ *   POST   /v1/occurrences        - Criar/editar tipo ocorrencia
+ *   GET    /v1/occurrences        - Listar ocorrencias
  */
-const axios = require('axios');
-const config = require('../config');
-const logger = require('../utils/logger');
-const { retry } = require('../utils/retry');
+var axios = require('axios');
+var config = require('../config');
+var logger = require('../utils/logger');
+var retry = require('../utils/retry').retry;
 
+// --- Situacoes da Entrega (conforme doc) ---
 var SITUATION = {
-  PENDENTE: 1,
-  COLETADO: 2,
-  EM_TRANSITO: 3,
-  ENTREGUE: 4,
-  CANCELADO: 5,
-  PARCIALMENTE_ENTREGUE: 6,
-  DEVOLVIDO: 7,
-  PROBLEMA_NA_ENTREGA: 8,
-  AGENDADO: 9,
+  RECEBIDA_TORRE: 0,
+  ENVIADA_MOTORISTA: 1,
+  AGUARDANDO_CONFIRMACAO: 2,       // descontinuado
+  RECEBIDA_MOTORISTA: 3,
+  RECUSADA_MOTORISTA: 4,           // descontinuado
+  FINALIZADA_MOTORISTA: 5,
+  FINALIZADA_TORRE: 6,
+  OPERACAO_FINALIZADA: 7,          // descontinuado
+  CANCELADA: 8,
+  NOTIFICACAO_CANCELAMENTO: 9,
+  TRANSFERIDA: 11,
 };
 
 var SITUATION_LABELS = {};
-SITUATION_LABELS[SITUATION.PENDENTE] = 'Pendente';
-SITUATION_LABELS[SITUATION.COLETADO] = 'Coletado';
-SITUATION_LABELS[SITUATION.EM_TRANSITO] = 'Em Transito';
-SITUATION_LABELS[SITUATION.ENTREGUE] = 'Entregue';
-SITUATION_LABELS[SITUATION.CANCELADO] = 'Cancelado';
-SITUATION_LABELS[SITUATION.PARCIALMENTE_ENTREGUE] = 'Parcialmente Entregue';
-SITUATION_LABELS[SITUATION.DEVOLVIDO] = 'Devolvido';
-SITUATION_LABELS[SITUATION.PROBLEMA_NA_ENTREGA] = 'Problema na Entrega';
-SITUATION_LABELS[SITUATION.AGENDADO] = 'Agendado';
+SITUATION_LABELS[0] = 'Recebida pela Torre de Controle';
+SITUATION_LABELS[1] = 'Enviada ao Motorista';
+SITUATION_LABELS[2] = 'Aguardando Confirmacao';
+SITUATION_LABELS[3] = 'Recebida pelo Motorista';
+SITUATION_LABELS[4] = 'Recusada pelo Motorista';
+SITUATION_LABELS[5] = 'Finalizada pelo Motorista';
+SITUATION_LABELS[6] = 'Finalizada pela Torre de Controle';
+SITUATION_LABELS[7] = 'Operacao Finalizada';
+SITUATION_LABELS[8] = 'Operacao Cancelada';
+SITUATION_LABELS[9] = 'Notificacao de Cancelamento Enviada';
+SITUATION_LABELS[11] = 'Transferida';
 
-var SITUATION_TO_ODOO_STATE = {};
-SITUATION_TO_ODOO_STATE[SITUATION.PENDENTE] = 'assigned';
-SITUATION_TO_ODOO_STATE[SITUATION.COLETADO] = 'confirmed';
-SITUATION_TO_ODOO_STATE[SITUATION.EM_TRANSITO] = 'in_transit';
-SITUATION_TO_ODOO_STATE[SITUATION.ENTREGUE] = 'done';
-SITUATION_TO_ODOO_STATE[SITUATION.CANCELADO] = 'cancel';
-SITUATION_TO_ODOO_STATE[SITUATION.PARCIALMENTE_ENTREGUE] = 'partial';
-SITUATION_TO_ODOO_STATE[SITUATION.DEVOLVIDO] = 'returned';
-SITUATION_TO_ODOO_STATE[SITUATION.PROBLEMA_NA_ENTREGA] = 'problem';
-SITUATION_TO_ODOO_STATE[SITUATION.AGENDADO] = 'scheduled';
-
-var ORDER_TYPES = {
-  VENDA: 'VENDA',
-  COMPRA: 'COMPRA',
-  TRANSFERENCIA: 'TRANSFERENCIA',
+var ORDER_TYPE = {
+  ENTREGA: 1,
+  COLETA: 2,
 };
+
+function getBaseUrl() {
+  return config.tudoentregue.baseUrl.replace(/\/+$/, '') + '/v1';
+}
 
 function getHeaders() {
   return {
@@ -56,103 +64,141 @@ function getHeaders() {
   };
 }
 
-async function createDeliveries(deliveries) {
-  logger.info('[TE] Criando ' + deliveries.length + ' entrega(s)');
-  var resp = await retry(function() {
-    return axios.post(config.tudoentregue.baseUrl + '/api/Entregas', deliveries, {
+/**
+ * POST /v1/orders - Inclusao/Edicao de Entrega
+ * Body: array de OrderViewModel
+ * Returns: array de OrderInsertUpdateReturn
+ */
+function createOrders(orders) {
+  logger.info('[TE] Criando ' + orders.length + ' entrega(s) via /v1/orders');
+  return retry(function() {
+    return axios.post(getBaseUrl() + '/orders', orders, {
       headers: getHeaders(),
       timeout: 30000,
     });
-  }, { label: 'TE createDeliveries', maxRetries: 2 });
-  logger.info('[TE] Resposta create: ' + resp.status);
-  return resp.data;
+  }, { label: 'TE createOrders', maxRetries: 2 }).then(function(resp) {
+    logger.info('[TE] createOrders status: ' + resp.status);
+    return resp.data;
+  });
 }
 
-async function editDeliveries(deliveries) {
-  logger.info('[TE] Editando ' + deliveries.length + ' entrega(s)');
-  var resp = await retry(function() {
-    return axios.put(config.tudoentregue.baseUrl + '/api/Entregas', deliveries, {
+/**
+ * POST /v1/orders - Edicao (mesmo endpoint, mesma estrutura)
+ */
+function editOrders(orders) {
+  logger.info('[TE] Editando ' + orders.length + ' entrega(s) via /v1/orders');
+  return retry(function() {
+    return axios.post(getBaseUrl() + '/orders', orders, {
       headers: getHeaders(),
       timeout: 30000,
     });
-  }, { label: 'TE editDeliveries', maxRetries: 2 });
-  logger.info('[TE] Resposta edit: ' + resp.status);
-  return resp.data;
+  }, { label: 'TE editOrders', maxRetries: 2 }).then(function(resp) {
+    logger.info('[TE] editOrders status: ' + resp.status);
+    return resp.data;
+  });
 }
 
-async function cancelDeliveries(deliveries) {
-  logger.info('[TE] Cancelando ' + deliveries.length + ' entrega(s)');
-  var resp = await retry(function() {
-    return axios.put(config.tudoentregue.baseUrl + '/api/Entregas/CancelarEntregas', deliveries, {
+/**
+ * PUT /v1/orders/cancel - Cancelamento
+ */
+function cancelOrders(orders) {
+  logger.info('[TE] Cancelando ' + orders.length + ' entrega(s)');
+  return retry(function() {
+    return axios.put(getBaseUrl() + '/orders/cancel', orders, {
       headers: getHeaders(),
       timeout: 30000,
     });
-  }, { label: 'TE cancelDeliveries', maxRetries: 2 });
-  logger.info('[TE] Resposta cancel: ' + resp.status);
-  return resp.data;
+  }, { label: 'TE cancelOrders', maxRetries: 2 }).then(function(resp) {
+    return resp.data;
+  });
 }
 
-async function getDeliveries(filter) {
-  var params = {};
-  if (filter) {
-    Object.keys(filter).forEach(function(k) { params[k] = filter[k]; });
-  }
-  var resp = await retry(function() {
-    return axios.get(config.tudoentregue.baseUrl + '/api/Entregas', {
+/**
+ * POST /v1/orders/delete - Exclusao permanente
+ */
+function deleteOrders(orders) {
+  logger.info('[TE] Excluindo ' + orders.length + ' entrega(s)');
+  return retry(function() {
+    return axios.post(getBaseUrl() + '/orders/delete', orders, {
+      headers: getHeaders(),
+      timeout: 30000,
+    });
+  }, { label: 'TE deleteOrders', maxRetries: 2 }).then(function(resp) {
+    return resp.data;
+  });
+}
+
+/**
+ * GET /v1/orders/situation - Consulta situacao
+ * Query: phoneCountry, phoneNumber, orderType, orderID
+ */
+function getSituation(params) {
+  return retry(function() {
+    return axios.get(getBaseUrl() + '/orders/situation', {
       headers: getHeaders(),
       params: params,
-      timeout: 30000,
+      timeout: 15000,
     });
-  }, { label: 'TE getDeliveries', maxRetries: 2 });
-  return resp.data;
+  }, { label: 'TE getSituation', maxRetries: 1 }).then(function(resp) {
+    return resp.data;
+  });
 }
 
-async function fetchAllPages(filter) {
-  var all = [];
-  var page = 1;
-  var pageSize = config.tudoentregue.pageSize || 50;
-  var emptyCount = 0;
-  var maxEmpty = config.tudoentregue.maxEmptyPages || 3;
-
-  while (true) {
-    var params = Object.assign({}, filter || {}, { pagina: page, tamanhoPagina: pageSize });
-    var data = await getDeliveries(params);
-    var items = Array.isArray(data) ? data : (data.data || data.entregas || []);
-    if (!items.length) {
-      emptyCount++;
-      if (emptyCount >= maxEmpty) break;
-    } else {
-      emptyCount = 0;
-      all = all.concat(items);
-    }
-    if (items.length < pageSize) break;
-    page++;
-    if (config.tudoentregue.pageIntervalMs) {
-      await new Promise(function(r) { setTimeout(r, config.tudoentregue.pageIntervalMs); });
-    }
-  }
-  return all;
+/**
+ * GET /v1/orders/finish - Consulta entregas com ocorrencia
+ * Query: phoneCountry, phoneNumber, orderType, orderID, partial
+ */
+function getFinished(params) {
+  return retry(function() {
+    return axios.get(getBaseUrl() + '/orders/finish', {
+      headers: getHeaders(),
+      params: params,
+      timeout: 15000,
+    });
+  }, { label: 'TE getFinished', maxRetries: 1 }).then(function(resp) {
+    return resp.data;
+  });
 }
 
-async function getSituations() {
-  var resp = await retry(function() {
-    return axios.get(config.tudoentregue.baseUrl + '/api/Situacoes', {
+/**
+ * GET /v1/tracking?trackingCode=XXX - Acompanhamento
+ */
+function getTracking(trackingCode) {
+  return retry(function() {
+    return axios.get(getBaseUrl() + '/tracking', {
+      headers: getHeaders(),
+      params: { trackingCode: trackingCode },
+      timeout: 15000,
+    });
+  }, { label: 'TE getTracking', maxRetries: 1 }).then(function(resp) {
+    return resp.data;
+  });
+}
+
+/**
+ * GET /v1/occurrences - Listar tipos de ocorrencia
+ */
+function getOccurrences() {
+  return retry(function() {
+    return axios.get(getBaseUrl() + '/occurrences', {
       headers: getHeaders(),
       timeout: 15000,
     });
-  }, { label: 'TE getSituations', maxRetries: 1 });
-  return resp.data;
+  }, { label: 'TE getOccurrences', maxRetries: 1 }).then(function(resp) {
+    return resp.data;
+  });
 }
 
 module.exports = {
-  createDeliveries: createDeliveries,
-  editDeliveries: editDeliveries,
-  cancelDeliveries: cancelDeliveries,
-  getDeliveries: getDeliveries,
-  fetchAllPages: fetchAllPages,
-  getSituations: getSituations,
+  createOrders: createOrders,
+  editOrders: editOrders,
+  cancelOrders: cancelOrders,
+  deleteOrders: deleteOrders,
+  getSituation: getSituation,
+  getFinished: getFinished,
+  getTracking: getTracking,
+  getOccurrences: getOccurrences,
   SITUATION: SITUATION,
   SITUATION_LABELS: SITUATION_LABELS,
-  SITUATION_TO_ODOO_STATE: SITUATION_TO_ODOO_STATE,
-  ORDER_TYPES: ORDER_TYPES,
+  ORDER_TYPE: ORDER_TYPE,
 };

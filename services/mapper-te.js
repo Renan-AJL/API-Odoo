@@ -1,127 +1,223 @@
 /**
- * services/mapper-te.js - Mapeamento Odoo <-> TudoEntregue
+ * services/mapper-te.js - Mapeamento Odoo <-> TudoEntregue v2
+ * Conforme spec oficial Swagger v1.0.20
+ *
+ * POST /v1/orders exige (array de):
+ *   Customer: { DocumentType, DocumentNumber }  <- CNPJ da empresa
+ *   Driver:   { PhoneCountry, PhoneNumber, DefineDriverAfter }
+ *   OrderType: 1=Entrega, 2=Coleta
+ *   OrderID:   string (id unico do pedido no Odoo)
+ *   OrderNumber: string (numero do pedido)
+ *   OrderDescription: "NF-e" / "CT-e" etc
+ *   DestinationAddress: { Name, Address, Address2, ZipCode, City, State, Country,
+ *                          Responsibility, PhoneCountry, PhoneNumber, Email,
+ *                          DocumentType, DocumentNumber, Latitude, Longitude }
+ *   Documents: [{ DocumentID, DocumentNumber, DocumentDescription, Volumes: [] }]
+ *   Observation, Volume, Weight, DeliveryDate, DeliveryStartTime, DeliveryEndTime
  */
 var logger = require('../utils/logger');
-var ORDER_TYPES = require('./tudoentregue').ORDER_TYPES;
+var teApi = require('./tudoentregue');
 
 /**
- * Mapeia picking Odoo + partner para o formato TE
+ * Mapeia picking Odoo + partner para OrderViewModel do TE
  */
-function odooToTeDelivery(picking, partner, saleOrder) {
+function odooToTeDelivery(picking, partner, saleOrder, companyCnpj) {
   if (!picking || !partner) return null;
 
-  // Monta endereco de entrega
-  var rua = (partner.x_studio_te_logradouro || '') + (partner.x_studio_te_numero ? ', ' + partner.x_studio_te_numero : '');
-  var complemento = partner.x_studio_te_complemento || '';
-  var bairro = partner.x_studio_te_bairro || '';
-  var cidade = partner.x_studio_te_municipio || (partner.city || '');
-  var uf = partner.x_studio_te_uf || (partner.state_id ? partner.state_id[1] : '');
-  if (uf && uf.length > 2) uf = uf.substring(0, 2);
-  var cep = partner.x_studio_te_cep || (partner.zip || '').replace(/\D/g, '');
+  // CNPJ do destinatario
+  var docNumber = (partner.x_studio_te_cnpj_cpf || partner.cnpj_cpf || partner.vat || '').replace(/\D/g, '');
+  var docType = docNumber.length > 11 ? 'CNPJ' : 'CPF';
 
-  var telefone = partner.x_studio_te_telefone || partner.phone || partner.mobile || '';
-  telefone = String(telefone).replace(/\D/g, '');
-
-  var cnpjCpf = partner.x_studio_te_cnpj_cpf || (partner.cnpj_cpf || '').replace(/\D/g, '') || (partner.vat || '').replace(/\D/g, '');
-
-  var delivery = {
-    CodigoPedido: picking.name || '',
-    TipoPedido: ORDER_TYPES.VENDA,
-    CnpjCpfDestinatario: cnpjCpf,
-    NomeDestinatario: partner.x_studio_te_razao_social || partner.name || '',
-    InscricaoEstadual: partner.x_studio_te_inscricao_estadual || '',
-    Telefone: telefone,
-    Email: partner.x_studio_te_email || partner.email || '',
-    Logradouro: rua,
-    Numero: partner.x_studio_te_numero || '',
-    Complemento: complemento,
-    Bairro: bairro,
-    Municipio: cidade,
-    Uf: uf,
-    Cep: cep,
-    Latitude: partner.x_studio_te_latitude || '',
-    Longitude: partner.x_studio_te_longitude || '',
-    Observacao: picking.x_studio_te_observacao || picking.note || '',
-  };
-
-  // Dados do sale order se disponivel
-  if (saleOrder) {
-    delivery.PesoTotal = saleOrder.x_studio_te_peso_total || '';
-    delivery.QtdVolumes = saleOrder.x_studio_te_qtd_volumes || '';
-    delivery.ValorFrete = saleOrder.x_studio_te_valor_frete || '';
-    delivery.DataEntrega = saleOrder.x_studio_te_data_entrega || '';
+  // Telefone destino
+  var phone = (partner.x_studio_te_telefone || partner.phone || partner.mobile || '').replace(/\D/g, '');
+  var phoneCountry = '+55';
+  var phoneNumber = phone;
+  if (phone.length > 11 && phone.startsWith('55')) {
+    phoneCountry = '+' + phone.substring(0, 2);
+    phoneNumber = phone.substring(2);
   }
 
-  // Se o picking tem campos TE preenchidos, usa-os
-  if (picking.x_studio_te_peso_total) delivery.PesoTotal = picking.x_studio_te_peso_total;
-  if (picking.x_studio_te_qtd_volumes) delivery.QtdVolumes = picking.x_studio_te_qtd_volumes;
-  if (picking.x_studio_te_valor_frete) delivery.ValorFrete = picking.x_studio_te_valor_frete;
-  if (picking.x_studio_te_data_entrega) delivery.DataEntrega = picking.x_studio_te_data_entrega;
+  // Endereco destino
+  var rua = partner.x_studio_te_logradouro || '';
+  var numero = partner.x_studio_te_numero || '';
+  // TE quer "Rua X, 71" no campo Address
+  var address = rua;
+  if (numero) address += ', ' + numero;
+
+  var state = partner.x_studio_te_uf || '';
+  if (!state && partner.state_id) {
+    state = typeof partner.state_id === 'object' ? (partner.state_id[1] || '') : '';
+    // Pega só a sigla
+    if (state.length > 2) {
+      var match = state.match(/\(([A-Z]{2})\)/);
+      state = match ? match[1] : state.substring(0, 2);
+    }
+  }
+
+  var delivery = {
+    Customer: {
+      DocumentType: 'CNPJ',
+      DocumentNumber: (companyCnpj || '').replace(/\D/g, ''),
+    },
+    Driver: {
+      PhoneCountry: '55',
+      PhoneNumber: '99999999999',
+      DefineDriverAfter: 1,  // 1 = definir motorista depois
+    },
+    OrderType: teApi.ORDER_TYPE.ENTREGA,  // 1 = Entrega
+    OrderID: String(picking.id),
+    OrderNumber: picking.name || '',
+    OrderDescription: 'NF-e',
+    DestinationAddress: {
+      Name: partner.x_studio_te_razao_social || partner.name || '',
+      Address: address || '',
+      AdditionalInformation: partner.x_studio_te_complemento || '',
+      Address2: partner.x_studio_te_bairro || '',
+      ZipCode: (partner.x_studio_te_cep || partner.zip || '').replace(/\D/g, ''),
+      City: partner.x_studio_te_municipio || partner.city || '',
+      State: state,
+      Country: 'Brasil',
+      Responsibility: '',
+      PhoneCountry: phoneCountry,
+      PhoneNumber: phoneNumber,
+      Email: partner.x_studio_te_email || partner.email || '',
+      DocumentType: docType,
+      DocumentNumber: docNumber,
+      Latitude: partner.x_studio_te_latitude || null,
+      Longitude: partner.x_studio_te_longitude || null,
+    },
+    Observation: picking.x_studio_te_observacao || picking.note || '',
+  };
+
+  // Peso e volumes
+  var peso = picking.x_studio_te_peso_total || (saleOrder && saleOrder.x_studio_te_peso_total) || null;
+  var volumes = picking.x_studio_te_qtd_volumes || (saleOrder && saleOrder.x_studio_te_qtd_volumes) || null;
+  if (peso) delivery.Weight = parseFloat(peso) || 0;
+  if (volumes) delivery.Volume = parseInt(volumes) || 0;
+
+  // Data de entrega
+  var dataEntrega = picking.x_studio_te_data_entrega || (saleOrder && saleOrder.x_studio_te_data_entrega) || '';
+  if (dataEntrega) {
+    delivery.DeliveryDate = dataEntrega.replace(' ', 'T');
+  }
 
   return delivery;
 }
 
 /**
- * Mapeia resposta do TE para campos do picking Odoo
+ * Mapeia resposta de criacao do TE para campos do picking Odoo
+ * Response: OrderInsertUpdateReturn { OrderID, Received, TrackingCode, TrackingUrl }
  */
-function teToOdooPicking(teDelivery) {
-  if (!teDelivery) return {};
+function teCreateToOdoo(teResponse) {
+  if (!teResponse) return {};
   var data = {};
-  if (teDelivery.Id) data.x_studio_te_order_id = String(teDelivery.Id);
-  if (teDelivery.Situacao !== undefined && teDelivery.Situacao !== null) {
-    data.x_studio_te_situacao = teDelivery.Situacao;
-  }
-  if (teDelivery.SituacaoDescricao) data.x_studio_te_situacao_desc = teDelivery.SituacaoDescricao;
-  if (teDelivery.DataEntrega) data.x_studio_te_data_entrega = teDelivery.DataEntrega;
-  if (teDelivery.ValorFrete !== undefined) data.x_studio_te_valor_frete = teDelivery.ValorFrete;
-  if (teDelivery.PesoTotal !== undefined) data.x_studio_te_peso_total = teDelivery.PesoTotal;
-  if (teDelivery.QtdVolumes !== undefined) data.x_studio_te_qtd_volumes = teDelivery.QtdVolumes;
-  if (teDelivery.ProtocoloColeta) data.x_studio_te_protocolo_coleta = teDelivery.ProtocoloColeta;
-  if (teDelivery.DataColeta) data.x_studio_te_data_coleta = teDelivery.DataColeta;
-  if (teDelivery.NomeMotorista) data.x_studio_te_nome_motorista = teDelivery.NomeMotorista;
-  if (teDelivery.PlacaVeiculo) data.x_studio_te_placa_veiculo = teDelivery.PlacaVeiculo;
-  if (teDelivery.Rastreio) data.x_studio_te_rastreio = teDelivery.Rastreio;
-  if (teDelivery.Ocorrencia) data.x_studio_te_observacao = teDelivery.Ocorrencia;
+  if (teResponse.OrderID) data.x_studio_te_order_id = String(teResponse.OrderID);
+  if (teResponse.TrackingCode) data.x_studio_te_rastreio = teResponse.TrackingCode;
   return data;
 }
 
 /**
- * Mapeia resposta do TE para campos do sale.order Odoo
+ * Mapeia webhook TE para campos do picking Odoo
+ * Webhook: "WebHook Padra Ocorrencia" {
+ *   OrderID, OrderNumber, OrderDescription,
+ *   Status: [{ Status, StatusDescription, Date }],
+ *   Occurrences: [{ OccurrenceCode, OccurrenceName, OccurrenceDate, Observation, Latitude, Longitude }],
+ *   Documents: [...]
+ * }
  */
-function teToOdooSaleOrder(teDelivery) {
-  if (!teDelivery) return {};
+function teWebhookToOdoo(webhookData) {
+  if (!webhookData) return {};
   var data = {};
-  if (teDelivery.Id) data.x_studio_te_order_id = String(teDelivery.Id);
-  if (teDelivery.Situacao !== undefined && teDelivery.Situacao !== null) {
-    data.x_studio_te_situacao = teDelivery.Situacao;
+  if (webhookData.OrderID) data.x_studio_te_order_id = String(webhookData.OrderID);
+
+  // Pegar ultima situacao do array Status
+  if (webhookData.Status && webhookData.Status.length) {
+    var lastStatus = webhookData.Status[webhookData.Status.length - 1];
+    if (lastStatus.Status !== undefined && lastStatus.Status !== null) {
+      data.x_studio_te_situacao = lastStatus.Status;
+    }
+    if (lastStatus.StatusDescription) {
+      data.x_studio_te_situacao_desc = lastStatus.StatusDescription;
+    }
   }
-  if (teDelivery.SituacaoDescricao) data.x_studio_te_situacao_desc = teDelivery.SituacaoDescricao;
-  if (teDelivery.DataEntrega) data.x_studio_te_data_entrega = teDelivery.DataEntrega;
-  if (teDelivery.ValorFrete !== undefined) data.x_studio_te_valor_frete = teDelivery.ValorFrete;
-  if (teDelivery.PesoTotal !== undefined) data.x_studio_te_peso_total = teDelivery.PesoTotal;
-  if (teDelivery.QtdVolumes !== undefined) data.x_studio_te_qtd_volumes = teDelivery.QtdVolumes;
-  if (teDelivery.ProtocoloColeta) data.x_studio_te_protocolo_coleta = teDelivery.ProtocoloColeta;
-  if (teDelivery.DataColeta) data.x_studio_te_data_coleta = teDelivery.DataColeta;
-  if (teDelivery.NomeMotorista) data.x_studio_te_nome_motorista = teDelivery.NomeMotorista;
-  if (teDelivery.PlacaVeiculo) data.x_studio_te_placa_veiculo = teDelivery.PlacaVeiculo;
-  if (teDelivery.Rastreio) data.x_studio_te_rastreio = teDelivery.Rastreio;
+
+  // Pegar ultima ocorrencia
+  if (webhookData.Occurrences && webhookData.Occurrences.length) {
+    var lastOcc = webhookData.Occurrences[webhookData.Occurrences.length - 1];
+    if (lastOcc.Observation) {
+      data.x_studio_te_observacao = lastOcc.Observation;
+    }
+    if (lastOcc.OccurrenceName) {
+      data.x_studio_te_observacao = (data.x_studio_te_observacao ? data.x_studio_te_observacao + ' - ' : '') + lastOcc.OccurrenceName;
+    }
+  }
+
+  // Motorista
+  if (webhookData.Driver && webhookData.Driver.PhoneNumber && webhookData.Driver.PhoneNumber !== '99999999999') {
+    data.x_studio_te_placa_veiculo = ''; // TE nao envia placa no webhook padrao
+  }
+
   return data;
 }
 
 /**
- * Normaliza payload do webhook TE
+ * Normaliza payload do webhook TE (pode ser array ou objeto)
  */
 function normalizeWebhookPayload(payload) {
-  // TE pode enviar array ou objeto unico
   if (Array.isArray(payload)) return payload;
-  if (payload && payload.entregas) return payload.entregas;
-  if (payload && payload.Id) return [payload];
+  if (payload && payload.OrderID) return [payload];
   return [];
+}
+
+/**
+ * Gera mensagem de chatter para o resultado da criacao
+ */
+function chatterCreateMessage(teResponse, delivery) {
+  var msg = '<b>TudoEntregue - Entrega criada!</b><br/>';
+  msg += 'OrderID: ' + (teResponse.OrderID || 'N/A') + '<br/>';
+  if (teResponse.TrackingCode) {
+    msg += 'Codigo Rastreio: ' + teResponse.TrackingCode + '<br/>';
+  }
+  if (teResponse.TrackingUrl) {
+    msg += '<a href="' + teResponse.TrackingUrl + '" target="_blank">Link de Acompanhamento</a><br/>';
+  }
+  msg += 'Pedido: ' + (delivery.OrderNumber || '') + '<br/>';
+  if (delivery.DestinationAddress) {
+    msg += 'Destinatario: ' + (delivery.DestinationAddress.Name || '') + '<br/>';
+    msg += 'Cidade/UF: ' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '<br/>';
+    msg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '');
+  }
+  return msg;
+}
+
+/**
+ * Gera mensagem de chatter para webhook de atualizacao
+ */
+function chatterWebhookMessage(webhookData) {
+  var msg = '<b>TudoEntregue - Atualizacao via Webhook</b><br/>';
+  msg += 'OrderID: ' + (webhookData.OrderID || '') + '<br/>';
+  msg += 'Pedido: ' + (webhookData.OrderNumber || '') + '<br/>';
+
+  if (webhookData.Status && webhookData.Status.length) {
+    var last = webhookData.Status[webhookData.Status.length - 1];
+    msg += 'Situacao: ' + (last.StatusDescription || '') + '<br/>';
+    if (last.Date) msg += 'Data: ' + last.Date;
+  }
+
+  if (webhookData.Occurrences && webhookData.Occurrences.length) {
+    var lastOcc = webhookData.Occurrences[webhookData.Occurrences.length - 1];
+    if (lastOcc.OccurrenceName) msg += '<br/>Ocorrencia: ' + lastOcc.OccurrenceName;
+    if (lastOcc.Observation) msg += '<br/>Observacao: ' + lastOcc.Observation;
+  }
+
+  return msg;
 }
 
 module.exports = {
   odooToTeDelivery: odooToTeDelivery,
-  teToOdooPicking: teToOdooPicking,
-  teToOdooSaleOrder: teToOdooSaleOrder,
+  teCreateToOdoo: teCreateToOdoo,
+  teWebhookToOdoo: teWebhookToOdoo,
   normalizeWebhookPayload: normalizeWebhookPayload,
+  chatterCreateMessage: chatterCreateMessage,
+  chatterWebhookMessage: chatterWebhookMessage,
 };

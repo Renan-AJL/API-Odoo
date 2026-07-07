@@ -1,20 +1,14 @@
 /**
  * routes/delivery.js - Rotas TE protegidas por API Key
- * POST /send        - Envia entregas ao TE
- * POST /sync-unsynced - Forca sync dos pendentes
- * GET  /status/:id  - Consulta situacao no TE
- * GET  /occurrences/:id - Ocorrencias de uma entrega
- * PUT  /edit        - Edita entregas no TE
- * PUT  /cancel      - Cancela entregas no TE
- * POST /pull        - Puxa atualizacoes do TE
- * GET  /situations  - Lista situacoes disponiveis
+ * Baseado na spec oficial TudoEntregue Swagger v1.0.20
  */
 var express = require('express');
 var router = express.Router();
-var { apiKeyAuth } = require('../middleware/auth');
+var apiKeyAuth = require('../middleware/auth').apiKeyAuth;
 var teApi = require('../services/tudoentregue');
 var odooTe = require('../services/odoo-te');
 var mapper = require('../services/mapper-te');
+var config = require('../config');
 var logger = require('../utils/logger');
 
 router.use(apiKeyAuth);
@@ -34,30 +28,47 @@ router.post('/send', async function(req, res) {
     var partner = await odooTe.getPartner(partnerId);
     var saleId = picking.sale_id ? picking.sale_id[0] : null;
     var saleOrder = null;
-    if (saleId) {
-      saleOrder = await odooTe.readSaleOrder(saleId);
+    if (saleId) saleOrder = await odooTe.readSaleOrder(saleId);
+
+    var delivery = mapper.odooToTeDelivery(picking, partner, saleOrder, config.empresa.cnpj);
+    if (!delivery) return res.status(500).json({ success: false, error: 'Falha no mapeamento' });
+
+    // Log no chatter - inicio
+    var chatterMsg = '<b>TudoEntregue - Enviando...</b><br/>';
+    chatterMsg += 'Pedido: ' + delivery.OrderNumber + '<br/>';
+    chatterMsg += 'Destinatario: ' + (delivery.DestinationAddress.Name || '') + '<br/>';
+    chatterMsg += 'Cidade: ' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '<br/>';
+    chatterMsg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '');
+    await odooTe.postChatter('stock.picking', pickingId, chatterMsg);
+    if (saleId) await odooTe.postChatter('sale.order', saleId, chatterMsg);
+
+    var result = await teApi.createOrders([delivery]);
+    var teResp = Array.isArray(result) ? result[0] : result;
+
+    // Grava dados de retorno
+    if (teResp && teResp.Received !== undefined) {
+      var odooData = mapper.teCreateToOdoo(teResp);
+      if (Object.keys(odooData).length) {
+        await odooTe.updatePickingTeData(pickingId, odooData);
+      }
+      // Marca como sync
+      await odooTe.markPickingsSynced([pickingId], teResp.OrderID || null);
+      if (saleId) await odooTe.markSaleOrdersSynced([saleId], teResp.OrderID || null);
+
+      // Chatter resultado
+      var resultMsg = mapper.chatterCreateMessage(teResp, delivery);
+      await odooTe.postChatter('stock.picking', pickingId, resultMsg);
+      if (saleId) await odooTe.postChatter('sale.order', saleId, resultMsg);
     }
 
-    var delivery = mapper.odooToTeDelivery(picking, partner, saleOrder);
-    if (!delivery) return res.status(500).json({ success: false, error: 'Falha ao mapear entrega' });
-
-    var result = await teApi.createDeliveries([delivery]);
-
-    // Grava te_order_id
-    if (result && result.data && result.data.length) {
-      var teId = result.data[0].Id || result.data[0].id;
-      await odooTe.markPickingsSynced([pickingId], teId);
-      if (saleId) await odooTe.markSaleOrdersSynced([saleId], teId);
-    }
-
-    res.json({ success: true, data: result });
+    res.json({ success: true, data: teResp });
   } catch (err) {
     logger.error('[TE-ROUTE] /send erro: ' + err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// POST /api/v1/te/sync-unsynced - Sync automatico dos pendentes
+// POST /api/v1/te/sync-unsynced - Forca sync dos pendentes
 router.post('/sync-unsynced', async function(req, res) {
   try {
     var results = await runAutoSync();
@@ -68,81 +79,66 @@ router.post('/sync-unsynced', async function(req, res) {
   }
 });
 
-// GET /api/v1/te/status/:id
-router.get('/status/:id', async function(req, res) {
+// GET /api/v1/te/status - Consulta situacao
+router.get('/status', async function(req, res) {
   try {
-    var data = await teApi.getDeliveries({ id: req.params.id });
+    var params = {};
+    if (req.query.order_id) params.orderID = req.query.order_id;
+    if (req.query.order_type) params.orderType = req.query.order_type;
+    if (req.query.phone) params.phoneNumber = req.query.phone;
+    if (req.query.phone_country) params.phoneCountry = req.query.phone_country;
+    var data = await teApi.getSituation(params);
     res.json({ success: true, data: data });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// GET /api/v1/te/occurrences/:id
-router.get('/occurrences/:id', async function(req, res) {
+// GET /api/v1/te/occurrences - Consulta entregas com ocorrencia
+router.get('/occurrences', async function(req, res) {
   try {
-    var data = await teApi.getDeliveries({ entregaId: req.params.id });
+    var params = {};
+    if (req.query.order_id) params.orderID = req.query.order_id;
+    if (req.query.order_type) params.orderType = req.query.order_type;
+    if (req.query.partial !== undefined) params.partial = req.query.partial;
+    if (req.query.phone) params.phoneNumber = req.query.phone;
+    var data = await teApi.getFinished(params);
     res.json({ success: true, data: data });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// PUT /api/v1/te/edit
-router.put('/edit', async function(req, res) {
+// GET /api/v1/te/tracking - Acompanhamento
+router.get('/tracking', async function(req, res) {
   try {
-    var deliveries = req.body.deliveries || req.body;
-    if (!Array.isArray(deliveries)) deliveries = [deliveries];
-    var data = await teApi.editDeliveries(deliveries);
+    if (!req.query.code) return res.status(400).json({ error: 'trackingCode obrigatorio' });
+    var data = await teApi.getTracking(req.query.code);
     res.json({ success: true, data: data });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// PUT /api/v1/te/cancel
+// PUT /api/v1/te/cancel - Cancelar entregas
 router.put('/cancel', async function(req, res) {
   try {
-    var deliveries = req.body.deliveries || req.body;
-    if (!Array.isArray(deliveries)) deliveries = [deliveries];
-    var data = await teApi.cancelDeliveries(deliveries);
+    var data = await teApi.cancelOrders(req.body);
     res.json({ success: true, data: data });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// POST /api/v1/te/pull - Puxa atualizacoes do TE
-router.post('/pull', async function(req, res) {
-  try {
-    var filter = req.body.filter || {};
-    var all = await teApi.fetchAllPages(filter);
-    res.json({ success: true, count: all.length, data: all });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/v1/te/situations
-router.get('/situations', async function(req, res) {
-  try {
-    var data = await teApi.getSituations();
-    res.json({ success: true, data: data });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// --- Auto-sync logic (reused by route and cron) ---
+// --- Auto-sync (poll Odoo + envia ao TE + chatter logging) ---
 async function runAutoSync() {
   var results = { synced: 0, errors: 0, details: [] };
   try {
     var pickings = await odooTe.getUnsyncedPickings();
     if (!pickings.length) {
-      logger.info('[TE-AUTO-SYNC] Nenhum picking pendente encontrado');
+      logger.info('[TE-AUTO-SYNC] Nenhum picking pendente');
       return results;
     }
-
     logger.info('[TE-AUTO-SYNC] ' + pickings.length + ' picking(s) pendente(s)');
 
     for (var i = 0; i < pickings.length; i++) {
@@ -158,53 +154,44 @@ async function runAutoSync() {
         var partner = await odooTe.getPartner(partnerId);
         var saleId = picking.sale_id ? picking.sale_id[0] : null;
         var saleOrder = null;
-        if (saleId) {
-          saleOrder = await odooTe.readSaleOrder(saleId);
-        }
+        if (saleId) saleOrder = await odooTe.readSaleOrder(saleId);
 
-        var delivery = mapper.odooToTeDelivery(picking, partner, saleOrder);
+        var delivery = mapper.odooToTeDelivery(picking, partner, saleOrder, config.empresa.cnpj);
         if (!delivery) {
           results.errors++;
           results.details.push({ picking: picking.name, error: 'Falha no mapeamento' });
           continue;
         }
 
-        // Log no chatter - inicio do envio
+        // Chatter: enviando
         var chatterMsg = '<b>TudoEntregue - Enviando...</b><br/>';
-        chatterMsg += 'Pedido: ' + (delivery.CodigoPedido || '') + '<br/>';
-        chatterMsg += 'Destinatario: ' + (delivery.NomeDestinatario || '') + '<br/>';
-        chatterMsg += 'CNPJ/CPF: ' + (delivery.CnpjCpfDestinatario || '') + '<br/>';
-        chatterMsg += 'Cidade/UF: ' + (delivery.Municipio || '') + '/' + (delivery.Uf || '') + '<br/>';
-        chatterMsg += 'CEP: ' + (delivery.Cep || '');
-
+        chatterMsg += 'Pedido: ' + delivery.OrderNumber + '<br/>';
+        chatterMsg += 'Destinatario: ' + (delivery.DestinationAddress.Name || '') + '<br/>';
+        chatterMsg += 'CNPJ/CPF: ' + (delivery.DestinationAddress.DocumentNumber || '') + '<br/>';
+        chatterMsg += 'Cidade: ' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '<br/>';
+        chatterMsg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '');
         await odooTe.postChatter('stock.picking', picking.id, chatterMsg);
-        if (saleId) {
-          await odooTe.postChatter('sale.order', saleId, chatterMsg);
-        }
+        if (saleId) await odooTe.postChatter('sale.order', saleId, chatterMsg);
 
-        var teResult = await teApi.createDeliveries([delivery]);
+        // Envia ao TE
+        var teResult = await teApi.createOrders([delivery]);
+        var teResp = Array.isArray(teResult) ? teResult[0] : teResult;
 
-        // Extrai TE Id
-        var teId = null;
-        if (teResult && teResult.data && teResult.data.length) {
-          teId = teResult.data[0].Id || teResult.data[0].id;
-        }
+        // Grava retorno
+        if (teResp) {
+          var odooData = mapper.teCreateToOdoo(teResp);
+          await odooTe.updatePickingTeData(picking.id, odooData);
+          await odooTe.markPickingsSynced([picking.id], teResp.OrderID || null);
+          if (saleId) await odooTe.markSaleOrdersSynced([saleId], teResp.OrderID || null);
 
-        // Marca como sync
-        await odooTe.markPickingsSynced([picking.id], teId);
-        if (saleId) await odooTe.markSaleOrdersSynced([saleId], teId);
-
-        // Log no chatter - resultado
-        var resultMsg = '<b>TudoEntregue - Enviado com sucesso!</b><br/>';
-        resultMsg += 'TE ID: ' + (teId || 'N/A') + '<br/>';
-        resultMsg += 'Status API: ' + (teResult ? 'OK' : 'Sem resposta');
-        await odooTe.postChatter('stock.picking', picking.id, resultMsg);
-        if (saleId) {
-          await odooTe.postChatter('sale.order', saleId, resultMsg);
+          // Chatter: resultado
+          var resultMsg = mapper.chatterCreateMessage(teResp, delivery);
+          await odooTe.postChatter('stock.picking', picking.id, resultMsg);
+          if (saleId) await odooTe.postChatter('sale.order', saleId, resultMsg);
         }
 
         results.synced++;
-        results.details.push({ picking: picking.name, te_id: teId, status: 'ok' });
+        results.details.push({ picking: picking.name, te_id: teResp ? teResp.OrderID : null, status: 'ok' });
       } catch (err) {
         results.errors++;
         var errMsg = '<b>TudoEntregue - ERRO no envio</b><br/>' + err.message;
