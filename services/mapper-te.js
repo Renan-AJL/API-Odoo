@@ -20,6 +20,7 @@ var teApi = require('./tudoentregue');
 
 /**
  * Mapeia picking Odoo + partner para OrderViewModel do TE
+ * Funciona COM ou SEM campos x_studio_* (usa campos nativos como fallback)
  */
 function odooToTeDelivery(picking, partner, saleOrder, companyCnpj) {
   if (!picking || !partner) return null;
@@ -28,18 +29,27 @@ function odooToTeDelivery(picking, partner, saleOrder, companyCnpj) {
   var docNumber = (partner.x_studio_te_cnpj_cpf || partner.cnpj_cpf || partner.vat || '').replace(/\D/g, '');
   var docType = docNumber.length > 11 ? 'CNPJ' : 'CPF';
 
-  // Telefone destino
-  var phone = (partner.x_studio_te_telefone || partner.phone || partner.mobile || '').replace(/\D/g, '');
-  var phoneCountry = '+55';
+  // Telefone destino - prioriza mobile (celular) sobre phone
+  var phone = (partner.x_studio_te_telefone || partner.mobile || partner.phone || '').replace(/\D/g, '');
+  var phoneCountry = '55';
   var phoneNumber = phone;
   if (phone.length > 11 && phone.startsWith('55')) {
-    phoneCountry = '+' + phone.substring(0, 2);
+    phoneCountry = phone.substring(0, 2);
     phoneNumber = phone.substring(2);
   }
+  // Se telefone com DDD tem 10 digitos (fixo), adiciona o 9o digito para celular
+  if (phoneNumber.length === 10) {
+    phoneNumber = phoneNumber.substring(0, 2) + '9' + phoneNumber.substring(2);
+  }
 
-  // Endereco destino
-  var rua = partner.x_studio_te_logradouro || '';
-  var numero = partner.x_studio_te_numero || '';
+  // Endereco destino - prioriza campos x_studio_te_*, senao campos nativos do partner
+  var rua = partner.x_studio_te_logradouro || partner.street || '';
+  var numero = partner.x_studio_te_numero || partner.number || '';
+  var complemento = partner.x_studio_te_complemento || partner.street2 || '';
+  var bairro = partner.x_studio_te_bairro || partner.district || '';
+  var cidade = partner.x_studio_te_municipio || partner.city || '';
+  var cep = (partner.x_studio_te_cep || partner.zip || '').replace(/\D/g, '');
+
   // TE quer "Rua X, 71" no campo Address
   var address = rua;
   if (numero) address += ', ' + numero;
@@ -47,7 +57,6 @@ function odooToTeDelivery(picking, partner, saleOrder, companyCnpj) {
   var state = partner.x_studio_te_uf || '';
   if (!state && partner.state_id) {
     state = typeof partner.state_id === 'object' ? (partner.state_id[1] || '') : '';
-    // Pega só a sigla
     if (state.length > 2) {
       var match = state.match(/\(([A-Z]{2})\)/);
       state = match ? match[1] : state.substring(0, 2);
@@ -62,19 +71,19 @@ function odooToTeDelivery(picking, partner, saleOrder, companyCnpj) {
     Driver: {
       PhoneCountry: '55',
       PhoneNumber: '99999999999',
-      DefineDriverAfter: 1,  // 1 = definir motorista depois
+      DefineDriverAfter: 1,
     },
-    OrderType: teApi.ORDER_TYPE.ENTREGA,  // 1 = Entrega
+    OrderType: teApi.ORDER_TYPE.ENTREGA,
     OrderID: String(picking.id),
     OrderNumber: picking.name || '',
     OrderDescription: 'NF-e',
     DestinationAddress: {
       Name: partner.x_studio_te_razao_social || partner.name || '',
       Address: address || '',
-      AdditionalInformation: partner.x_studio_te_complemento || '',
-      Address2: partner.x_studio_te_bairro || '',
-      ZipCode: (partner.x_studio_te_cep || partner.zip || '').replace(/\D/g, ''),
-      City: partner.x_studio_te_municipio || partner.city || '',
+      AdditionalInformation: complemento,
+      Address2: bairro,
+      ZipCode: cep,
+      City: cidade,
       State: state,
       Country: 'Brasil',
       Responsibility: '',
@@ -86,10 +95,10 @@ function odooToTeDelivery(picking, partner, saleOrder, companyCnpj) {
       Latitude: partner.x_studio_te_latitude || null,
       Longitude: partner.x_studio_te_longitude || null,
     },
-    Observation: picking.x_studio_te_observacao || picking.note || '',
+    Observation: picking.note || picking.x_studio_te_observacao || '',
   };
 
-  // Peso e volumes
+  // Peso e volumes (de campos x_studio ou null)
   var peso = picking.x_studio_te_peso_total || (saleOrder && saleOrder.x_studio_te_peso_total) || null;
   var volumes = picking.x_studio_te_qtd_volumes || (saleOrder && saleOrder.x_studio_te_qtd_volumes) || null;
   if (peso) delivery.Weight = parseFloat(peso) || 0;
@@ -150,11 +159,6 @@ function teWebhookToOdoo(webhookData) {
     if (lastOcc.OccurrenceName) {
       data.x_studio_te_observacao = (data.x_studio_te_observacao ? data.x_studio_te_observacao + ' - ' : '') + lastOcc.OccurrenceName;
     }
-  }
-
-  // Motorista
-  if (webhookData.Driver && webhookData.Driver.PhoneNumber && webhookData.Driver.PhoneNumber !== '99999999999') {
-    data.x_studio_te_placa_veiculo = ''; // TE nao envia placa no webhook padrao
   }
 
   return data;

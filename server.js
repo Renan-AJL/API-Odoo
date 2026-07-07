@@ -41,8 +41,8 @@ app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({
   origin: '*',
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'X-API-Key', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT'],
+  allowedHeaders: ['Content-Type', 'X-API-Key', 'Authorization', 'AppKey', 'RequesterKey'],
 }));
 
 // --- Rate Limiting ---
