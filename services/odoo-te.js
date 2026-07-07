@@ -6,16 +6,15 @@ var xmlrpc = require('xmlrpc');
 var config = require('../config');
 var logger = require('../utils/logger');
 
-// Apenas campos nativos do Odoo - campos x_studio_* serao lidos sob demanda
-// pois podem nao existir se o usuario ainda nao os criou no Studio
+// Campos 100% nativos do Odoo (existem em qualquer instalacao)
 var PARTNER_FIELDS = [
-  'id', 'name', 'city', 'state_id', 'zip', 'phone', 'email', 'cnpj_cpf', 'vat',
-  'street', 'street2', 'number', 'district', 'country_id', 'l10n_br_city_id',
+  'id', 'name', 'city', 'state_id', 'zip', 'phone', 'email',
+  'street', 'street2', 'country_id',
 ];
 
-// Campos x_studio para partner (endereco de entrega alternativo)
-// Serao lidos separadamente com safeReadCustom
-var PARTNER_CUSTOM_FIELDS = [
+// Todos os campos opcionais do partner (extended + x_studio)
+var PARTNER_OPTIONAL_FIELDS = [
+  'vat', 'cnpj_cpf', 'number', 'district', 'l10n_br_city_id',
   'x_studio_te_codigo', 'x_studio_te_razao_social',
   'x_studio_te_cnpj_cpf', 'x_studio_te_inscricao_estadual',
   'x_studio_te_telefone', 'x_studio_te_email', 'x_studio_te_logradouro',
@@ -49,9 +48,9 @@ var PICKING_CUSTOM_FIELDS = [
   'x_studio_te_nome_motorista', 'x_studio_te_placa_veiculo', 'x_studio_te_rastreio',
 ];
 
-// Mapeamento de campos customizados por modelo
-var CUSTOM_FIELDS = {
-  'res.partner': PARTNER_CUSTOM_FIELDS,
+// Mapeamento de campos opcionais por modelo (segundo nivel do safeReadCustom)
+var OPTIONAL_FIELDS = {
+  'res.partner': PARTNER_OPTIONAL_FIELDS,
   'sale.order': SALE_ORDER_CUSTOM_FIELDS,
   'stock.picking': PICKING_CUSTOM_FIELDS,
 };
@@ -292,7 +291,7 @@ async function updateSaleOrderTeData(orderId, data) {
 }
 
 async function getPartner(partnerId) {
-  var partners = await safeReadCustom('res.partner', [partnerId], PARTNER_FIELDS, PARTNER_CUSTOM_FIELDS);
+  var partners = await safeReadCustom('res.partner', [partnerId], PARTNER_FIELDS, PARTNER_OPTIONAL_FIELDS);
   return partners ? partners[0] : null;
 }
 

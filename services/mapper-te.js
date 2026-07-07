@@ -44,7 +44,7 @@ function odooToTeDelivery(picking, partner, saleOrder, companyCnpj) {
 
   // Endereco destino - prioriza campos x_studio_te_*, senao campos nativos do partner
   var rua = partner.x_studio_te_logradouro || partner.street || '';
-  var numero = partner.x_studio_te_numero || partner.number || '';
+  var numero = partner.x_studio_te_numero || (partner.number ? String(partner.number) : '');
   var complemento = partner.x_studio_te_complemento || partner.street2 || '';
   var bairro = partner.x_studio_te_bairro || partner.district || '';
   var cidade = partner.x_studio_te_municipio || partner.city || '';
