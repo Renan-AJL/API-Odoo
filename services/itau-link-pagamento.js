@@ -80,6 +80,9 @@ async function criarLinkPagamento(dadosLink) {
   logger.info('Criando checkout de cartao...');
 
   var orderId = dadosLink.seu_numero || ('ORD-' + Date.now());
+  // Sanitiza orderId para URL e Rede reference (sem espacos)
+  orderId = String(orderId).replace(/[^a-zA-Z0-9\-_]/g, '').substring(0, 50);
+  if (!orderId) orderId = 'ORD' + Date.now();
   var valor = dadosLink.valor || 0;
   var descricao = dadosLink.descricao || 'Pagamento';
   var parcelas = dadosLink.parcelas || 12;
@@ -130,11 +133,15 @@ async function processarPagamento(orderId, cartaoData) {
   var pv = config.rede.pv;
   var chave = config.rede.chaveIntegracao;
 
+  // Sanitiza reference: remove espacos e chars especiais (Rede aceita apenas alfanumericos)
+  var safeReference = String(orderId).replace(/[^a-zA-Z0-9\-_]/g, '').substring(0, 50);
+  if (!safeReference) safeReference = 'ORD' + Date.now();
+
   // Payload FLAT conforme doc oficial e.Rede
-  // https://developer.userede.com.br/erede/v2/transactions
+  // https://developer.userrede.com.br/erede/v2/transactions
   var payload = {
     // Obrigatorios
-    reference: orderId,                                    // ate 50 chars - codigo da transacao
+    reference: safeReference,                              // ate 50 chars - alfanumerico sem espacos
     amount: Math.round(order.valor * 100),                // centavos, sem separador
     cardNumber: cartaoData.numero.replace(/\D/g, ''),      // ate 19 chars
     expirationMonth: parseInt(cartaoData.validade_mes, 10), // 1-12
@@ -144,7 +151,7 @@ async function processarPagamento(orderId, cartaoData) {
     capture: true,
     kind: 'credit',                                        // credit ou debit
     installments: parseInt(cartaoData.parcelas) || 1,
-    softDescriptor: (config.rede.softDescriptor || 'LOJA').substring(0, 13),
+    // softDescriptor REMOVIDO: merchant nao tem essa funcionalidade habilitada na Rede
     cardholderName: (cartaoData.titular || '').toUpperCase(),
     securityCode: cartaoData.cvv || '',
   };
@@ -173,7 +180,6 @@ async function processarPagamento(orderId, cartaoData) {
     expirationMonth: payload.expirationMonth,
     expirationYear: payload.expirationYear,
     cardholderName: payload.cardholderName,
-    softDescriptor: payload.softDescriptor,
   }));
 
   try {

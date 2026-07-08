@@ -80,8 +80,8 @@ app.use('/api/v1/itau', itauApiRoutes);
 app.use('/api/v1/itau/boletos', itauBoletosRoutes);
 app.use('/api/v1/itau/webhook', itauWebhookRoutes);
 app.use('/api/v1/itau/token', itauTokenRoutes);
-app.use('/api/v1/te', teDeliveryRoutes);
 app.use('/api/v1/te/webhook', teWebhookRoutes);
+app.use('/api/v1/te', teDeliveryRoutes);
 
 // --- Root ---
 app.get('/', (req, res) => {
