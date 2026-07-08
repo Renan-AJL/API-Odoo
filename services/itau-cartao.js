@@ -28,11 +28,11 @@ async function getRedeToken() {
     const params = new URLSearchParams();
     params.append('grant_type', 'client_credentials');
 
-    const response = await axios.post(`${config.redeBaseUrl}/oauth/token`, params, {
+    const response = await axios.post(`${config.redeBaseUrl}/redelabs/oauth2/token`, params, {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Authorization': 'Basic ' + Buffer.from(
-          `${config.rede.clientId}:${config.rede.clientSecret}`
+          `${config.rede.pv}:${config.rede.chaveIntegracao}`
         ).toString('base64'),
       },
       timeout: 30000,
@@ -71,31 +71,33 @@ async function autorizarPagamento(cartaoData) {
 
   const headers = await getRedeHeaders();
 
+  // Payload FLAT conforme doc oficial e.Rede (sem objeto 'card' aninhado)
   const payload = {
-    merchantId: config.rede.merchantId,
-    merchantOrderId: cartaoData.order_id || String(Date.now()),
-    amount: Math.round(cartaoData.valor * 100), // Valor em centavos
-    softDescriptor: config.rede.softDescriptor,
-    currency: 'BRL',
+    reference: cartaoData.order_id || String(Date.now()),
+    amount: Math.round(cartaoData.valor * 100),
+    cardNumber: cartaoData.numero ? cartaoData.numero.replace(/\D/g, '') : '',
+    expirationMonth: parseInt(cartaoData.validade_mes, 10) || 0,
+    expirationYear: cartaoData.validade_ano || '',
+    cardholderName: (cartaoData.titular || '').toUpperCase(),
+    securityCode: cartaoData.cvv || '',
+    softDescriptor: (config.rede.softDescriptor || 'LOJA').substring(0, 13),
+    kind: cartaoData.tipo === 'debito' ? 'debit' : 'credit',
     installments: cartaoData.parcelas || 1,
-    capture: cartaoData.capture !== false, // Captura automatica
+    capture: cartaoData.capture !== false,
   };
 
-  // Dados do cartao (tokenizado ou pleno)
+  // Se tokenizado, usa token no lugar dos dados plenos
   if (cartaoData.card_token) {
     payload.cardToken = cartaoData.card_token;
-  } else {
-    payload.card = {
-      cardNumber: cartaoData.numero.replace(/\D/g, ''),
-      holder: cartaoData.titular,
-      expirationDate: `${cartaoData.validade_mes}/${cartaoData.validade_ano}`,
-      securityCode: cartaoData.cvv,
-    };
+    delete payload.cardNumber;
+    delete payload.expirationMonth;
+    delete payload.expirationYear;
+    delete payload.securityCode;
   }
 
   try {
     const response = await axios.post(
-      `${config.redeBaseUrl}/transactions`,
+      `${config.redeBaseUrl}/erede/v2/transactions`,
       payload,
       { headers, timeout: 30000 }
     );

@@ -1,10 +1,9 @@
 // ============================================
 // SERVICO DE CHECKOUT CARTAO - REDE ITAU (OAuth 2.0)
 // ============================================
-// Rede Itau exige OAuth 2.0:
-//   1. POST /redelabs/oauth2/token (Basic Auth PV:Chave -> Bearer token)
-//   2. POST /erede/v2/transactions (Bearer token)
-// Referencia: documentacao Rede Itau for Developers
+// Conforme documentacao oficial e.Rede (atualizada 18/06/2026)
+// OAuth 2.0: POST /redelabs/oauth2/token -> Bearer token
+// Transacao: POST /erede/v2/transactions (Bearer token + payload flat)
 
 var axios = require('axios');
 var config = require('../config');
@@ -20,8 +19,9 @@ var tokenCache = {
 };
 
 /**
- * Obtem token OAuth 2.0 da Rede Itau
- * POST /redelabs/oauth2/token
+ * Obtem token OAuth 2.0 da Rede
+ * POST /redelabs/oauth2/token (producao)
+ * POST /oauth2/token (sandbox)
  * Header: Authorization: Basic base64(PV:Chave)
  * Body: grant_type=client_credentials
  */
@@ -35,7 +35,12 @@ async function getRedeToken() {
   var chave = config.rede.chaveIntegracao;
   var basicAuth = Buffer.from(pv + ':' + chave).toString('base64');
 
-  var tokenUrl = config.redeBaseUrl + '/redelabs/oauth2/token';
+  // URLs conforme doc oficial
+  var isSandbox = (process.env.REDE_AMBIENTE || '') === 'sandbox';
+  var tokenUrl = isSandbox
+    ? config.redeBaseUrl + '/oauth2/token'
+    : config.redeBaseUrl + '/redelabs/oauth2/token';
+
   logger.info('[REDE-OAUTH] Obtendo token... URL: ' + tokenUrl + ' | PV: ' + pv.substring(0, 4) + '***');
 
   try {
@@ -52,19 +57,19 @@ async function getRedeToken() {
 
     var data = response.data;
     if (!data.access_token) {
-      throw new Error('Token nao retornado pela Rede: ' + JSON.stringify(data));
+      throw new Error('Token nao retornado: ' + JSON.stringify(data));
     }
 
     tokenCache.accessToken = data.access_token;
     tokenCache.expiresAt = now + (data.expires_in * 1000);
 
-    logger.info('[REDE-OAUTH] Token obtido com sucesso (expira em ' + data.expires_in + 's)');
+    logger.info('[REDE-OAUTH] Token OK (expira em ' + data.expires_in + 's)');
     return data.access_token;
   } catch (error) {
     var status = error.response ? error.response.status : 0;
     var errBody = error.response ? JSON.stringify(error.response.data) : error.message;
-    logger.error('[REDE-OAUTH] Falha ao obter token: ' + status + ' - ' + errBody);
-    throw new Error('Autenticacao Rede falhou (OAuth): ' + status + ' - ' + errBody);
+    logger.error('[REDE-OAUTH] Falha: ' + status + ' - ' + errBody);
+    throw new Error('Autenticacao Rede falhou (OAuth): ' + status);
   }
 }
 
@@ -111,9 +116,11 @@ async function criarLinkPagamento(dadosLink) {
 }
 
 /**
- * Processa o pagamento do cartao via API Rede Itau (OAuth 2.0)
- * 1. Obtem Bearer token via OAuth
- * 2. Envia transacao com Bearer token
+ * Processa pagamento via e.Rede (OAuth 2.0)
+ * Payload FLAT conforme documentacao oficial (sem objeto "card" aninhado)
+ *
+ * Campos obrigatorios: reference, amount, cardNumber, expirationMonth, expirationYear
+ * Campos opcionais: capture, kind, installments, softDescriptor, cardholderName, securityCode
  */
 async function processarPagamento(orderId, cartaoData) {
   var order = pendingOrders.get(orderId);
@@ -123,27 +130,51 @@ async function processarPagamento(orderId, cartaoData) {
   var pv = config.rede.pv;
   var chave = config.rede.chaveIntegracao;
 
-  // Payload da transacao
+  // Payload FLAT conforme doc oficial e.Rede
+  // https://developer.userede.com.br/erede/v2/transactions
   var payload = {
+    // Obrigatorios
+    reference: orderId,                                    // ate 50 chars - codigo da transacao
+    amount: Math.round(order.valor * 100),                // centavos, sem separador
+    cardNumber: cartaoData.numero.replace(/\D/g, ''),      // ate 19 chars
+    expirationMonth: parseInt(cartaoData.validade_mes, 10), // 1-12
+    expirationYear: cartaoData.validade_ano,                // 2 ou 4 digitos (ex: 28 ou 2028)
+
+    // Opcionais
     capture: true,
-    merchantOrderId: orderId,
-    amount: Math.round(order.valor * 100),
-    currency: 'BRL',
+    kind: 'credit',                                        // credit ou debit
     installments: parseInt(cartaoData.parcelas) || 1,
     softDescriptor: (config.rede.softDescriptor || 'LOJA').substring(0, 13),
-    card: {
-      cardNumber: cartaoData.numero.replace(/\D/g, ''),
-      holder: cartaoData.titular,
-      expirationDate: (cartaoData.validade_mes || '') + '/' + (cartaoData.validade_ano || ''),
-      securityCode: cartaoData.cvv,
-    },
+    cardholderName: (cartaoData.titular || '').toUpperCase(),
+    securityCode: cartaoData.cvv || '',
   };
 
-  var apiUrl = config.redeBaseUrl + '/erede/v2/transactions';
-  logger.info('[REDE-PAG] Processando: ' + orderId + ' R$' + order.valor + ' ' + payload.installments + 'x');
-  logger.info('[REDE-PAG] Endpoint: ' + apiUrl);
-  logger.info('[REDE-PAG] PV: ' + pv.substring(0, 4) + '***' + pv.substring(pv.length - 3) + ' | Chave: ' + (chave ? chave.substring(0, 4) + '***' + chave.substring(chave.length - 3) : 'VAZIA'));
-  logger.info('[REDE-PAG] Ambiente: ' + (process.env.REDE_AMBIENTE || 'producao (default)'));
+  // URLs conforme doc oficial
+  var isSandbox = (process.env.REDE_AMBIENTE || '') === 'sandbox';
+  var apiUrl = isSandbox
+    ? config.redeBaseUrl.replace('/api.', 'https://sandbox-erede.useredecloud.com.br').replace('https://sandbox.userede.com.br', 'https://sandbox-erede.useredecloud.com.br') + '/v2/transactions'
+    : config.redeBaseUrl + '/erede/v2/transactions';
+
+  // Fallback: se a URL do sandbox ficou estranha, usa a doc direto
+  if (isSandbox) {
+    apiUrl = 'https://sandbox-erede.useredecloud.com.br/v2/transactions';
+  }
+
+  logger.info('[REDE-PAG] Transacao: ' + orderId + ' R$' + order.valor + ' ' + payload.installments + 'x');
+  logger.info('[REDE-PAG] URL: ' + apiUrl);
+  logger.info('[REDE-PAG] PV: ' + pv.substring(0, 4) + '*** | Chave: ' + (chave ? chave.substring(0, 4) + '***' : 'VAZIA'));
+  logger.info('[REDE-PAG] Ambiente: ' + (isSandbox ? 'SANDBOX' : 'PRODUCAO'));
+  logger.info('[REDE-PAG] Payload: ' + JSON.stringify({
+    reference: payload.reference,
+    amount: payload.amount,
+    kind: payload.kind,
+    installments: payload.installments,
+    cardNumber: payload.cardNumber.substring(0, 6) + '******' + payload.cardNumber.substring(payload.cardNumber.length - 4),
+    expirationMonth: payload.expirationMonth,
+    expirationYear: payload.expirationYear,
+    cardholderName: payload.cardholderName,
+    softDescriptor: payload.softDescriptor,
+  }));
 
   try {
     // PASSO 1: Obter token OAuth
@@ -164,7 +195,9 @@ async function processarPagamento(orderId, cartaoData) {
     order.resultado = result;
     pendingOrders.set(orderId, order);
 
-    logger.info('[REDE-PAG] Resultado: ' + result.returnCode + ' - ' + result.returnMessage);
+    logger.info('[REDE-PAG] Resultado: ' + result.returnCode + ' - ' + result.returnMessage +
+      (result.tid ? ' | TID: ' + result.tid : '') +
+      (result.nsu ? ' | NSU: ' + result.nsu : ''));
 
     return {
       autorizado: autorizado,
@@ -180,9 +213,9 @@ async function processarPagamento(orderId, cartaoData) {
     var errData = error.response ? error.response.data : {};
     var errBody = typeof errData === 'string' ? errData : JSON.stringify(errData);
 
-    // Se token expirou ou invalido, limpa cache e tenta uma vez
+    // Se 401, limpa cache e tenta uma vez com token novo
     if (status === 401 && tokenCache.accessToken) {
-      logger.warn('[REDE-PAG] 401 recebido, limpando cache de token e tentando novamente...');
+      logger.warn('[REDE-PAG] 401 - limpando cache de token e tentando novamente...');
       tokenCache.accessToken = null;
       tokenCache.expiresAt = null;
       try {
@@ -213,15 +246,15 @@ async function processarPagamento(orderId, cartaoData) {
         var rs = retryErr.response ? retryErr.response.status : 502;
         var rd = retryErr.response ? retryErr.response.data : {};
         var rb = typeof rd === 'string' ? rd : JSON.stringify(rd);
-        logger.error('[REDE-PAG] Retry tambem falhou: ' + rs + ' - ' + rb);
-        throw { status: rs, message: (rd.message || rd.mensagem || rd.returnMessage) || 'Erro ao processar pagamento', detail: rd };
+        logger.error('[REDE-PAG] Retry falhou: ' + rs + ' - ' + rb);
+        throw { status: rs, message: (rd.returnMessage || rd.message || 'Erro ao processar pagamento'), detail: rd };
       }
     }
 
     logger.error('[REDE-PAG] Falha: ' + status + ' - ' + errBody);
     throw {
       status: status,
-      message: (errData.message || errData.mensagem || errData.returnMessage) || 'Erro ao processar pagamento',
+      message: (errData.returnMessage || errData.message || 'Erro ao processar pagamento'),
       detail: errData,
     };
   }
