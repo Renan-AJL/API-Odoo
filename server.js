@@ -115,6 +115,7 @@ app.get('/', (req, res) => {
       itau_pdf_txid: 'GET /api/v1/itau/boletos/pdf/:txid',
       itau_webhook_pix: 'POST /api/v1/itau/webhook/pix-confirmacao',
       te_send: 'POST /api/v1/te/send',
+      te_send_invoice: 'POST /api/v1/te/send-invoice',
       te_webhook: 'POST /api/v1/te/webhook/tudoentregue',
     },
     auth: 'Envie header X-API-Key para autenticacao.',
@@ -167,31 +168,9 @@ app.listen(PORT, () => {
   console.log('===========================================================');
   console.log('');
 
-  // --- Auto-sync TudoEntregue ---
-  if (config.isTeConfigured && config.odoo.enabled) {
-    var syncIntervalMs = parseInt(process.env.TE_SYNC_INTERVAL_MS, 10) || 180000; // 3 min
-    var firstRunDelay = 10000; // 10s apos start
-
-    var teAutoSync = require('./routes/delivery')._runAutoSync;
-
-    setTimeout(function() {
-      logger.info('[TE-AUTO-SYNC] Primeira execucao (delay=' + firstRunDelay + 'ms)');
-      teAutoSync().catch(function(err) {
-        logger.error('[TE-AUTO-SYNC] Erro na primeira execucao: ' + err.message);
-      });
-    }, firstRunDelay);
-
-    setInterval(function() {
-      logger.info('[TE-AUTO-SYNC] Execucao periodica (intervalo=' + syncIntervalMs + 'ms)');
-      teAutoSync().catch(function(err) {
-        logger.error('[TE-AUTO-SYNC] Erro na execucao periodica: ' + err.message);
-      });
-    }, syncIntervalMs);
-
-    console.log('  [TE-AUTO-SYNC] Ativo! Intervalo: ' + (syncIntervalMs / 1000) + 's | Primeira execucao em ' + (firstRunDelay / 1000) + 's');
-  } else {
-    console.log('  [TE-AUTO-SYNC] DESATIVADO (TE ou Odoo nao configurados)');
-  }
+  // --- Auto-sync TudoEntregue: DESATIVADO ---
+  // Agora o envio e manual via botao "TudoEntregue" na fatura (POST /api/v1/te/send-invoice)
+  console.log('  [TE-AUTO-SYNC] DESATIVADO - Envio manual via botao na fatura');
 });
 
 module.exports = app;

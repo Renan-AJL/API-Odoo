@@ -88,7 +88,8 @@ async function processarPagamento(orderId, cartaoData) {
 
   var apiUrl = config.redeBaseUrl + '/erede/v2/transactions';
   logger.info('Processando pagamento e.Rede W3.0: ' + orderId + ' R$' + order.valor + ' ' + payload.installments + 'x');
-  logger.info('Endpoint: ' + apiUrl + ' | PV: ' + pv.substring(0, 4) + '***');
+  logger.info('Endpoint: ' + apiUrl + ' | PV: ' + pv.substring(0, 4) + '***' + pv.substring(pv.length - 3) + ' | Chave: ' + (chave ? chave.substring(0, 4) + '***' + chave.substring(chave.length - 3) : 'VAZIA'));
+  logger.info('Ambiente Rede: ' + (process.env.REDE_AMBIENTE || 'producao (default)'));
 
   try {
     var response = await axios.post(apiUrl, payload, {

@@ -13,6 +13,100 @@ var logger = require('../utils/logger');
 
 router.use(apiKeyAuth);
 
+// POST /api/v1/te/send-invoice - Envia fatura ao TE (chamado pela Server Action do Odoo)
+// Aceita: { "invoice_id": 123 }  (um unico ID por chamada)
+router.post('/send-invoice', async function(req, res) {
+  var invId = req.body.invoice_id;
+  if (!invId) return res.status(400).json({ success: false, error: 'invoice_id obrigatorio' });
+
+  try {
+    logger.info('[TE-SEND-INVOICE] Recebido invoice_id=' + invId);
+
+    // 1. Encontra a venda relacionada a esta fatura
+    var saleOrder = await odooTe.findSaleOrderByInvoice(invId);
+    if (!saleOrder) {
+      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO</b><br/>Venda nao encontrada para esta fatura. Verifique se a fatura esta vinculada a um pedido de venda.');
+      return res.status(404).json({ success: false, error: 'Venda nao encontrada para esta fatura' });
+    }
+    logger.info('[TE-SEND-INVOICE] Venda: ' + saleOrder.name + ' (id=' + saleOrder.id + ')');
+
+    // 2. Encontra o picking de entrega
+    var picking = await odooTe.findDeliveryPicking(saleOrder.id);
+    if (!picking) {
+      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO</b><br/>Picking de entrega nao encontrado para a venda ' + saleOrder.name + '. Confirme o pedido de venda primeiro.');
+      return res.status(404).json({ success: false, error: 'Picking de entrega nao encontrado' });
+    }
+    logger.info('[TE-SEND-INVOICE] Picking: ' + picking.name + ' (id=' + picking.id + ')');
+
+    // 3. Le o partner
+    var partnerId = picking.partner_id ? picking.partner_id[0] : null;
+    if (!partnerId) {
+      return res.status(400).json({ success: false, error: 'Picking sem parceiro' });
+    }
+    var partner = await odooTe.getPartner(partnerId);
+
+    // 4. Le a venda completa (para campos x_studio)
+    var saleFull = await odooTe.readSaleOrder(saleOrder.id);
+
+    // 5. Mapeia para TE
+    var delivery = mapper.odooToTeDelivery(picking, partner, saleFull, config.empresa.cnpj);
+    if (!delivery) {
+      return res.status(500).json({ success: false, error: 'Falha no mapeamento dos dados' });
+    }
+
+    // 6. Chatter: enviando
+    var chatterMsg = '<b>TudoEntregue - Enviando...</b><br/>';
+    chatterMsg += 'Fatura ID: ' + invId + '<br/>';
+    chatterMsg += 'Pedido: ' + delivery.OrderNumber + '<br/>';
+    chatterMsg += 'Destinatario: ' + (delivery.DestinationAddress.Name || '') + '<br/>';
+    chatterMsg += 'CNPJ/CPF: ' + (delivery.DestinationAddress.DocumentNumber || '') + '<br/>';
+    chatterMsg += 'Cidade: ' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '<br/>';
+    chatterMsg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '');
+    await odooTe.postChatter('account.move', invId, chatterMsg);
+    await odooTe.postChatter('stock.picking', picking.id, chatterMsg);
+    await odooTe.postChatter('sale.order', saleOrder.id, chatterMsg);
+
+    // 7. Envia ao TE
+    logger.info('[TE-SEND-INVOICE] Payload TE: ' + JSON.stringify(delivery, null, 2));
+    var teResult = await teApi.createOrders([delivery]);
+    var teResp = Array.isArray(teResult) ? teResult[0] : teResult;
+
+    // 8. Grava retorno
+    if (teResp) {
+      var odooData = mapper.teCreateToOdoo(teResp);
+      await odooTe.markInvoiceSynced([invId], teResp.OrderID || null);
+      if (Object.keys(odooData).length) {
+        await odooTe.updatePickingTeData(picking.id, odooData);
+        await odooTe.updateSaleOrderTeData(saleOrder.id, odooData);
+      }
+      await odooTe.markPickingsSynced([picking.id], teResp.OrderID || null);
+      await odooTe.markSaleOrdersSynced([saleOrder.id], teResp.OrderID || null);
+
+      var resultMsg = mapper.chatterCreateMessage(teResp, delivery);
+      await odooTe.postChatter('account.move', invId, resultMsg);
+      await odooTe.postChatter('stock.picking', picking.id, resultMsg);
+      await odooTe.postChatter('sale.order', saleOrder.id, resultMsg);
+
+      res.json({
+        success: true,
+        invoice_id: invId,
+        sale: saleOrder.name,
+        picking: picking.name,
+        te_order_id: teResp.OrderID,
+        te_received: teResp.Received,
+        te_tracking: teResp.TrackingCode,
+      });
+    } else {
+      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO</b><br/>TE nao retornou dados.');
+      res.status(502).json({ success: false, error: 'TE nao retornou dados' });
+    }
+  } catch (err) {
+    logger.error('[TE-SEND-INVOICE] Erro: ' + err.message);
+    await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO no envio</b><br/>' + err.message).catch(function() {});
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/v1/te/send - Envia picking ao TE
 router.post('/send', async function(req, res) {
   try {
