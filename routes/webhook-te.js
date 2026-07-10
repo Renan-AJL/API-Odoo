@@ -46,8 +46,25 @@ router.post('/tudoentregue', async function(req, res) {
       var picking = await odooTe.findPickingByTeId(String(orderId));
       var saleOrder = await odooTe.findSaleOrderByTeId(String(orderId));
 
+      // Fallback: busca pelo numero do pedido (para pedidos criados diretamente no TE)
+      if (!picking && !saleOrder && d.OrderNumber) {
+        logger.info('[TE-WEBHOOK] Buscando por OrderNumber (fallback): ' + d.OrderNumber);
+        picking = await odooTe.findPickingByOrderNumber(String(d.OrderNumber));
+        saleOrder = await odooTe.findSaleOrderByOrderNumber(String(d.OrderNumber));
+
+        // Se encontrou por OrderNumber, salva o te_order_id para futuros webhooks
+        if (picking) {
+          logger.info('[TE-WEBHOOK] Picking encontrado por OrderNumber: ' + picking.name + ' (id=' + picking.id + ') - salvando te_order_id');
+          await odooTe.updatePickingTeData(picking.id, { x_studio_te_order_id: String(orderId) });
+        }
+        if (saleOrder) {
+          logger.info('[TE-WEBHOOK] Sale Order encontrado por OrderNumber: ' + saleOrder.name + ' (id=' + saleOrder.id + ') - salvando te_order_id');
+          await odooTe.updateSaleOrderTeData(saleOrder.id, { x_studio_te_order_id: String(orderId) });
+        }
+      }
+
       if (!picking && !saleOrder) {
-        logger.warn('[TE-WEBHOOK] Nenhum registro encontrado para OrderID=' + orderId + ' (campos x_studio_te_order_id podem nao existir ainda)');
+        logger.warn('[TE-WEBHOOK] Nenhum registro encontrado para OrderID=' + orderId + ' | Pedido=' + (d.OrderNumber || ''));
         continue;
       }
 
