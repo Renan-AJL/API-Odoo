@@ -48,13 +48,20 @@ router.post('/send-invoice', async function(req, res) {
     // 4. Le a venda completa (para campos x_studio + amount_total)
     var saleFull = await odooTe.readSaleOrder(saleOrder.id);
 
-    // 5. Le a fatura completa (para numero NF + valor)
+    // 5. Le a fatura completa (para numero NF + valor + motorista)
     var invoice = { id: invId, name: String(invId), amount_total: 0 };
+    var driverPartner = null;
     try {
       var invRead = await odooTe.executeKw('account.move', 'read', [[invId]], {
-        fields: ['id', 'name', 'amount_total'],
+        fields: ['id', 'name', 'amount_total', 'x_studio_motorista'],
       });
       if (invRead && invRead[0]) invoice = invRead[0];
+      // Se tem motorista definido, le os dados do contato
+      if (invoice.x_studio_motorista) {
+        var driverId = invoice.x_studio_motorista[0];
+        driverPartner = await odooTe.getPartner(driverId);
+        logger.info('[TE-SEND-INVOICE] Motorista: ' + (driverPartner ? driverPartner.name : 'ID=' + driverId));
+      }
     } catch (err) {
       logger.warn('[TE-SEND-INVOICE] Erro lendo fatura (usando fallback): ' + err.message);
     }
@@ -82,6 +89,7 @@ router.post('/send-invoice', async function(req, res) {
       companyCnpj: config.empresa.cnpj,
       moves: moves,
       productsMap: productsMap,
+      driverPartner: driverPartner,
     });
     if (!delivery) {
       return res.status(500).json({ success: false, error: 'Falha no mapeamento dos dados' });

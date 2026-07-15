@@ -255,7 +255,7 @@ function buildDocuments(invoice, moves, productsMap) {
 /**
  * Mapeia picking Odoo + partner + saleOrder + invoice + company para OrderViewModel do TE
  *
- * @param {Object} ctx - { picking, partner, saleOrder, invoice, company, companyCnpj, moves, productsMap }
+ * @param {Object} ctx - { picking, partner, saleOrder, invoice, company, companyCnpj, moves, productsMap, driverPartner }
  */
 function odooToTeDelivery(ctx) {
   var picking = ctx.picking;
@@ -266,6 +266,7 @@ function odooToTeDelivery(ctx) {
   var companyCnpj = ctx.companyCnpj;
   var moves = ctx.moves;
   var productsMap = ctx.productsMap;
+  var driverPartner = ctx.driverPartner;
 
   if (!picking || !partner) return null;
 
@@ -333,16 +334,30 @@ function odooToTeDelivery(ctx) {
     observation += (observation ? ' | ' : '') + 'Valor: R$ ' + Number(amountTotal).toFixed(2).replace('.', ',');
   }
 
+  // Driver: se x_studio_motorista definido na fatura, usa dados do contato
+  var driver;
+  if (driverPartner) {
+    var driverPhone = formatPhone(driverPartner.phone || '');
+    driver = {
+      Name: driverPartner.name || '',
+      PhoneCountry: driverPhone.phoneCountry,
+      PhoneNumber: driverPhone.phoneNumber || '99999999999',
+      DefineDriverAfter: 0,
+    };
+  } else {
+    driver = {
+      PhoneCountry: '55',
+      PhoneNumber: '99999999999',
+      DefineDriverAfter: 1,
+    };
+  }
+
   var delivery = {
     Customer: {
       DocumentType: 'CNPJ',
       DocumentNumber: (companyCnpj || '').replace(/\D/g, ''),
     },
-    Driver: {
-      PhoneCountry: '55',
-      PhoneNumber: '99999999999',
-      DefineDriverAfter: 1,
-    },
+    Driver: driver,
     OrderType: teApi.ORDER_TYPE.ENTREGA,
     OrderID: String(picking.id),
     OrderNumber: orderNumber,
