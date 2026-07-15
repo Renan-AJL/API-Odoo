@@ -48,11 +48,16 @@ router.post('/send-invoice', async function(req, res) {
     // 4. Le a venda completa (para campos x_studio + amount_total)
     var saleFull = await odooTe.readSaleOrder(saleOrder.id);
 
-    // 5. Le a fatura completa (para numero NF + dados fiscais)
-    var invoices = await odooTe.executeKw('account.move', 'read', [[invId]], {
-      fields: ['id', 'name', 'amount_total', 'nfe40_access_key', 'nfe40_number', 'nfe40_serie'],
-    });
-    var invoice = invoices ? invoices[0] : { id: invId, name: String(invId) };
+    // 5. Le a fatura completa (para numero NF + valor)
+    var invoice = { id: invId, name: String(invId), amount_total: 0 };
+    try {
+      var invRead = await odooTe.executeKw('account.move', 'read', [[invId]], {
+        fields: ['id', 'name', 'amount_total'],
+      });
+      if (invRead && invRead[0]) invoice = invRead[0];
+    } catch (err) {
+      logger.warn('[TE-SEND-INVOICE] Erro lendo fatura (usando fallback): ' + err.message);
+    }
 
     // 6. Le os moves do picking (itens/produtos)
     var moves = await odooTe.getStockMoves(picking.id);

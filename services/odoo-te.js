@@ -359,7 +359,6 @@ async function getPartner(partnerId) {
 var INVOICE_FIELDS = [
   'id', 'name', 'state', 'move_type', 'partner_id',
   'invoice_date', 'amount_total', 'payment_state',
-  'nfe40_access_key', 'nfe40_number', 'nfe40_serie',
 ];
 
 var INVOICE_CUSTOM_FIELDS = [
