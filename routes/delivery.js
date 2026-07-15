@@ -48,30 +48,23 @@ router.post('/send-invoice', async function(req, res) {
     // 4. Le a venda completa (para campos x_studio + amount_total)
     var saleFull = await odooTe.readSaleOrder(saleOrder.id);
 
-    // 5. Le a fatura completa (para numero NF + valor + motorista)
+    // 5. Le a fatura completa (para numero NF + valor)
     var invoice = { id: invId, name: String(invId), amount_total: 0 };
-    var driverPartner = null;
     try {
       var invRead = await odooTe.executeKw('account.move', 'read', [[invId]], {
-        fields: ['id', 'name', 'amount_total', 'x_studio_motorista'],
+        fields: ['id', 'name', 'amount_total'],
       });
       if (invRead && invRead[0]) invoice = invRead[0];
-      // Se tem motorista definido, le os dados do contato
-      if (invoice.x_studio_motorista) {
-        var driverId = invoice.x_studio_motorista[0];
-        driverPartner = await odooTe.getPartner(driverId);
-        logger.info('[TE-SEND-INVOICE] Motorista: ' + (driverPartner ? driverPartner.name : 'ID=' + driverId));
-      }
     } catch (err) {
       logger.warn('[TE-SEND-INVOICE] Erro lendo fatura (usando fallback): ' + err.message);
     }
 
-    // 6. Le os moves do picking (itens/produtos)
-    var moves = await odooTe.getStockMoves(picking.id);
+    // 6. Le as linhas do pedido (sale.order.line) para peso/volume/itens
+    var orderLines = await odooTe.getSaleOrderLines(saleOrder.id);
     var productIds = [];
-    if (moves.length) {
-      moves.forEach(function(m) {
-        if (m.product_id && m.product_id[0]) productIds.push(m.product_id[0]);
+    if (orderLines.length) {
+      orderLines.forEach(function(line) {
+        if (line.product_id && line.product_id[0]) productIds.push(line.product_id[0]);
       });
     }
     var productsMap = await odooTe.getProducts(productIds);
@@ -87,9 +80,8 @@ router.post('/send-invoice', async function(req, res) {
       invoice: invoice,
       company: company,
       companyCnpj: config.empresa.cnpj,
-      moves: moves,
+      orderLines: orderLines,
       productsMap: productsMap,
-      driverPartner: driverPartner,
     });
     if (!delivery) {
       return res.status(500).json({ success: false, error: 'Falha no mapeamento dos dados' });
@@ -170,12 +162,12 @@ router.post('/send', async function(req, res) {
     var saleOrder = null;
     if (saleId) saleOrder = await odooTe.readSaleOrder(saleId);
 
-    // Le moves, produtos e empresa para mapeamento completo
-    var moves = await odooTe.getStockMoves(pickingId);
+    // Le linhas do pedido, produtos e empresa para mapeamento completo
+    var orderLines = await odooTe.getSaleOrderLines(saleId);
     var productIds = [];
-    if (moves.length) {
-      moves.forEach(function(m) {
-        if (m.product_id && m.product_id[0]) productIds.push(m.product_id[0]);
+    if (orderLines.length) {
+      orderLines.forEach(function(line) {
+        if (line.product_id && line.product_id[0]) productIds.push(line.product_id[0]);
       });
     }
     var productsMap = await odooTe.getProducts(productIds);
@@ -184,7 +176,7 @@ router.post('/send', async function(req, res) {
     var delivery = mapper.odooToTeDelivery({
       picking: picking, partner: partner, saleOrder: saleOrder,
       invoice: null, company: company, companyCnpj: config.empresa.cnpj,
-      moves: moves, productsMap: productsMap,
+      orderLines: orderLines, productsMap: productsMap,
     });
     if (!delivery) return res.status(500).json({ success: false, error: 'Falha no mapeamento' });
 
@@ -334,20 +326,20 @@ async function runAutoSync() {
 
         // 4. Le dados completos para mapeamento
         var saleFull = await odooTe.readSaleOrder(saleOrder.id);
-        var moves = await odooTe.getStockMoves(picking.id);
-        var moveProductIds = [];
-        if (moves.length) {
-          moves.forEach(function(m) {
-            if (m.product_id && m.product_id[0]) moveProductIds.push(m.product_id[0]);
+        var orderLines = await odooTe.getSaleOrderLines(saleOrder.id);
+        var lineProductIds = [];
+        if (orderLines.length) {
+          orderLines.forEach(function(line) {
+            if (line.product_id && line.product_id[0]) lineProductIds.push(line.product_id[0]);
           });
         }
-        var productsMap = await odooTe.getProducts(moveProductIds);
+        var productsMap = await odooTe.getProducts(lineProductIds);
         var company = await odooTe.getCompany();
 
         var delivery = mapper.odooToTeDelivery({
           picking: picking, partner: partner, saleOrder: saleFull,
           invoice: invoice, company: company, companyCnpj: config.empresa.cnpj,
-          moves: moves, productsMap: productsMap,
+          orderLines: orderLines, productsMap: productsMap,
         });
         if (!delivery) {
           results.details.push({ invoice: invoice.name, error: 'Falha no mapeamento' });

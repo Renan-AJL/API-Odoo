@@ -179,66 +179,51 @@ function buildDestinationAddress(partner) {
 }
 
 /**
- * Monta o array Documents com NF + Volumes (itens do picking)
+ * Monta o array Documents com NF + Volumes (itens da linha do pedido)
  *
  * @param {Object} invoice - Dados da fatura (account.move)
- * @param {Array} moves - stock.move do picking
+ * @param {Array} orderLines - sale.order.line do pedido
  * @param {Object} productsMap - Mapa product.id -> product data
  */
-function buildDocuments(invoice, moves, productsMap) {
+function buildDocuments(invoice, orderLines, productsMap) {
   if (!invoice) return [];
 
-  // Numero da NF: prioriza nfe40_number, senao usa name da fatura
-  var nfNumber = invoice.nfe40_number || invoice.name || String(invoice.id);
-  var nfSerie = invoice.nfe40_serie || '1';
+  // Numero da NF: usa name da fatura
+  var nfNumber = invoice.name || String(invoice.id);
 
   // DocumentID unico da NF
   var docId = 'NF-' + nfNumber;
 
   var volumes = [];
 
-  // Se tem move lines, monta volumes com os itens
-  if (moves && moves.length) {
-    var totalWeight = 0;
-    var totalVolume = 0;
-    var totalQty = 0;
-
-    moves.forEach(function(move) {
-      var qty = move.quantity_done || move.product_uom_qty || 0;
+  // Se tem linhas do pedido, monta volumes com os itens
+  if (orderLines && orderLines.length) {
+    orderLines.forEach(function(line) {
+      var qty = line.product_uom_qty || 0;
       if (qty <= 0) return;
 
-      var productId = move.product_id ? move.product_id[0] : null;
-      var productName = move.description_picking || (move.product_id ? move.product_id[1] : move.name) || '';
-      var product = productId ? (productsMap[productId] || {}) : {};
-
-      // Peso: do produto ou ignora
-      var weight = parseFloat(product.weight) || 0;
-      var itemWeight = weight * qty;
-      totalWeight += itemWeight;
-
-      // Volume cubico: do produto ou ignora
-      var volume = parseFloat(product.volume) || 0;
-      totalVolume += volume * qty;
-
-      totalQty += qty;
+      var productId = line.product_id ? line.product_id[0] : null;
+      var productName = line.name || (line.product_id ? line.product_id[1] : '') || '';
 
       volumes.push({
-        VolumeID: 'VOL-' + move.id,
+        VolumeID: 'VOL-' + line.id,
         Count: Math.round(qty),
         Unity: 'UN',
         Description: productName,
       });
     });
 
-    return [{
-      DocumentID: docId,
-      DocumentNumber: nfNumber,
-      DocumentDescription: 'NF-e',
-      Volumes: volumes,
-    }];
+    if (volumes.length) {
+      return [{
+        DocumentID: docId,
+        DocumentNumber: nfNumber,
+        DocumentDescription: 'NF-e',
+        Volumes: volumes,
+      }];
+    }
   }
 
-  // Sem move lines: cria um volume generico
+  // Sem linhas: cria um volume generico
   return [{
     DocumentID: docId,
     DocumentNumber: nfNumber,
@@ -255,7 +240,7 @@ function buildDocuments(invoice, moves, productsMap) {
 /**
  * Mapeia picking Odoo + partner + saleOrder + invoice + company para OrderViewModel do TE
  *
- * @param {Object} ctx - { picking, partner, saleOrder, invoice, company, companyCnpj, moves, productsMap, driverPartner }
+ * @param {Object} ctx - { picking, partner, saleOrder, invoice, company, companyCnpj, orderLines, productsMap }
  */
 function odooToTeDelivery(ctx) {
   var picking = ctx.picking;
@@ -264,9 +249,8 @@ function odooToTeDelivery(ctx) {
   var invoice = ctx.invoice;
   var company = ctx.company;
   var companyCnpj = ctx.companyCnpj;
-  var moves = ctx.moves;
+  var orderLines = ctx.orderLines || [];
   var productsMap = ctx.productsMap;
-  var driverPartner = ctx.driverPartner;
 
   if (!picking || !partner) return null;
 
@@ -288,18 +272,18 @@ function odooToTeDelivery(ctx) {
   // DestinationAddress (destinatario = cliente)
   var destAddress = buildDestinationAddress(partner);
 
-  // Documents (NF + itens/volumes)
-  var documents = buildDocuments(invoice, moves, productsMap);
+  // Documents (NF + volumes das linhas do pedido)
+  var documents = buildDocuments(invoice, orderLines, productsMap);
 
-  // Calcula peso e volume total a partir dos moves
+  // Calcula peso e volume total a partir das linhas do pedido (sale.order.line)
   var totalWeight = 0;
   var totalVolume = 0;
   var totalQty = 0;
-  if (moves && moves.length) {
-    moves.forEach(function(move) {
-      var qty = move.quantity_done || move.product_uom_qty || 0;
+  if (orderLines && orderLines.length) {
+    orderLines.forEach(function(line) {
+      var qty = line.product_uom_qty || 0;
       if (qty <= 0) return;
-      var productId = move.product_id ? move.product_id[0] : null;
+      var productId = line.product_id ? line.product_id[0] : null;
       var product = productId ? (productsMap[productId] || {}) : {};
       totalWeight += (parseFloat(product.weight) || 0) * qty;
       totalVolume += (parseFloat(product.volume) || 0) * qty;
@@ -307,12 +291,12 @@ function odooToTeDelivery(ctx) {
     });
   }
 
-  // Fallback para peso/volume de campos x_studio se nao calculou dos moves
+  // Fallback para peso/volume de campos x_studio se nao calculou das linhas
   if (totalWeight <= 0) {
     totalWeight = parseFloat(picking.x_studio_te_peso_total) || (saleOrder && parseFloat(saleOrder.x_studio_te_peso_total)) || 0;
   }
   if (totalQty <= 0) {
-    totalQty = parseInt(picking.x_studio_te_qtd_volumes) || (saleOrder && parseInt(saleOrder.x_studio_te_qtd_volumes)) || 0;
+    totalQty = parseInt(picking.x_studio_te_qtd_volumes) || (saleOrder && parseInt(saleOrder.x_studio_te_qtd_volumes)) || 1;
   }
 
   // Valor total do pedido
@@ -334,23 +318,12 @@ function odooToTeDelivery(ctx) {
     observation += (observation ? ' | ' : '') + 'Valor: R$ ' + Number(amountTotal).toFixed(2).replace('.', ',');
   }
 
-  // Driver: se x_studio_motorista definido na fatura, usa dados do contato
-  var driver;
-  if (driverPartner) {
-    var driverPhone = formatPhone(driverPartner.phone || '');
-    driver = {
-      Name: driverPartner.name || '',
-      PhoneCountry: driverPhone.phoneCountry,
-      PhoneNumber: driverPhone.phoneNumber || '99999999999',
-      DefineDriverAfter: 0,
-    };
-  } else {
-    driver = {
-      PhoneCountry: '55',
-      PhoneNumber: '99999999999',
-      DefineDriverAfter: 1,
-    };
-  }
+  // Driver: TE define o motorista automaticamente
+  var driver = {
+    PhoneCountry: '55',
+    PhoneNumber: '99999999999',
+    DefineDriverAfter: 1,
+  };
 
   var delivery = {
     Customer: {

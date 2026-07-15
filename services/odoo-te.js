@@ -32,6 +32,11 @@ var PRODUCT_FIELDS = [
   'id', 'name', 'weight', 'volume', 'default_code', 'qty_available',
 ];
 
+var ORDER_LINE_FIELDS = [
+  'id', 'name', 'product_id', 'product_uom_qty', 'price_unit',
+  'price_subtotal', 'price_total',
+];
+
 var SALE_ORDER_FIELDS = [
   'id', 'name', 'partner_id', 'state', 'amount_total',
 ];
@@ -461,6 +466,24 @@ async function getStockMoves(pickingId) {
 }
 
 /**
+ * Le as linhas do pedido de venda (sale.order.line)
+ * Cada linha tem product_id, product_uom_qty, name, preco, etc.
+ */
+async function getSaleOrderLines(saleOrderId) {
+  try {
+    var ids = await executeKw('sale.order.line', 'search', [[
+      ['order_id', '=', saleOrderId],
+    ]]);
+    if (!ids || !ids.length) return [];
+    var lines = await executeKw('sale.order.line', 'read', [ids], { fields: ORDER_LINE_FIELDS });
+    return lines || [];
+  } catch (err) {
+    logger.warn('[ODOO-TE] Erro lendo sale.order.line: ' + err.message);
+    return [];
+  }
+}
+
+/**
  * Le dados do produto (peso, volume)
  */
 async function getProducts(productIds) {
@@ -528,6 +551,7 @@ module.exports = {
   executeKw: executeKw,
   getPartner: getPartner,
   getStockMoves: getStockMoves,
+  getSaleOrderLines: getSaleOrderLines,
   getProducts: getProducts,
   getCompany: getCompany,
   postChatter: postChatter,
