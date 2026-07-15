@@ -45,16 +45,44 @@ router.post('/send-invoice', async function(req, res) {
     }
     var partner = await odooTe.getPartner(partnerId);
 
-    // 4. Le a venda completa (para campos x_studio)
+    // 4. Le a venda completa (para campos x_studio + amount_total)
     var saleFull = await odooTe.readSaleOrder(saleOrder.id);
 
-    // 5. Mapeia para TE
-    var delivery = mapper.odooToTeDelivery(picking, partner, saleFull, config.empresa.cnpj);
+    // 5. Le a fatura completa (para numero NF + dados fiscais)
+    var invoices = await odooTe.executeKw('account.move', 'read', [[invId]], {
+      fields: ['id', 'name', 'amount_total', 'nfe40_access_key', 'nfe40_number', 'nfe40_serie'],
+    });
+    var invoice = invoices ? invoices[0] : { id: invId, name: String(invId) };
+
+    // 6. Le os moves do picking (itens/produtos)
+    var moves = await odooTe.getStockMoves(picking.id);
+    var productIds = [];
+    if (moves.length) {
+      moves.forEach(function(m) {
+        if (m.product_id && m.product_id[0]) productIds.push(m.product_id[0]);
+      });
+    }
+    var productsMap = await odooTe.getProducts(productIds);
+
+    // 7. Le dados da empresa (remetente)
+    var company = await odooTe.getCompany();
+
+    // 8. Mapeia para TE
+    var delivery = mapper.odooToTeDelivery({
+      picking: picking,
+      partner: partner,
+      saleOrder: saleFull,
+      invoice: invoice,
+      company: company,
+      companyCnpj: config.empresa.cnpj,
+      moves: moves,
+      productsMap: productsMap,
+    });
     if (!delivery) {
       return res.status(500).json({ success: false, error: 'Falha no mapeamento dos dados' });
     }
 
-    // 6. Chatter: enviando
+    // 9. Chatter: enviando
     var chatterMsg = '<b>TudoEntregue - Enviando...</b><br/>';
     chatterMsg += 'Fatura ID: ' + invId + '<br/>';
     chatterMsg += 'Pedido: ' + delivery.OrderNumber + '<br/>';
@@ -62,6 +90,11 @@ router.post('/send-invoice', async function(req, res) {
     chatterMsg += 'CNPJ/CPF: ' + (delivery.DestinationAddress.DocumentNumber || '') + '<br/>';
     chatterMsg += 'Cidade: ' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '<br/>';
     chatterMsg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '');
+    if (delivery.Weight) chatterMsg += '<br/>Peso: ' + delivery.Weight + ' kg';
+    if (delivery.Volume) chatterMsg += ' | Volumes: ' + delivery.Volume;
+    if (delivery.Documents && delivery.Documents.length) {
+      chatterMsg += '<br/>NF: ' + (delivery.Documents[0].DocumentNumber || '');
+    }
     await odooTe.postChatter('account.move', invId, chatterMsg);
     await odooTe.postChatter('stock.picking', picking.id, chatterMsg);
     await odooTe.postChatter('sale.order', saleOrder.id, chatterMsg);
@@ -124,7 +157,22 @@ router.post('/send', async function(req, res) {
     var saleOrder = null;
     if (saleId) saleOrder = await odooTe.readSaleOrder(saleId);
 
-    var delivery = mapper.odooToTeDelivery(picking, partner, saleOrder, config.empresa.cnpj);
+    // Le moves, produtos e empresa para mapeamento completo
+    var moves = await odooTe.getStockMoves(pickingId);
+    var productIds = [];
+    if (moves.length) {
+      moves.forEach(function(m) {
+        if (m.product_id && m.product_id[0]) productIds.push(m.product_id[0]);
+      });
+    }
+    var productsMap = await odooTe.getProducts(productIds);
+    var company = await odooTe.getCompany();
+
+    var delivery = mapper.odooToTeDelivery({
+      picking: picking, partner: partner, saleOrder: saleOrder,
+      invoice: null, company: company, companyCnpj: config.empresa.cnpj,
+      moves: moves, productsMap: productsMap,
+    });
     if (!delivery) return res.status(500).json({ success: false, error: 'Falha no mapeamento' });
 
     // Log no chatter - inicio
@@ -133,6 +181,8 @@ router.post('/send', async function(req, res) {
     chatterMsg += 'Destinatario: ' + (delivery.DestinationAddress.Name || '') + '<br/>';
     chatterMsg += 'Cidade: ' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '<br/>';
     chatterMsg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '');
+    if (delivery.Weight) chatterMsg += '<br/>Peso: ' + delivery.Weight + ' kg';
+    if (delivery.Volume) chatterMsg += ' | Volumes: ' + delivery.Volume;
     await odooTe.postChatter('stock.picking', pickingId, chatterMsg);
     if (saleId) await odooTe.postChatter('sale.order', saleId, chatterMsg);
 
@@ -269,9 +319,23 @@ async function runAutoSync() {
         }
         var partner = await odooTe.getPartner(partnerId);
 
-        // 4. Mapeia para o formato TE
+        // 4. Le dados completos para mapeamento
         var saleFull = await odooTe.readSaleOrder(saleOrder.id);
-        var delivery = mapper.odooToTeDelivery(picking, partner, saleFull, config.empresa.cnpj);
+        var moves = await odooTe.getStockMoves(picking.id);
+        var moveProductIds = [];
+        if (moves.length) {
+          moves.forEach(function(m) {
+            if (m.product_id && m.product_id[0]) moveProductIds.push(m.product_id[0]);
+          });
+        }
+        var productsMap = await odooTe.getProducts(moveProductIds);
+        var company = await odooTe.getCompany();
+
+        var delivery = mapper.odooToTeDelivery({
+          picking: picking, partner: partner, saleOrder: saleFull,
+          invoice: invoice, company: company, companyCnpj: config.empresa.cnpj,
+          moves: moves, productsMap: productsMap,
+        });
         if (!delivery) {
           results.details.push({ invoice: invoice.name, error: 'Falha no mapeamento' });
           continue;
@@ -285,6 +349,11 @@ async function runAutoSync() {
         chatterMsg += 'CNPJ/CPF: ' + (delivery.DestinationAddress.DocumentNumber || '') + '<br/>';
         chatterMsg += 'Cidade: ' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '<br/>';
         chatterMsg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '');
+        if (delivery.Weight) chatterMsg += '<br/>Peso: ' + delivery.Weight + ' kg';
+        if (delivery.Volume) chatterMsg += ' | Volumes: ' + delivery.Volume;
+        if (delivery.Documents && delivery.Documents.length) {
+          chatterMsg += '<br/>NF: ' + (delivery.Documents[0].DocumentNumber || '');
+        }
         await odooTe.postChatter('account.move', invoice.id, chatterMsg);
         await odooTe.postChatter('stock.picking', picking.id, chatterMsg);
         await odooTe.postChatter('sale.order', saleOrder.id, chatterMsg);

@@ -23,8 +23,17 @@ var PARTNER_OPTIONAL_FIELDS = [
   'x_studio_te_latitude', 'x_studio_te_longitude',
 ];
 
+var MOVE_FIELDS = [
+  'id', 'name', 'product_id', 'product_uom_qty', 'quantity_done',
+  'description_picking', 'sale_line_id',
+];
+
+var PRODUCT_FIELDS = [
+  'id', 'name', 'weight', 'volume', 'default_code', 'qty_available',
+];
+
 var SALE_ORDER_FIELDS = [
-  'id', 'name', 'partner_id', 'state',
+  'id', 'name', 'partner_id', 'state', 'amount_total',
 ];
 
 var SALE_ORDER_CUSTOM_FIELDS = [
@@ -350,6 +359,7 @@ async function getPartner(partnerId) {
 var INVOICE_FIELDS = [
   'id', 'name', 'state', 'move_type', 'partner_id',
   'invoice_date', 'amount_total', 'payment_state',
+  'nfe40_access_key', 'nfe40_number', 'nfe40_serie',
 ];
 
 var INVOICE_CUSTOM_FIELDS = [
@@ -434,6 +444,59 @@ async function markInvoiceSynced(invoiceIds, teOrderId) {
   logger.info('[ODOO-TE] ' + invoiceIds.length + ' fatura(s) sync | te_order_id=' + teOrderId);
 }
 
+/**
+ * Le as stock.move de um picking (itens da entrega)
+ */
+async function getStockMoves(pickingId) {
+  try {
+    var ids = await executeKw('stock.move', 'search', [[
+      ['picking_id', '=', pickingId],
+    ]]);
+    if (!ids || !ids.length) return [];
+    var moves = await executeKw('stock.move', 'read', [ids], { fields: MOVE_FIELDS });
+    return moves || [];
+  } catch (err) {
+    logger.warn('[ODOO-TE] Erro lendo stock.move: ' + err.message);
+    return [];
+  }
+}
+
+/**
+ * Le dados do produto (peso, volume)
+ */
+async function getProducts(productIds) {
+  if (!productIds || !productIds.length) return {};
+  try {
+    var products = await executeKw('product.product', 'read', [productIds], { fields: PRODUCT_FIELDS });
+    var map = {};
+    if (products) {
+      products.forEach(function(p) { map[p.id] = p; });
+    }
+    return map;
+  } catch (err) {
+    logger.warn('[ODOO-TE] Erro lendo produtos: ' + err.message);
+    return {};
+  }
+}
+
+/**
+ * Le dados da empresa (res.company) para SourceAddress (remetente/matriz)
+ */
+async function getCompany() {
+  try {
+    var ids = await executeKw('res.company', 'search', [[], 1]);
+    if (!ids || !ids.length) return null;
+    var companies = await executeKw('res.company', 'read', [ids], {
+      fields: ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id',
+               'phone', 'email', 'partner_id', 'vat', 'l10n_br_cnpj_cpf', 'district', 'number'],
+    });
+    return companies ? companies[0] : null;
+  } catch (err) {
+    logger.warn('[ODOO-TE] Erro lendo res.company: ' + err.message);
+    return null;
+  }
+}
+
 async function postChatter(model, recordId, body) {
   try {
     // Cria mensagem diretamente - campos minimos para funcionar no Odoo SaaS
@@ -463,7 +526,11 @@ module.exports = {
   findSaleOrderByOrderNumber: findSaleOrderByOrderNumber,
   updatePickingTeData: updatePickingTeData,
   updateSaleOrderTeData: updateSaleOrderTeData,
+  executeKw: executeKw,
   getPartner: getPartner,
+  getStockMoves: getStockMoves,
+  getProducts: getProducts,
+  getCompany: getCompany,
   postChatter: postChatter,
   readPicking: readPicking,
   readSaleOrder: readSaleOrder,

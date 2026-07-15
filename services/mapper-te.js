@@ -1,5 +1,5 @@
 /**
- * services/mapper-te.js - Mapeamento Odoo <-> TudoEntregue v2
+ * services/mapper-te.js - Mapeamento Odoo <-> TudoEntregue v3
  * Conforme spec oficial Swagger v1.0.20
  *
  * POST /v1/orders exige (array de):
@@ -7,42 +7,143 @@
  *   Driver:   { PhoneCountry, PhoneNumber, DefineDriverAfter }
  *   OrderType: 1=Entrega, 2=Coleta
  *   OrderID:   string (id unico do pedido no Odoo)
- *   OrderNumber: string (numero do pedido)
- *   OrderDescription: "NF-e" / "CT-e" etc
+ *   OrderNumber: string (numero do pedido de venda)
+ *   OrderDescription: "NF-e"
+ *   SourceAddress: { Name, Address, Address2, ZipCode, City, State, Country, ... }  <- REMETENTE
  *   DestinationAddress: { Name, Address, Address2, ZipCode, City, State, Country,
- *                          Responsibility, PhoneCountry, PhoneNumber, Email,
- *                          DocumentType, DocumentNumber, Latitude, Longitude }
- *   Documents: [{ DocumentID, DocumentNumber, DocumentDescription, Volumes: [] }]
- *   Observation, Volume, Weight, DeliveryDate, DeliveryStartTime, DeliveryEndTime
+ *                          Responsibility, PhoneCountry, PhoneNumber, Email, ... }
+ *   Documents: [{ DocumentID, DocumentNumber, DocumentDescription,
+ *                 Volumes: [{ VolumeID, Count, Unity, Description }] }]
+ *   DepartureDate, DeliveryDate, DeliveryStartTime, DeliveryEndTime,
+ *   Observation, Volume, Weight, CubicMeters, Sequence
  */
 var logger = require('../utils/logger');
 var teApi = require('./tudoentregue');
 
+// Dados fixos da matriz AJL (fallback caso res.company nao retorne)
+var MATRIX_FALLBACK = {
+  name: 'AJL FERRO E ACO LTDA',
+  cnpj: '22603750000190',
+  street: 'Av. Juscelino Kubitschek de Oliveira',
+  number: '7525',
+  district: 'Campo Comprido',
+  city: 'Curitiba',
+  state: 'PR',
+  zip: '81020490',
+  country: 'Brasil',
+  phone: '',
+  email: '',
+};
+
 /**
- * Mapeia picking Odoo + partner para OrderViewModel do TE
- * Funciona COM ou SEM campos x_studio_* (usa campos nativos como fallback)
+ * Extrai sigla UF de um state_id do Odoo
+ * state_id vem como [id, "Parana (PR)"] ou [id, "PR"]
  */
-function odooToTeDelivery(picking, partner, saleOrder, companyCnpj) {
-  if (!picking || !partner) return null;
+function extractState(stateId) {
+  if (!stateId) return '';
+  var label = typeof stateId === 'object' ? (stateId[1] || '') : String(stateId);
+  if (label.length <= 2) return label.toUpperCase();
+  var match = label.match(/\(([A-Z]{2})\)/);
+  return match ? match[1] : label.substring(0, 2).toUpperCase();
+}
 
-  // CNPJ do destinatario
-  var docNumber = (partner.x_studio_te_cnpj_cpf || partner.cnpj_cpf || partner.vat || '').replace(/\D/g, '');
-  var docType = docNumber.length > 11 ? 'CNPJ' : 'CPF';
+/**
+ * Extrai estado do res.company (pode ter city+state ou state_id)
+ */
+function extractCompanyState(company) {
+  // Tenta via state_id
+  if (company.state_id) return extractState(company.state_id);
+  // Fallback: campo l10n_br_state (se existir)
+  if (company.l10n_br_state) return company.l10n_br_state;
+  return MATRIX_FALLBACK.state;
+}
 
-  // Telefone destino - usa phone do partner (campo mobile nao existe neste Odoo)
-  var phone = (partner.x_studio_te_telefone || partner.phone || '').replace(/\D/g, '');
+/**
+ * Formata telefone: separa country code e limpa
+ */
+function formatPhone(rawPhone) {
+  var phone = (rawPhone || '').replace(/\D/g, '');
   var phoneCountry = '55';
   var phoneNumber = phone;
   if (phone.length > 11 && phone.startsWith('55')) {
     phoneCountry = phone.substring(0, 2);
     phoneNumber = phone.substring(2);
   }
-  // Se telefone com DDD tem 10 digitos (fixo), adiciona o 9o digito para celular
+  // Fixo com 10 digitos -> adiciona 9o digito
   if (phoneNumber.length === 10) {
     phoneNumber = phoneNumber.substring(0, 2) + '9' + phoneNumber.substring(2);
   }
+  return { phoneCountry: phoneCountry, phoneNumber: phoneNumber };
+}
 
-  // Endereco destino - prioriza campos x_studio_te_*, senao campos nativos do partner
+/**
+ * Formata data ISO vinda do Odoo para o formato TE (YYYY-MM-DDTHH:MM:SS)
+ */
+function formatTeDate(dateStr) {
+  if (!dateStr) return null;
+  // Odoo manda "2026-07-14 03:00:00" ou "2026-07-14T03:00:00"
+  return dateStr.replace(' ', 'T');
+}
+
+/**
+ * Formata data para apenas YYYY-MM-DD
+ */
+function formatDateOnly(dateStr) {
+  if (!dateStr) return null;
+  return dateStr.substring(0, 10);
+}
+
+/**
+ * Extrai hora de uma data ISO
+ */
+function extractTime(dateStr) {
+  if (!dateStr) return null;
+  var match = dateStr.match(/(\d{2}:\d{2})/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Monta o SourceAddress (remetente) a partir dos dados da empresa
+ */
+function buildSourceAddress(company, companyCnpj) {
+  var cnpj = companyCnpj || MATRIX_FALLBACK.cnpj;
+  var state = company ? extractCompanyState(company) : MATRIX_FALLBACK.state;
+  var street = (company && company.street) ? company.street : MATRIX_FALLBACK.street;
+  var num = (company && company.number) ? String(company.number) : MATRIX_FALLBACK.number;
+  var district = (company && company.district) ? company.district : MATRIX_FALLBACK.district;
+  var city = (company && company.city) ? company.city : MATRIX_FALLBACK.city;
+  var zip = ((company && company.zip) ? company.zip : MATRIX_FALLBACK.zip).replace(/\D/g, '');
+  var name = (company && company.name) ? company.name : MATRIX_FALLBACK.name;
+
+  var address = street;
+  if (num) address += ', ' + num;
+
+  return {
+    Name: name,
+    Address: address,
+    AdditionalInformation: company && company.street2 ? company.street2 : '',
+    Address2: district,
+    ZipCode: zip,
+    City: city,
+    State: state,
+    Country: MATRIX_FALLBACK.country,
+    PhoneCountry: '55',
+    PhoneNumber: company && company.phone ? company.phone.replace(/\D/g, '') : MATRIX_FALLBACK.phone,
+    Email: company && company.email ? company.email : MATRIX_FALLBACK.email,
+    DocumentType: 'CNPJ',
+    DocumentNumber: cnpj.replace(/\D/g, ''),
+  };
+}
+
+/**
+ * Monta o DestinationAddress (destinatario) a partir do partner
+ */
+function buildDestinationAddress(partner) {
+  var docNumber = (partner.x_studio_te_cnpj_cpf || partner.cnpj_cpf || partner.vat || '').replace(/\D/g, '');
+  var docType = docNumber.length > 11 ? 'CNPJ' : 'CPF';
+
+  var phone = formatPhone(partner.x_studio_te_telefone || partner.phone || '');
+
   var rua = partner.x_studio_te_logradouro || partner.street || '';
   var numero = partner.x_studio_te_numero || (partner.number ? String(partner.number) : '');
   var complemento = partner.x_studio_te_complemento || partner.street2 || '';
@@ -50,17 +151,186 @@ function odooToTeDelivery(picking, partner, saleOrder, companyCnpj) {
   var cidade = partner.x_studio_te_municipio || partner.city || '';
   var cep = (partner.x_studio_te_cep || partner.zip || '').replace(/\D/g, '');
 
-  // TE quer "Rua X, 71" no campo Address
   var address = rua;
   if (numero) address += ', ' + numero;
 
-  var state = partner.x_studio_te_uf || '';
-  if (!state && partner.state_id) {
-    state = typeof partner.state_id === 'object' ? (partner.state_id[1] || '') : '';
-    if (state.length > 2) {
-      var match = state.match(/\(([A-Z]{2})\)/);
-      state = match ? match[1] : state.substring(0, 2);
-    }
+  var state = partner.x_studio_te_uf || extractState(partner.state_id);
+
+  return {
+    Name: partner.x_studio_te_razao_social || partner.name || '',
+    Address: address || '',
+    AdditionalInformation: complemento,
+    Address2: bairro,
+    ZipCode: cep,
+    City: cidade,
+    State: state,
+    Country: 'Brasil',
+    Responsibility: partner.name || '',
+    PhoneCountry: phone.phoneCountry,
+    PhoneNumber: phone.phoneNumber,
+    PhoneNumberSms: phone.phoneNumber,
+    PhoneCountrySms: phone.phoneCountry,
+    Email: partner.x_studio_te_email || partner.email || '',
+    DocumentType: docType,
+    DocumentNumber: docNumber,
+    Latitude: partner.x_studio_te_latitude || null,
+    Longitude: partner.x_studio_te_longitude || null,
+  };
+}
+
+/**
+ * Monta o array Documents com NF + Volumes (itens do picking)
+ *
+ * @param {Object} invoice - Dados da fatura (account.move)
+ * @param {Array} moves - stock.move do picking
+ * @param {Object} productsMap - Mapa product.id -> product data
+ */
+function buildDocuments(invoice, moves, productsMap) {
+  if (!invoice) return [];
+
+  // Numero da NF: prioriza nfe40_number, senao usa name da fatura
+  var nfNumber = invoice.nfe40_number || invoice.name || String(invoice.id);
+  var nfSerie = invoice.nfe40_serie || '1';
+
+  // DocumentID unico da NF
+  var docId = 'NF-' + nfNumber;
+
+  var volumes = [];
+
+  // Se tem move lines, monta volumes com os itens
+  if (moves && moves.length) {
+    var totalWeight = 0;
+    var totalVolume = 0;
+    var totalQty = 0;
+
+    moves.forEach(function(move) {
+      var qty = move.quantity_done || move.product_uom_qty || 0;
+      if (qty <= 0) return;
+
+      var productId = move.product_id ? move.product_id[0] : null;
+      var productName = move.description_picking || (move.product_id ? move.product_id[1] : move.name) || '';
+      var product = productId ? (productsMap[productId] || {}) : {};
+
+      // Peso: do produto ou ignora
+      var weight = parseFloat(product.weight) || 0;
+      var itemWeight = weight * qty;
+      totalWeight += itemWeight;
+
+      // Volume cubico: do produto ou ignora
+      var volume = parseFloat(product.volume) || 0;
+      totalVolume += volume * qty;
+
+      totalQty += qty;
+
+      volumes.push({
+        VolumeID: 'VOL-' + move.id,
+        Count: Math.round(qty),
+        Unity: 'UN',
+        Description: productName,
+      });
+    });
+
+    return [{
+      DocumentID: docId,
+      DocumentNumber: nfNumber,
+      DocumentDescription: 'NF-e',
+      Volumes: volumes,
+    }];
+  }
+
+  // Sem move lines: cria um volume generico
+  return [{
+    DocumentID: docId,
+    DocumentNumber: nfNumber,
+    DocumentDescription: 'NF-e',
+    Volumes: [{
+      VolumeID: docId + '-V1',
+      Count: 1,
+      Unity: 'UN',
+      Description: 'Entrega - ' + nfNumber,
+    }],
+  }];
+}
+
+/**
+ * Mapeia picking Odoo + partner + saleOrder + invoice + company para OrderViewModel do TE
+ *
+ * @param {Object} ctx - { picking, partner, saleOrder, invoice, company, companyCnpj, moves, productsMap }
+ */
+function odooToTeDelivery(ctx) {
+  var picking = ctx.picking;
+  var partner = ctx.partner;
+  var saleOrder = ctx.saleOrder;
+  var invoice = ctx.invoice;
+  var company = ctx.company;
+  var companyCnpj = ctx.companyCnpj;
+  var moves = ctx.moves;
+  var productsMap = ctx.productsMap;
+
+  if (!picking || !partner) return null;
+
+  // OrderNumber: prioriza nome do sale.order (ex: S00176), senao picking.origin, senao picking.name
+  var orderNumber = '';
+  if (saleOrder) {
+    orderNumber = saleOrder.name || '';
+  }
+  if (!orderNumber && picking.origin) {
+    orderNumber = picking.origin;
+  }
+  if (!orderNumber) {
+    orderNumber = picking.name || '';
+  }
+
+  // SourceAddress (remetente = empresa)
+  var sourceAddress = buildSourceAddress(company, companyCnpj);
+
+  // DestinationAddress (destinatario = cliente)
+  var destAddress = buildDestinationAddress(partner);
+
+  // Documents (NF + itens/volumes)
+  var documents = buildDocuments(invoice, moves, productsMap);
+
+  // Calcula peso e volume total a partir dos moves
+  var totalWeight = 0;
+  var totalVolume = 0;
+  var totalQty = 0;
+  if (moves && moves.length) {
+    moves.forEach(function(move) {
+      var qty = move.quantity_done || move.product_uom_qty || 0;
+      if (qty <= 0) return;
+      var productId = move.product_id ? move.product_id[0] : null;
+      var product = productId ? (productsMap[productId] || {}) : {};
+      totalWeight += (parseFloat(product.weight) || 0) * qty;
+      totalVolume += (parseFloat(product.volume) || 0) * qty;
+      totalQty += qty;
+    });
+  }
+
+  // Fallback para peso/volume de campos x_studio se nao calculou dos moves
+  if (totalWeight <= 0) {
+    totalWeight = parseFloat(picking.x_studio_te_peso_total) || (saleOrder && parseFloat(saleOrder.x_studio_te_peso_total)) || 0;
+  }
+  if (totalQty <= 0) {
+    totalQty = parseInt(picking.x_studio_te_qtd_volumes) || (saleOrder && parseInt(saleOrder.x_studio_te_qtd_volumes)) || 0;
+  }
+
+  // Valor total do pedido
+  var amountTotal = (saleOrder && saleOrder.amount_total) || (invoice && invoice.amount_total) || 0;
+
+  // Data de saida: scheduled_date do picking
+  var scheduledDate = picking.scheduled_date || '';
+
+  // Data de entrega: campo x_studio ou scheduled_date + 1 dia
+  var deliveryDate = picking.x_studio_te_data_entrega || (saleOrder && saleOrder.x_studio_te_data_entrega) || '';
+  if (!deliveryDate && scheduledDate) {
+    // Sem data customizada, usa a mesma scheduled_date como previsao
+    deliveryDate = scheduledDate;
+  }
+
+  // Monta observacao com valor se nao houver nota
+  var observation = picking.note || picking.x_studio_te_observacao || '';
+  if (amountTotal > 0) {
+    observation += (observation ? ' | ' : '') + 'Valor: R$ ' + Number(amountTotal).toFixed(2).replace('.', ',');
   }
 
   var delivery = {
@@ -75,40 +345,35 @@ function odooToTeDelivery(picking, partner, saleOrder, companyCnpj) {
     },
     OrderType: teApi.ORDER_TYPE.ENTREGA,
     OrderID: String(picking.id),
-    OrderNumber: picking.name || '',
+    OrderNumber: orderNumber,
     OrderDescription: 'NF-e',
-    DestinationAddress: {
-      Name: partner.x_studio_te_razao_social || partner.name || '',
-      Address: address || '',
-      AdditionalInformation: complemento,
-      Address2: bairro,
-      ZipCode: cep,
-      City: cidade,
-      State: state,
-      Country: 'Brasil',
-      Responsibility: '',
-      PhoneCountry: phoneCountry,
-      PhoneNumber: phoneNumber,
-      Email: partner.x_studio_te_email || partner.email || '',
-      DocumentType: docType,
-      DocumentNumber: docNumber,
-      Latitude: partner.x_studio_te_latitude || null,
-      Longitude: partner.x_studio_te_longitude || null,
-    },
-    Observation: picking.note || picking.x_studio_te_observacao || '',
+    OrderDescriptionDocuments: 'NF-e',
+    SourceAddress: sourceAddress,
+    DestinationAddress: destAddress,
+    Documents: documents,
+    Observation: observation,
   };
 
-  // Peso e volumes (de campos x_studio ou null)
-  var peso = picking.x_studio_te_peso_total || (saleOrder && saleOrder.x_studio_te_peso_total) || null;
-  var volumes = picking.x_studio_te_qtd_volumes || (saleOrder && saleOrder.x_studio_te_qtd_volumes) || null;
-  if (peso) delivery.Weight = parseFloat(peso) || 0;
-  if (volumes) delivery.Volume = parseInt(volumes) || 0;
-
-  // Data de entrega
-  var dataEntrega = picking.x_studio_te_data_entrega || (saleOrder && saleOrder.x_studio_te_data_entrega) || '';
-  if (dataEntrega) {
-    delivery.DeliveryDate = dataEntrega.replace(' ', 'T');
+  // Data de saida
+  if (scheduledDate) {
+    delivery.DepartureDate = formatTeDate(scheduledDate);
   }
+
+  // Previsao de entrega + janela de horario
+  if (deliveryDate) {
+    delivery.DeliveryDate = formatDateOnly(deliveryDate);
+    var startTime = extractTime(deliveryDate);
+    delivery.DeliveryStartTime = startTime || '08:00';
+    delivery.DeliveryEndTime = '18:00';
+  }
+
+  // Peso, volume, cubagem
+  if (totalWeight > 0) delivery.Weight = Math.round(totalWeight * 100) / 100;
+  if (totalQty > 0) delivery.Volume = totalQty;
+  if (totalVolume > 0) delivery.CubicMeters = Math.round(totalVolume * 100) / 100;
+
+  // Sequencia (0 por padrao, TE pode ajustar na separacao de carga)
+  delivery.Sequence = 0;
 
   return delivery;
 }
@@ -127,19 +392,12 @@ function teCreateToOdoo(teResponse) {
 
 /**
  * Mapeia webhook TE para campos do picking Odoo
- * Webhook: "WebHook Padra Ocorrencia" {
- *   OrderID, OrderNumber, OrderDescription,
- *   Status: [{ Status, StatusDescription, Date }],
- *   Occurrences: [{ OccurrenceCode, OccurrenceName, OccurrenceDate, Observation, Latitude, Longitude }],
- *   Documents: [...]
- * }
  */
 function teWebhookToOdoo(webhookData) {
   if (!webhookData) return {};
   var data = {};
   if (webhookData.OrderID) data.x_studio_te_order_id = String(webhookData.OrderID);
 
-  // Pegar ultima situacao do array Status
   if (webhookData.Status && webhookData.Status.length) {
     var lastStatus = webhookData.Status[webhookData.Status.length - 1];
     if (lastStatus.Status !== undefined && lastStatus.Status !== null) {
@@ -150,7 +408,6 @@ function teWebhookToOdoo(webhookData) {
     }
   }
 
-  // Pegar ultima ocorrencia
   if (webhookData.Occurrences && webhookData.Occurrences.length) {
     var lastOcc = webhookData.Occurrences[webhookData.Occurrences.length - 1];
     if (lastOcc.Observation) {
@@ -189,8 +446,16 @@ function chatterCreateMessage(teResponse, delivery) {
   if (delivery.DestinationAddress) {
     msg += 'Destinatario: ' + (delivery.DestinationAddress.Name || '') + '<br/>';
     msg += 'Cidade/UF: ' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '<br/>';
-    msg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '');
+    msg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '') + '<br/>';
   }
+  if (delivery.Documents && delivery.Documents.length) {
+    msg += 'NF: ' + (delivery.Documents[0].DocumentNumber || '') + '<br/>';
+    if (delivery.Documents[0].Volumes && delivery.Documents[0].Volumes.length) {
+      msg += 'Itens: ' + delivery.Documents[0].Volumes.length + '<br/>';
+    }
+  }
+  if (delivery.Weight) msg += 'Peso: ' + delivery.Weight + ' kg<br/>';
+  if (delivery.Volume) msg += 'Volumes: ' + delivery.Volume;
   return msg;
 }
 
