@@ -28,7 +28,13 @@ async function getRedeToken() {
     const params = new URLSearchParams();
     params.append('grant_type', 'client_credentials');
 
-    const response = await axios.post(`${config.redeBaseUrl}/redelabs/oauth2/token`, params, {
+    // URL correta por ambiente (conforme doc e.Rede)
+    var isSandbox = (process.env.REDE_AMBIENTE || '') === 'sandbox';
+    var tokenUrl = isSandbox
+      ? config.redeBaseUrl + '/oauth2/token'
+      : config.redeBaseUrl + '/redelabs/oauth2/token';
+
+    const response = await axios.post(tokenUrl, params, {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Authorization': 'Basic ' + Buffer.from(
