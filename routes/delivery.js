@@ -1,417 +1,788 @@
-/**
- * routes/delivery.js - Rotas TE protegidas por API Key
- * Baseado na spec oficial TudoEntregue Swagger v1.0.20
- */
-var express = require('express');
-var router = express.Router();
-var apiKeyAuth = require('../middleware/auth').apiKeyAuth;
-var teApi = require('../services/tudoentregue');
-var odooTe = require('../services/odoo-te');
-var mapper = require('../services/mapper-te');
-var config = require('../config');
-var logger = require('../utils/logger');
+// ============================================================
+// routes/delivery.js — Rotas de entrega TudoEntregue (ODOO -> TE)
+// Protegidas por API Key (mesma chave unificada)
+// ============================================================
+const express = require('express');
+const router = express.Router();
+const { client: teClient, ORDER_TYPES, SITUATION_LABELS } = require('../services/tudoentregue');
+const odooTe = require('../services/odoo-te');
+const Mapper = require('../services/mapper-te');
+const { apiKeyAuth } = require('../middleware/auth');
+const config = require('../config');
 
+// Todas as rotas de delivery exigem API Key
 router.use(apiKeyAuth);
 
-// POST /api/v1/te/send-invoice - Envia fatura ao TE (chamado pela Server Action do Odoo)
-// Aceita: { "invoice_id": 123 }  (um unico ID por chamada)
-router.post('/send-invoice', async function(req, res) {
-  var invId = req.body.invoice_id;
-  if (!invId) return res.status(400).json({ success: false, error: 'invoice_id obrigatorio' });
-
+// -------------------------------------------------------
+// POST /api/v1/te/deliveries/send — Envia pedidos do ODOO ao TE
+// Body: { orderIds?: number[], pickingIds?: number[], orderType?: 1|2|3|4|5 }
+// -------------------------------------------------------
+router.post('/deliveries/send', async (req, res, next) => {
   try {
-    logger.info('[TE-SEND-INVOICE] Recebido invoice_id=' + invId);
+    const { orderIds, pickingIds, orderType = 1 } = req.body;
 
-    // 1. Encontra a venda relacionada a esta fatura
-    var saleOrder = await odooTe.findSaleOrderByInvoice(invId);
-    if (!saleOrder) {
-      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO</b><br/>Venda nao encontrada para esta fatura. Verifique se a fatura esta vinculada a um pedido de venda.');
-      return res.status(404).json({ success: false, error: 'Venda nao encontrada para esta fatura' });
-    }
-    logger.info('[TE-SEND-INVOICE] Venda: ' + saleOrder.name + ' (id=' + saleOrder.id + ')');
-
-    // 2. Encontra o picking de entrega
-    var picking = await odooTe.findDeliveryPicking(saleOrder.id);
-    if (!picking) {
-      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO</b><br/>Picking de entrega nao encontrado para a venda ' + saleOrder.name + '. Confirme o pedido de venda primeiro.');
-      return res.status(404).json({ success: false, error: 'Picking de entrega nao encontrado' });
-    }
-    logger.info('[TE-SEND-INVOICE] Picking: ' + picking.name + ' (id=' + picking.id + ')');
-
-    // 3. Le o partner
-    var partnerId = picking.partner_id ? picking.partner_id[0] : null;
-    if (!partnerId) {
-      return res.status(400).json({ success: false, error: 'Picking sem parceiro' });
-    }
-    var partner = await odooTe.getPartner(partnerId);
-
-    // 4. Le a venda completa (para campos x_studio + amount_total)
-    var saleFull = await odooTe.readSaleOrder(saleOrder.id);
-
-    // 5. Le a fatura completa (para numero NF + valor)
-    var invoice = { id: invId, name: String(invId), amount_total: 0 };
-    try {
-      var invRead = await odooTe.executeKw('account.move', 'read', [[invId]], {
-        fields: ['id', 'name', 'amount_total'],
-      });
-      if (invRead && invRead[0]) invoice = invRead[0];
-    } catch (err) {
-      logger.warn('[TE-SEND-INVOICE] Erro lendo fatura (usando fallback): ' + err.message);
+    if (!orderIds?.length && !pickingIds?.length) {
+      return res.status(400).json({ success: false, error: 'Informe orderIds ou pickingIds' });
     }
 
-    // 6. Le as linhas do pedido (sale.order.line) para peso/volume/itens
-    var orderLines = await odooTe.getSaleOrderLines(saleOrder.id);
-    var productIds = [];
-    if (orderLines.length) {
-      orderLines.forEach(function(line) {
-        if (line.product_id && line.product_id[0]) productIds.push(line.product_id[0]);
-      });
+    // 1. Busca pedidos ODOO
+    const pickings = [];
+    const saleOrders = [];
+
+    if (pickingIds?.length) {
+      const found = await odooTe.read('stock.picking', pickingIds, [
+        'id', 'name', 'partner_id', 'scheduled_date', 'move_line_count', 'origin',
+      ]);
+      pickings.push(...found);
     }
-    var productsMap = await odooTe.getProducts(productIds);
 
-    // 7. Le dados da empresa (remetente)
-    var company = await odooTe.getCompany();
+    if (orderIds?.length) {
+      const soFields = odooTe.getStudioFields('sale.order');
+      const found = await odooTe.read('sale.order', orderIds, [
+        'id', 'name', 'state', 'partner_id', 'amount_total', 'note', ...soFields,
+      ]);
+      saleOrders.push(...found);
+    }
 
-    // 8. Mapeia para TE
-    var delivery = mapper.odooToTeDelivery({
-      picking: picking,
-      partner: partner,
-      saleOrder: saleFull,
-      invoice: invoice,
-      company: company,
-      companyCnpj: config.empresa.cnpj,
-      orderLines: orderLines,
-      productsMap: productsMap,
+    // 2. Busca parceiros
+    const partnerIds = [
+      ...pickings.map(p => p.partner_id?.[0]),
+      ...saleOrders.map(o => o.partner_id?.[0]),
+    ].filter(Boolean);
+
+    const partners = partnerIds.length > 0
+      ? await odooTe.read('res.partner', [...new Set(partnerIds)], [
+          'id', 'name', 'cnpj_cpf', 'vat', 'phone', 'mobile', 'email',
+          'street', 'street_number', 'street2', 'zip', 'city',
+          'l10n_br_district', 'partner_latitude', 'partner_longitude',
+          'state_id', 'country_id',
+          ...odooTe.getStudioFields('res.partner'),
+        ])
+      : [];
+
+    const partnerMap = {};
+    partners.forEach(p => { partnerMap[p.id] = p; });
+
+    // 3. Mapeia para entregas TE
+    const teDeliveries = [];
+
+    for (const so of saleOrders) {
+      const partner = partnerMap[so.partner_id?.[0]] || {};
+      const picking = pickings.find(p => p.origin === so.name) || null;
+      const teDelivery = Mapper.odooToTeDelivery(so, partner, picking);
+      teDelivery.OrderType = orderType;
+      teDeliveries.push(teDelivery);
+    }
+
+    for (const picking of pickings) {
+      if (saleOrders.some(so => so.name === picking.origin)) continue; // ja mapeado
+      const partner = partnerMap[picking.partner_id?.[0]] || {};
+      const fakeSo = { name: picking.origin || `WH-${picking.id}`, note: '', id: 0 };
+      const teDelivery = Mapper.odooToTeDelivery(fakeSo, partner, picking);
+      teDelivery.OrderType = orderType;
+      teDeliveries.push(teDelivery);
+    }
+
+    if (teDeliveries.length === 0) {
+      return res.json({ success: true, sent: 0, message: 'Nenhuma entrega para enviar' });
+    }
+
+    // 4. Envia ao TE em lotes de 50
+    const results = [];
+    const BATCH = 50;
+
+    for (let i = 0; i < teDeliveries.length; i += BATCH) {
+      const batch = teDeliveries.slice(i, i + BATCH);
+      const result = await teClient.createDeliveries(batch);
+      results.push(result);
+
+      // 5. Marca como sincronizado no ODOO
+      const batchOrderNums = batch.map(d => d.OrderNumber);
+
+      const syncedSo = saleOrders.filter(so =>
+        batchOrderNums.includes(so.name) || batchOrderNums.includes(`WH-${so.id}`)
+      );
+      const syncedPickings = pickings.filter(p =>
+        batchOrderNums.includes(p.origin) || batchOrderNums.includes(`WH-${p.id}`)
+      );
+
+      if (syncedSo.length > 0) {
+        await odooTe.markSaleOrdersSynced(syncedSo.map(s => s.id), batchOrderNums[0], orderType);
+      }
+      if (syncedPickings.length > 0) {
+        await odooTe.markPickingsSynced(syncedPickings.map(p => p.id), batchOrderNums[0]);
+      }
+    }
+
+    console.log(`[TE-DELIVERY] Enviadas ${teDeliveries.length} entregas ao TE`);
+    res.json({
+      success: true,
+      sent: teDeliveries.length,
+      batches: results.length,
+      results,
     });
+  } catch (err) {
+    console.error('[TE-DELIVERY] Erro:', err.message);
+    const status = err.isAxiosError ? (err.response?.status || 502) : 500;
+    res.status(status).json({ success: false, error: err.message });
+  }
+});
+
+// -------------------------------------------------------
+// POST /api/v1/te/deliveries/sync-unsynced — Busca pendentes e envia
+// -------------------------------------------------------
+router.post('/deliveries/sync-unsynced', async (req, res, next) => {
+  try {
+    const { limit = 50, orderType = 1 } = req.body;
+
+    const saleOrders = await odooTe.getUnsyncedSaleOrders(limit);
+    const pickings = await odooTe.getUnsyncedPickings(limit);
+
+    if (saleOrders.length === 0 && pickings.length === 0) {
+      return res.json({ success: true, sent: 0, message: 'Nenhum pedido pendente' });
+    }
+
+    // Delega para /send via redirect interno
+    req.body = {
+      orderIds: saleOrders.map(o => o.id),
+      pickingIds: pickings.map(p => p.id),
+      orderType,
+    };
+    return router.handle(req, res, next);
+  } catch (err) {
+    console.error('[TE-DELIVERY] Erro sync-unsynced:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// -------------------------------------------------------
+// GET /api/v1/te/deliveries/status/:orderNumber — Consulta situacao no TE
+// -------------------------------------------------------
+router.get('/deliveries/status/:orderNumber', async (req, res) => {
+  try {
+    const { orderNumber } = req.params;
+
+    const result = await teClient.getDeliveries({ orderNumber, page: 1 });
+    const delivery = result?.Result?.[0] || null;
+
     if (!delivery) {
-      return res.status(500).json({ success: false, error: 'Falha no mapeamento dos dados' });
+      return res.status(404).json({ success: false, error: `Entrega ${orderNumber} nao encontrada no TE` });
     }
 
-    // 9. Chatter: enviando
-    var chatterMsg = '<b>TudoEntregue - Enviando...</b><br/>';
-    chatterMsg += 'Fatura ID: ' + invId + '<br/>';
-    chatterMsg += 'Pedido: ' + delivery.OrderNumber + '<br/>';
-    chatterMsg += 'Destinatario: ' + (delivery.DestinationAddress.Name || '') + '<br/>';
-    chatterMsg += 'CNPJ/CPF: ' + (delivery.DestinationAddress.DocumentNumber || '') + '<br/>';
-    chatterMsg += 'Cidade: ' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '<br/>';
-    chatterMsg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '');
-    if (delivery.Weight) chatterMsg += '<br/>Peso: ' + delivery.Weight + ' kg';
-    if (delivery.Volume) chatterMsg += ' | Volumes: ' + delivery.Volume;
-    if (delivery.Documents && delivery.Documents.length) {
-      chatterMsg += '<br/>NF: ' + (delivery.Documents[0].DocumentNumber || '');
+    const mapped = Mapper.teToOdooPicking(delivery);
+
+    // Atualiza no ODOO
+    const picking = await odooTe.findPickingByTeId(orderNumber);
+    if (picking) await odooTe.updatePickingTeData(picking.id, mapped);
+
+    const saleOrder = await odooTe.findSaleOrderByTeId(orderNumber);
+    if (saleOrder) {
+      await odooTe.updateSaleOrderTeData(saleOrder.id, Mapper.teToOdooSaleOrder(delivery));
     }
-    await odooTe.postChatter('account.move', invId, chatterMsg);
-    await odooTe.postChatter('stock.picking', picking.id, chatterMsg);
-    await odooTe.postChatter('sale.order', saleOrder.id, chatterMsg);
 
-    // 7. Envia ao TE
-    logger.info('[TE-SEND-INVOICE] Payload TE: ' + JSON.stringify(delivery, null, 2));
-    var teResult = await teApi.createOrders([delivery]);
-    var teResp = Array.isArray(teResult) ? teResult[0] : teResult;
-
-    // 8. Grava retorno
-    if (teResp) {
-      var odooData = mapper.teCreateToOdoo(teResp);
-      await odooTe.markInvoiceSynced([invId], teResp.OrderID || null);
-      if (Object.keys(odooData).length) {
-        await odooTe.updatePickingTeData(picking.id, odooData);
-        await odooTe.updateSaleOrderTeData(saleOrder.id, odooData);
-      }
-      await odooTe.markPickingsSynced([picking.id], teResp.OrderID || null);
-      await odooTe.markSaleOrdersSynced([saleOrder.id], teResp.OrderID || null);
-
-      var resultMsg = mapper.chatterCreateMessage(teResp, delivery);
-      await odooTe.postChatter('account.move', invId, resultMsg);
-      await odooTe.postChatter('stock.picking', picking.id, resultMsg);
-      await odooTe.postChatter('sale.order', saleOrder.id, resultMsg);
-
-      res.json({
-        success: true,
-        invoice_id: invId,
-        sale: saleOrder.name,
-        picking: picking.name,
-        te_order_id: teResp.OrderID,
-        te_received: teResp.Received,
-        te_tracking: teResp.TrackingCode,
-      });
-    } else {
-      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO</b><br/>TE nao retornou dados.');
-      res.status(502).json({ success: false, error: 'TE nao retornou dados' });
-    }
-  } catch (err) {
-    logger.error('[TE-SEND-INVOICE] Erro: ' + err.message);
-    await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO no envio</b><br/>' + err.message).catch(function() {});
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /api/v1/te/send - Envia picking ao TE
-router.post('/send', async function(req, res) {
-  try {
-    var pickingId = req.body.picking_id;
-    if (!pickingId) return res.status(400).json({ success: false, error: 'picking_id obrigatorio' });
-
-    var picking = await odooTe.readPicking(pickingId);
-    if (!picking) return res.status(404).json({ success: false, error: 'Picking nao encontrado' });
-
-    var partnerId = picking.partner_id ? picking.partner_id[0] : null;
-    if (!partnerId) return res.status(400).json({ success: false, error: 'Picking sem parceiro' });
-
-    var partner = await odooTe.getPartner(partnerId);
-    var saleId = picking.sale_id ? picking.sale_id[0] : null;
-    var saleOrder = null;
-    if (saleId) saleOrder = await odooTe.readSaleOrder(saleId);
-
-    // Le linhas do pedido, produtos e empresa para mapeamento completo
-    var orderLines = await odooTe.getSaleOrderLines(saleId);
-    var productIds = [];
-    if (orderLines.length) {
-      orderLines.forEach(function(line) {
-        if (line.product_id && line.product_id[0]) productIds.push(line.product_id[0]);
-      });
-    }
-    var productsMap = await odooTe.getProducts(productIds);
-    var company = await odooTe.getCompany();
-
-    var delivery = mapper.odooToTeDelivery({
-      picking: picking, partner: partner, saleOrder: saleOrder,
-      invoice: null, company: company, companyCnpj: config.empresa.cnpj,
-      orderLines: orderLines, productsMap: productsMap,
+    res.json({
+      success: true,
+      orderNumber,
+      situation: mapped.situation,
+      situationLabel: mapped.situationLabel,
+      trackingCode: mapped.trackingCode,
+      driverName: mapped.driverName,
+      odooUpdated: !!(picking || saleOrder),
+      raw: delivery,
     });
-    if (!delivery) return res.status(500).json({ success: false, error: 'Falha no mapeamento' });
+  } catch (err) {
+    console.error('[TE-DELIVERY] Erro status:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
-    // Log no chatter - inicio
-    var chatterMsg = '<b>TudoEntregue - Enviando...</b><br/>';
-    chatterMsg += 'Pedido: ' + delivery.OrderNumber + '<br/>';
-    chatterMsg += 'Destinatario: ' + (delivery.DestinationAddress.Name || '') + '<br/>';
-    chatterMsg += 'Cidade: ' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '<br/>';
-    chatterMsg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '');
-    if (delivery.Weight) chatterMsg += '<br/>Peso: ' + delivery.Weight + ' kg';
-    if (delivery.Volume) chatterMsg += ' | Volumes: ' + delivery.Volume;
-    await odooTe.postChatter('stock.picking', pickingId, chatterMsg);
-    if (saleId) await odooTe.postChatter('sale.order', saleId, chatterMsg);
+// -------------------------------------------------------
+// GET /api/v1/te/deliveries/occurrences/:orderNumber
+// -------------------------------------------------------
+router.get('/deliveries/occurrences/:orderNumber', async (req, res) => {
+  try {
+    const { orderNumber } = req.params;
 
-    var result = await teApi.createOrders([delivery]);
-    var teResp = Array.isArray(result) ? result[0] : result;
+    const result = await teClient.getDeliveriesWithOccurrence({ orderNumber, page: 1 });
+    const delivery = result?.Result?.[0] || null;
 
-    // Grava dados de retorno
-    if (teResp && teResp.Received !== undefined) {
-      var odooData = mapper.teCreateToOdoo(teResp);
-      if (Object.keys(odooData).length) {
-        await odooTe.updatePickingTeData(pickingId, odooData);
-      }
-      // Marca como sync
-      await odooTe.markPickingsSynced([pickingId], teResp.OrderID || null);
-      if (saleId) await odooTe.markSaleOrdersSynced([saleId], teResp.OrderID || null);
-
-      // Chatter resultado
-      var resultMsg = mapper.chatterCreateMessage(teResp, delivery);
-      await odooTe.postChatter('stock.picking', pickingId, resultMsg);
-      if (saleId) await odooTe.postChatter('sale.order', saleId, resultMsg);
+    if (!delivery) {
+      return res.status(404).json({ success: false, error: `Ocorrencia de ${orderNumber} nao encontrada` });
     }
 
-    res.json({ success: true, data: teResp });
+    const mapped = Mapper.teToOdooPicking(delivery);
+
+    res.json({
+      success: true,
+      orderNumber,
+      occurrenceDescription: delivery.OccurrenceDescription || delivery.occurrenceDescription,
+      occurrenceDate: delivery.OccurrenceDate || delivery.occurrenceDate,
+      situation: mapped.situation,
+      situationLabel: mapped.situationLabel,
+      raw: delivery,
+    });
   } catch (err) {
-    logger.error('[TE-ROUTE] /send erro: ' + err.message);
+    console.error('[TE-DELIVERY] Erro occurrences:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// POST /api/v1/te/sync-unsynced - Forca sync dos pendentes
-router.post('/sync-unsynced', async function(req, res) {
+// -------------------------------------------------------
+// PUT /api/v1/te/deliveries/edit — Edita entregas no TE
+// -------------------------------------------------------
+router.put('/deliveries/edit', async (req, res) => {
   try {
-    var results = await runAutoSync();
-    res.json({ success: true, synced: results.synced, errors: results.errors, details: results.details });
-  } catch (err) {
-    logger.error('[TE-ROUTE] /sync-unsynced erro: ' + err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/v1/te/status - Consulta situacao
-router.get('/status', async function(req, res) {
-  try {
-    var params = {};
-    if (req.query.order_id) params.orderID = req.query.order_id;
-    if (req.query.order_type) params.orderType = req.query.order_type;
-    if (req.query.phone) params.phoneNumber = req.query.phone;
-    if (req.query.phone_country) params.phoneCountry = req.query.phone_country;
-    var data = await teApi.getSituation(params);
-    res.json({ success: true, data: data });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/v1/te/occurrences - Consulta entregas com ocorrencia
-router.get('/occurrences', async function(req, res) {
-  try {
-    var params = {};
-    if (req.query.order_id) params.orderID = req.query.order_id;
-    if (req.query.order_type) params.orderType = req.query.order_type;
-    if (req.query.partial !== undefined) params.partial = req.query.partial;
-    if (req.query.phone) params.phoneNumber = req.query.phone;
-    var data = await teApi.getFinished(params);
-    res.json({ success: true, data: data });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/v1/te/tracking - Acompanhamento
-router.get('/tracking', async function(req, res) {
-  try {
-    if (!req.query.code) return res.status(400).json({ error: 'trackingCode obrigatorio' });
-    var data = await teApi.getTracking(req.query.code);
-    res.json({ success: true, data: data });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// PUT /api/v1/te/cancel - Cancelar entregas
-router.put('/cancel', async function(req, res) {
-  try {
-    var data = await teApi.cancelOrders(req.body);
-    res.json({ success: true, data: data });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// --- Auto-sync (poll faturas postadas + envia ao TE) ---
-// Fluxo: Fatura postada (NF emitida) -> Venda (sale.order) -> Picking de entrega -> TE
-async function runAutoSync() {
-  var results = { synced: 0, errors: 0, details: [] };
-  try {
-    var invoices = await odooTe.getUnsyncedInvoices();
-    if (!invoices.length) {
-      logger.info('[TE-AUTO-SYNC] Nenhuma fatura pendente');
-      return results;
+    const { deliveries } = req.body;
+    if (!deliveries?.length) {
+      return res.status(400).json({ success: false, error: 'Informe o array "deliveries"' });
     }
-    logger.info('[TE-AUTO-SYNC] ' + invoices.length + ' fatura(s) pendente(s)');
 
-    for (var i = 0; i < invoices.length; i++) {
-      var invoice = invoices[i];
-      try {
-        logger.info('[TE-AUTO-SYNC] Fatura ' + invoice.name + ' (id=' + invoice.id + ')');
+    const result = await teClient.editDeliveries(deliveries);
+    res.json({ success: true, result });
+  } catch (err) {
+    console.error('[TE-DELIVERY] Erro edit:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
-        // 1. Encontra a venda relacionada
-        var saleOrder = await odooTe.findSaleOrderByInvoice(invoice.id);
-        if (!saleOrder) {
-          logger.warn('[TE-AUTO-SYNC] Venda nao encontrada para fatura ' + invoice.name);
-          // Marca como sync para nao tentar de novo (fatura sem venda vinculada)
-          await odooTe.markInvoiceSynced([invoice.id], null);
-          results.details.push({ invoice: invoice.name, error: 'Venda nao encontrada' });
-          continue;
+// -------------------------------------------------------
+// DELETE /api/v1/te/deliveries/cancel — Cancela entregas no TE
+// -------------------------------------------------------
+router.delete('/deliveries/cancel', async (req, res) => {
+  try {
+    const { orders } = req.body;
+    if (!orders?.length) {
+      return res.status(400).json({ success: false, error: 'Informe o array "orders" com OrderNumber e OrderType' });
+    }
+
+    const result = await teClient.cancelDeliveries(orders);
+    res.json({ success: true, result });
+  } catch (err) {
+    console.error('[TE-DELIVERY] Erro cancel:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// -------------------------------------------------------
+// GET /api/v1/te/deliveries/situations — Lista situacoes
+// -------------------------------------------------------
+router.get('/deliveries/situations', async (req, res) => {
+  try {
+    const situations = await teClient.getSituations();
+    res.json({ success: true, situations });
+  } catch (err) {
+    console.error('[TE-DELIVERY] Erro situations:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// -------------------------------------------------------
+// GET /api/v1/te/deliveries/pull — Puxa status e atualiza ODOO
+// -------------------------------------------------------
+router.get('/deliveries/pull', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, situation } = req.query;
+
+    const params = { page: 1 };
+    if (dateFrom) params.dateFrom = dateFrom;
+    if (dateTo) params.dateTo = dateTo;
+    if (situation) params.situation = parseInt(situation, 10);
+
+    const allDeliveries = await teClient.fetchAllPages('/api/Entregas', params);
+
+    let updated = 0;
+    let notFound = 0;
+
+    for (const d of allDeliveries) {
+      const orderNum = d.OrderNumber || d.orderNumber;
+      const picking = await odooTe.findPickingByTeId(orderNum);
+
+      if (picking) {
+        const mapped = Mapper.teToOdooPicking(d);
+        await odooTe.updatePickingTeData(picking.id, mapped);
+        updated++;
+      } else {
+        const so = await odooTe.findSaleOrderByTeId(orderNum);
+        if (so) {
+          await odooTe.updateSaleOrderTeData(so.id, Mapper.teToOdooSaleOrder(d));
+          updated++;
+        } else {
+          notFound++;
         }
-        logger.info('[TE-AUTO-SYNC] Venda encontrada: ' + saleOrder.name);
-
-        // 2. Encontra o picking de entrega
-        var picking = await odooTe.findDeliveryPicking(saleOrder.id);
-        if (!picking) {
-          logger.warn('[TE-AUTO-SYNC] Picking de entrega nao encontrado para venda ' + saleOrder.name);
-          results.details.push({ invoice: invoice.name, sale: saleOrder.name, error: 'Picking nao encontrado' });
-          continue;
-        }
-        logger.info('[TE-AUTO-SYNC] Picking encontrado: ' + picking.name);
-
-        // 3. Le o partner completo
-        var partnerId = picking.partner_id ? picking.partner_id[0] : null;
-        if (!partnerId) {
-          results.details.push({ invoice: invoice.name, error: 'Picking sem parceiro' });
-          continue;
-        }
-        var partner = await odooTe.getPartner(partnerId);
-
-        // 4. Le dados completos para mapeamento
-        var saleFull = await odooTe.readSaleOrder(saleOrder.id);
-        var orderLines = await odooTe.getSaleOrderLines(saleOrder.id);
-        var lineProductIds = [];
-        if (orderLines.length) {
-          orderLines.forEach(function(line) {
-            if (line.product_id && line.product_id[0]) lineProductIds.push(line.product_id[0]);
-          });
-        }
-        var productsMap = await odooTe.getProducts(lineProductIds);
-        var company = await odooTe.getCompany();
-
-        var delivery = mapper.odooToTeDelivery({
-          picking: picking, partner: partner, saleOrder: saleFull,
-          invoice: invoice, company: company, companyCnpj: config.empresa.cnpj,
-          orderLines: orderLines, productsMap: productsMap,
-        });
-        if (!delivery) {
-          results.details.push({ invoice: invoice.name, error: 'Falha no mapeamento' });
-          continue;
-        }
-
-        // 5. Chatter: enviando (na fatura, na venda e no picking)
-        var chatterMsg = '<b>TudoEntregue - Enviando...</b><br/>';
-        chatterMsg += 'Fatura: ' + invoice.name + '<br/>';
-        chatterMsg += 'Pedido: ' + delivery.OrderNumber + '<br/>';
-        chatterMsg += 'Destinatario: ' + (delivery.DestinationAddress.Name || '') + '<br/>';
-        chatterMsg += 'CNPJ/CPF: ' + (delivery.DestinationAddress.DocumentNumber || '') + '<br/>';
-        chatterMsg += 'Cidade: ' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '<br/>';
-        chatterMsg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '');
-        if (delivery.Weight) chatterMsg += '<br/>Peso: ' + delivery.Weight + ' kg';
-        if (delivery.Volume) chatterMsg += ' | Volumes: ' + delivery.Volume;
-        if (delivery.Documents && delivery.Documents.length) {
-          chatterMsg += '<br/>NF: ' + (delivery.Documents[0].DocumentNumber || '');
-        }
-        await odooTe.postChatter('account.move', invoice.id, chatterMsg);
-        await odooTe.postChatter('stock.picking', picking.id, chatterMsg);
-        await odooTe.postChatter('sale.order', saleOrder.id, chatterMsg);
-
-        // 6. Envia ao TE
-        logger.info('[TE-AUTO-SYNC] Payload para TE: ' + JSON.stringify(delivery, null, 2));
-        var teResult = await teApi.createOrders([delivery]);
-        var teResp = Array.isArray(teResult) ? teResult[0] : teResult;
-
-        // 7. Grava retorno em todos os modelos
-        if (teResp) {
-          var odooData = mapper.teCreateToOdoo(teResp);
-
-          // Marca fatura como sync
-          await odooTe.markInvoiceSynced([invoice.id], teResp.OrderID || null);
-
-          // Grava dados TE no picking e venda (se campos existem)
-          if (Object.keys(odooData).length) {
-            await odooTe.updatePickingTeData(picking.id, odooData);
-            await odooTe.updateSaleOrderTeData(saleOrder.id, odooData);
-          }
-          await odooTe.markPickingsSynced([picking.id], teResp.OrderID || null);
-          await odooTe.markSaleOrdersSynced([saleOrder.id], teResp.OrderID || null);
-
-          // Chatter: resultado
-          var resultMsg = mapper.chatterCreateMessage(teResp, delivery);
-          await odooTe.postChatter('account.move', invoice.id, resultMsg);
-          await odooTe.postChatter('stock.picking', picking.id, resultMsg);
-          await odooTe.postChatter('sale.order', saleOrder.id, resultMsg);
-        }
-
-        results.synced++;
-        results.details.push({
-          invoice: invoice.name,
-          sale: saleOrder.name,
-          picking: picking.name,
-          te_id: teResp ? teResp.OrderID : null,
-          status: 'ok',
-        });
-      } catch (err) {
-        results.errors++;
-        var errMsg = '<b>TudoEntregue - ERRO no envio</b><br/>Fatura: ' + invoice.name + '<br/>' + err.message;
-        await odooTe.postChatter('account.move', invoice.id, errMsg).catch(function() {});
-        results.details.push({ invoice: invoice.name, error: err.message });
-        logger.error('[TE-AUTO-SYNC] Erro fatura ' + invoice.name + ': ' + err.message);
       }
     }
+
+    res.json({
+      success: true,
+      totalFetched: allDeliveries.length,
+      updatedInOdoo: updated,
+      notFoundInOdoo: notFound,
+    });
   } catch (err) {
-    logger.error('[TE-AUTO-SYNC] Erro geral: ' + err.message);
-    results.errors++;
+    console.error('[TE-DELIVERY] Erro pull:', err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
-  return results;
+});
+
+// ============================================================
+// MOTORISTA: Mapa nome -> telefone (configurar os telefones)
+// ============================================================
+// Mapeamento dos motoristas do Odoo (selection key) para telefone TE
+// Formato: telefone com DDD (ex: '41999999999')
+// IMPORTANTE: Preencha os telefones reais dos motoristas
+const MOTORISTA_PHONE_MAP = {
+  'ADRIANO':       '',
+  'EDUARDO':       '',
+  'EMERSON':       '',
+  'FELIX':         '',
+  'GIAN':          '',
+  'HAIME':         '',
+  'HUGTHON':       '',
+  'Leonardo | Active': '',
+  'LUCAS':         '',
+  'Lucas Mateus':  '',
+  'LUIS':          '',
+  'MARCOS':        '',
+  'MARCOS2':       '',
+  'PAULO':         '',
+  'ROBERTO':       '',
+  'STRADA PINHAIS':'',
+  'WELINGTON':     '',
+  'WELINGTON2':    '',
+};
+
+// ============================================================
+// STATUS LABELS para /orders/situation (codigo diferente do /api/Entregas)
+// ============================================================
+const SITUATION_ORDER_LABELS = {
+  0:  'Nao Enviada',
+  1:  'Envio Solicitado',
+  2:  'Enviada ao Motorista - Aguardando Confirmacao',
+  3:  'Enviada ao Motorista - Confirmada',
+  4:  'Enviada ao Motorista - Recusada',
+  5:  'Finalizada pelo Motorista',
+  6:  'Finalizada pelo Cliente',
+  7:  'Operacao Finalizada',
+  8:  'Operacao Cancelada',
+  9:  'Cancelamento Enviado ao Motorista',
+  11: 'Transferida',
+};
+
+const SITUATION_ORDER_COLORS = {
+  0:  '#9e9e9e',  // cinza - Aguardando
+  1:  '#2196f3',  // azul - Em Rota
+  3:  '#4caf50',  // verde - Entregue
+  5:  '#f44336',  // vermelho - Nao Entregue
+  6:  '#ff9800',  // laranja - Parcial
+  8:  '#b71c1c',  // vermelho escuro - Cancelada
+  9:  '#ff5722',  // laranja escuro - Atrasada
+  10: '#0097a7',  // teal - Em Separacao
+  11: '#9c27b0',  // roxo - Transferida
+  12: '#1b5e20',  // verde escuro - Baixada
+  // /orders/situation codes (usados no timeline)
+  2:  '#42a5f5',  // azul claro
+  4:  '#e53935',  // vermelho
+  7:  '#1b5e20',  // verde escuro - Operacao Finalizada
+};
+
+// ============================================================
+// HTML CARD BUILDERS
+// ============================================================
+
+function buildDeliveryStatusCard(delivery, trackingData, situationData) {
+  const sitCode = delivery.Situation ?? delivery.situation ?? null;
+  const sitLabel = SITUATION_LABELS[sitCode] || `Situacao ${sitCode}`;
+  const sitColor = SITUATION_ORDER_COLORS[sitCode] || '#607d8b';
+  const trackingCode = delivery.TrackingCode || delivery.trackingCode || '';
+  const driverName = delivery.DriverName || delivery.driverName || '';
+  const driverPhone = delivery.DriverPhone || delivery.driverPhone || '';
+  const orderNum = delivery.OrderNumber || delivery.orderNumber || '';
+  const custName = delivery.CustomerName || delivery.customerName || '';
+  const docNum = delivery.DocumentNumber || delivery.documentNumber || '';
+  const scheduled = delivery.ScheduledDate || delivery.scheduledDate || '';
+  const deliveredDate = delivery.DeliveredDate || delivery.deliveredDate || '';
+  const occDesc = delivery.OccurrenceDescription || delivery.occurrenceDescription || '';
+
+  // Build timeline from situationData.Status[]
+  let timelineHtml = '';
+  const statuses = situationData?.Status || [];
+  if (statuses.length > 0) {
+    timelineHtml = `
+      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e0e0e0;">
+        <div style="font-size: 11px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Historico de Status</div>
+        ${statuses.map((s, i) => {
+          const sLabel = SITUATION_ORDER_LABELS[s.Status] || `Status ${s.Status}`;
+          const sColor = SITUATION_ORDER_COLORS[s.Status] || '#607d8b';
+          const sDate = s.Date ? formatDate(s.Date) : '';
+          const isFirst = i === 0;
+          return `
+          <div style="display: flex; gap: 10px; align-items: flex-start; margin-bottom: ${isFirst ? '8px' : '6px'};">
+            <div style="min-width: 10px; min-height: 10px; width: 10px; height: 10px; border-radius: 50%; background: ${sColor}; margin-top: 4px; ${isFirst ? 'box-shadow: 0 0 0 3px ' + sColor + '33;' : 'opacity: 0.6;'}"></div>
+            <div style="flex: 1;">
+              <div style="font-size: 12px; color: #333; font-weight: ${isFirst ? '600' : '400'};">${sLabel}</div>
+              ${sDate ? `<div style="font-size: 10px; color: #999; margin-top: 2px;">${sDate}</div>` : ''}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+
+  // Tracking statuses from /tracking
+  let trackingHtml = '';
+  const trackStatuses = trackingData?.TrackingStatus || [];
+  if (trackStatuses.length > 0) {
+    trackingHtml = `
+      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e0e0e0;">
+        <div style="font-size: 11px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Ocorrencias</div>
+        ${trackStatuses.map(ts => {
+          const isOk = ts.Status === 'check';
+          const icon = isOk ? '&#10003;' : '&#9888;';
+          const color = isOk ? '#4caf50' : '#ff9800';
+          const tsDate = ts.Date ? formatDate(ts.Date) : '';
+          const images = (ts.AttachmentsImagesUrls || []).filter(Boolean);
+          return `
+          <div style="display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; padding: 8px; background: ${isOk ? '#f1f8e9' : '#fff3e0'}; border-radius: 6px;">
+            <div style="color: ${color}; font-size: 16px; font-weight: bold; min-width: 20px; text-align: center;">${icon}</div>
+            <div style="flex: 1;">
+              <div style="font-size: 12px; color: #333;">${ts.Description || ''}</div>
+              ${tsDate ? `<div style="font-size: 10px; color: #999; margin-top: 2px;">${tsDate}</div>` : ''}
+              ${images.length > 0 ? images.map(img => `<img src="${img}" style="max-width: 120px; max-height: 80px; border-radius: 4px; margin-top: 6px; margin-right: 4px; cursor: pointer;" />`).join('') : ''}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+
+  return `
+<div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; border: 1px solid #e0e0e0; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+  <!-- Header -->
+  <div style="background: linear-gradient(135deg, #1565c0, #1e88e5); color: white; padding: 14px 16px; display: flex; align-items: center; gap: 10px;">
+    <div style="font-size: 22px;">&#128666;</div>
+    <div style="flex: 1;">
+      <div style="font-size: 14px; font-weight: 700;">Status de Entrega</div>
+      <div style="font-size: 11px; opacity: 0.85;">TudoEntregue</div>
+    </div>
+    <div style="background: ${sitColor}; color: white; font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px; text-transform: uppercase;">${sitLabel}</div>
+  </div>
+  <!-- Body -->
+  <div style="padding: 14px 16px;">
+    ${orderNum ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Pedido</span><span style="font-size: 12px; font-weight: 600; color: #333;">${orderNum}</span></div>` : ''}
+    ${trackingCode ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Rastreio</span><span style="font-size: 12px; font-weight: 600; color: #1565c0;"><a href="https://app.tudoentregue.com.br/rastreamento/${trackingCode}" target="_blank" style="color: #1565c0; text-decoration: none;">${trackingCode}</a></span></div>` : ''}
+    ${custName ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Cliente</span><span style="font-size: 12px; color: #333;">${custName}</span></div>` : ''}
+    ${driverName ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Motorista</span><span style="font-size: 12px; color: #333;">${driverName}</span></div>` : ''}
+    ${driverPhone ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Tel Motorista</span><span style="font-size: 12px; color: #333;"><a href="tel:+55${driverPhone}" style="color: #333; text-decoration: none;">${driverPhone}</a></span></div>` : ''}
+    ${scheduled ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Agendamento</span><span style="font-size: 12px; color: #333;">${formatDate(scheduled)}</span></div>` : ''}
+    ${deliveredDate ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Entregue em</span><span style="font-size: 12px; color: #4caf50; font-weight: 600;">${formatDate(deliveredDate)}</span></div>` : ''}
+    ${occDesc ? `<div style="margin-top: 10px; padding: 8px 12px; background: #fff3e0; border-radius: 6px; border-left: 3px solid #ff9800;"><div style="font-size: 11px; color: #888; margin-bottom: 2px;">Ocorrencia</div><div style="font-size: 12px; color: #e65100;">${occDesc}</div></div>` : ''}
+    ${timelineHtml}
+    ${trackingHtml}
+  </div>
+  <!-- Footer -->
+  <div style="background: #f5f5f5; padding: 8px 16px; font-size: 10px; color: #aaa; text-align: right;">Atualizado: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</div>
+</div>`;
 }
 
-router._runAutoSync = runAutoSync;
+function buildMotoristaCard(driverName, driverFromTe) {
+  if (!driverFromTe) {
+    return buildMotoristaNotFoundCard(driverName);
+  }
+
+  const phone = driverFromTe.PhoneNumber || '';
+  const phoneCountry = driverFromTe.PhoneCountry || '55';
+  const fullPhone = phone ? `+${phoneCountry} ${phone}` : 'N/A';
+  const enable = driverFromTe.Enable;
+  const lastAccess = driverFromTe.LastAccess || '';
+  const appInstalled = driverFromTe.ApplicationInstallMobile;
+  const email = driverFromTe.Email || '';
+  const city = driverFromTe.City || '';
+  const state = driverFromTe.State || '';
+
+  const statusColor = enable ? '#4caf50' : '#f44336';
+  const statusText = enable ? 'ATIVO' : 'INATIVO';
+  const statusIcon = enable ? '&#10003;' : '&#10007;';
+  const appIcon = appInstalled ? '&#9989;' : '&#10060;';
+  const appText = appInstalled ? 'Instalado' : 'Nao Instalado';
+
+  return `
+<div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; border: 1px solid #e0e0e0; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+  <!-- Header -->
+  <div style="background: linear-gradient(135deg, #2e7d32, #43a047); color: white; padding: 14px 16px; display: flex; align-items: center; gap: 10px;">
+    <div style="font-size: 22px;">&#128100;</div>
+    <div style="flex: 1;">
+      <div style="font-size: 14px; font-weight: 700;">Motorista TE</div>
+      <div style="font-size: 11px; opacity: 0.85;">${driverName}</div>
+    </div>
+    <div style="background: ${statusColor}; color: white; font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px; text-transform: uppercase; display: flex; align-items: center; gap: 4px;">${statusIcon} ${statusText}</div>
+  </div>
+  <!-- Body -->
+  <div style="padding: 14px 16px;">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+      <span style="font-size: 11px; color: #888;">Telefone</span>
+      <span style="font-size: 12px; font-weight: 600; color: #2e7d32;"><a href="tel:+${phoneCountry}${phone}" style="color: #2e7d32; text-decoration: none;">${fullPhone}</a></span>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+      <span style="font-size: 11px; color: #888;">Aplicativo</span>
+      <span style="font-size: 12px; color: #333;">${appIcon} ${appText}</span>
+    </div>
+    ${lastAccess ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Ultimo Acesso</span><span style="font-size: 12px; color: #333;">${formatDate(lastAccess)}</span></div>` : ''}
+    ${email ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">E-mail</span><span style="font-size: 12px; color: #333;">${email}</span></div>` : ''}
+    ${(city || state) ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Cidade</span><span style="font-size: 12px; color: #333;">${city}${state ? '/' + state : ''}</span></div>` : ''}
+    ${!enable ? `<div style="margin-top: 10px; padding: 8px 12px; background: #ffebee; border-radius: 6px; border-left: 3px solid #f44336;"><div style="font-size: 12px; color: #c62828;">Motorista inativo no TudoEntregue</div></div>` : ''}
+    ${enable && !appInstalled ? `<div style="margin-top: 10px; padding: 8px 12px; background: #fff3e0; border-radius: 6px; border-left: 3px solid #ff9800;"><div style="font-size: 12px; color: #e65100;">Aplicativo nao instalado. SMS com link de download enviado.</div></div>` : ''}
+  </div>
+  <!-- Footer -->
+  <div style="background: #f5f5f5; padding: 8px 16px; font-size: 10px; color: #aaa; text-align: right;">Atualizado: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</div>
+</div>`;
+}
+
+function buildMotoristaNotFoundCard(driverName) {
+  return `
+<div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; border: 1px solid #e0e0e0; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+  <div style="background: linear-gradient(135deg, #e65100, #ff9800); color: white; padding: 14px 16px; display: flex; align-items: center; gap: 10px;">
+    <div style="font-size: 22px;">&#128100;</div>
+    <div style="flex: 1;">
+      <div style="font-size: 14px; font-weight: 700;">Motorista TE</div>
+      <div style="font-size: 11px; opacity: 0.85;">${driverName}</div>
+    </div>
+    <div style="background: #f44336; color: white; font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px;">NAO ENCONTRADO</div>
+  </div>
+  <div style="padding: 14px 16px;">
+    <div style="padding: 10px 12px; background: #fff3e0; border-radius: 6px; border-left: 3px solid #ff9800;">
+      <div style="font-size: 12px; color: #e65100;">Motorista nao encontrado no TudoEntregue. Configure o telefone no mapa MOTORISTA_PHONE_MAP para cadastro automatico.</div>
+    </div>
+  </div>
+  <div style="background: #f5f5f5; padding: 8px 16px; font-size: 10px; color: #aaa; text-align: right;">Atualizado: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</div>
+</div>`;
+}
+
+function buildErrorCard(title, message) {
+  return `
+<div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; border: 1px solid #e0e0e0; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+  <div style="background: linear-gradient(135deg, #c62828, #e53935); color: white; padding: 14px 16px; display: flex; align-items: center; gap: 10px;">
+    <div style="font-size: 22px;">&#9888;</div>
+    <div style="font-size: 14px; font-weight: 700;">${title}</div>
+  </div>
+  <div style="padding: 14px 16px;">
+    <div style="font-size: 12px; color: #c62828;">${message}</div>
+  </div>
+  <div style="background: #f5f5f5; padding: 8px 16px; font-size: 10px; color: #aaa; text-align: right;">${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</div>
+</div>`;
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleString('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
+// ============================================================
+// POST /api/v1/te/delivery-status — Busca status TE e grava card HTML
+// Body: { saleOrderId: number }
+// ============================================================
+router.post('/delivery-status', async (req, res) => {
+  try {
+    const { saleOrderId } = req.body;
+    if (!saleOrderId) {
+      return res.status(400).json({ success: false, error: 'Informe saleOrderId' });
+    }
+
+    // 1. Busca sale order no Odoo
+    const so = await odooTe.findSaleOrderById(saleOrderId);
+    if (!so) {
+      return res.status(404).json({ success: false, error: `Sale Order ${saleOrderId} nao encontrada` });
+    }
+
+    const f = odooTe.FIELDS['sale.order'];
+    const orderName = so.name;
+    const teOrderId = so[f.teOrderId];
+    const trackingCode = so[f.teTrackingCode];
+
+    if (!teOrderId && !trackingCode) {
+      // Nenhuma entrega enviada ao TE ainda
+      const noCard = buildErrorCard(
+        'Sem Entrega TE',
+        `Pedido ${orderName} ainda nao foi enviado ao TudoEntregue. Envie a entrega primeiro.`
+      );
+      await odooTe.updateSaleOrderStatusHtml(saleOrderId, noCard);
+      return res.json({ success: true, message: 'Pedido ainda nao enviado ao TE', card: noCard });
+    }
+
+    // 2. Busca dados no TE — /api/Entregas (dados completos da entrega)
+    let deliveryData = null;
+    if (teOrderId) {
+      const result = await teClient.getDeliveries({ orderNumber: teOrderId, page: 1 });
+      deliveryData = result?.Result?.[0] || null;
+    }
+
+    // 3. Busca situacao detalhada — /orders/situation
+    let situationData = null;
+    if (teOrderId) {
+      try {
+        situationData = await teClient.getOrderSituation({
+          orderType: 1,
+          orderID: teOrderId,
+        });
+      } catch (err) {
+        console.warn(`[TE-DELIVERY-STATUS] /orders/situation falhou: ${err.message}`);
+      }
+    }
+
+    // 4. Busca tracking detalhado (ocorrencias com fotos)
+    let trackingData = null;
+    if (trackingCode) {
+      try {
+        trackingData = await teClient.getTracking(trackingCode);
+      } catch (err) {
+        console.warn(`[TE-DELIVERY-STATUS] /tracking falhou: ${err.message}`);
+      }
+    }
+
+    // 5. Monta card HTML
+    const cardHtml = buildDeliveryStatusCard(deliveryData, trackingData, situationData);
+
+    // 6. Tambem atualiza campos padrao do TE
+    if (deliveryData) {
+      const mapped = Mapper.teToOdooPicking(deliveryData);
+      const soMapped = Mapper.teToOdooSaleOrder(deliveryData);
+      await odooTe.updateSaleOrderTeData(saleOrderId, soMapped);
+    }
+
+    // 7. Grava card no campo HTML
+    await odooTe.updateSaleOrderStatusHtml(saleOrderId, cardHtml);
+
+    console.log(`[TE-DELIVERY-STATUS] Card atualizado: SO ${orderName} (${saleOrderId})`);
+    res.json({
+      success: true,
+      orderName,
+      teOrderId,
+      trackingCode,
+      hasDeliveryData: !!deliveryData,
+      hasSituationData: !!situationData,
+      hasTrackingData: !!trackingData,
+      card: cardHtml,
+    });
+  } catch (err) {
+    console.error('[TE-DELIVERY-STATUS] Erro:', err.message);
+    // Grava card de erro no campo
+    try {
+      await odooTe.updateSaleOrderStatusHtml(req.body.saleOrderId, buildErrorCard('Erro ao Buscar Status', err.message));
+    } catch {}
+    const status = err.isAxiosError ? (err.response?.status || 502) : 500;
+    res.status(status).json({ success: false, error: err.message });
+  }
+});
+
+// ============================================================
+// POST /api/v1/te/sync-motorista — Sincroniza motorista com TE
+// Body: { saleOrderId: number }
+// ============================================================
+router.post('/sync-motorista', async (req, res) => {
+  try {
+    const { saleOrderId } = req.body;
+    if (!saleOrderId) {
+      return res.status(400).json({ success: false, error: 'Informe saleOrderId' });
+    }
+
+    // 1. Busca sale order e o motorista selecionado
+    const so = await odooTe.findSaleOrderById(saleOrderId);
+    if (!so) {
+      return res.status(404).json({ success: false, error: `Sale Order ${saleOrderId} nao encontrada` });
+    }
+
+    const f = odooTe.FIELDS['sale.order'];
+    const motoristaKey = so[f.teMotorista];
+    if (!motoristaKey) {
+      const noCard = buildErrorCard('Motorista nao Selecionado', 'Selecione um motorista no campo Motorista do pedido.');
+      await odooTe.updateSaleOrderStatusHtml(saleOrderId, noCard);
+      return res.json({ success: false, error: 'Nenhum motorista selecionado', card: noCard });
+    }
+
+    // 2. Busca lista de motoristas do TE
+    let customerData = null;
+    try {
+      customerData = await teClient.getCustomers(true);
+    } catch (err) {
+      console.error('[TE-SYNC-MOTORISTA] Erro ao buscar motoristas TE:', err.message);
+    }
+
+    // 3. Procura motorista pelo nome na lista do TE
+    let driverFromTe = null;
+    if (customerData?.Driver && Array.isArray(customerData.Driver)) {
+      driverFromTe = customerData.Driver.find(d => {
+        const teName = (d.Name || '').toUpperCase().trim();
+        const odooName = motoristaKey.toUpperCase().trim();
+        return teName === odooName || teName.includes(odooName) || odooName.includes(teName);
+      });
+    }
+
+    // 4. Se nao encontrou, tenta cadastrar no TE (se tiver telefone no mapa)
+    if (!driverFromTe) {
+      const phone = MOTORISTA_PHONE_MAP[motoristaKey] || '';
+      if (phone) {
+        console.log(`[TE-SYNC-MOTORISTA] Cadastrando ${motoristaKey} no TE (tel: ${phone})`);
+        try {
+          const customerDoc = config.empresa.cnpj;
+          await teClient.addDriver(customerDoc, motoristaKey, '55', phone);
+
+          // Busca novamente para confirmar
+          await new Promise(r => setTimeout(r, 2000));
+          const updatedCustomerData = await teClient.getCustomers(true);
+          if (updatedCustomerData?.Driver) {
+            driverFromTe = updatedCustomerData.Driver.find(d => {
+              const teName = (d.Name || '').toUpperCase().trim();
+              const odooName = motoristaKey.toUpperCase().trim();
+              return teName === odooName || teName.includes(odooName) || odooName.includes(teName);
+            });
+          }
+        } catch (err) {
+          console.error(`[TE-SYNC-MOTORISTA] Erro ao cadastrar ${motoristaKey}:`, err.message);
+        }
+      }
+    }
+
+    // 5. Monta card HTML do motorista
+    const motoristaCard = buildMotoristaCard(motoristaKey, driverFromTe);
+
+    // 6. Le o HTML atual do campo e concatena (novo status em cima, antigo embaixo)
+    const existingHtml = so[f.teStatusHtml] || '';
+    let finalHtml = motoristaCard;
+    if (existingHtml && existingHtml.includes('Motorista TE')) {
+      // Remove cards de motorista antigos e coloca o novo em cima
+      // Divide em blocos de cards (cada card comeca com <div)
+      finalHtml = motoristaCard + '\n' + existingHtml;
+    } else if (existingHtml) {
+      // Tem card de entrega mas nao de motorista — coloca motorista em cima
+      finalHtml = motoristaCard + '\n' + existingHtml;
+    }
+
+    // 7. Grava no campo HTML
+    await odooTe.updateSaleOrderStatusHtml(saleOrderId, finalHtml);
+
+    console.log(`[TE-SYNC-MOTORISTA] Motorista ${motoristaKey} sincronizado: SO ${so.name} (${saleOrderId})`);
+    res.json({
+      success: true,
+      motorista: motoristaKey,
+      foundInTe: !!driverFromTe,
+      driverData: driverFromTe || null,
+      card: motoristaCard,
+    });
+  } catch (err) {
+    console.error('[TE-SYNC-MOTORISTA] Erro:', err.message);
+    try {
+      await odooTe.updateSaleOrderStatusHtml(req.body.saleOrderId, buildErrorCard('Erro ao Sincronizar Motorista', err.message));
+    } catch {}
+    const status = err.isAxiosError ? (err.response?.status || 502) : 500;
+    res.status(status).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

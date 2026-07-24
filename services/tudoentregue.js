@@ -1,204 +1,287 @@
-/**
- * services/tudoentregue.js - TudoEntregue API Client v2
- * Baseado na spec oficial Swagger v1.0.20
- * Host: api.tudoentregue.com.br  basePath: /v1
- * Auth: headers AppKey + RequesterKey
- *
- * Endpoints:
- *   POST   /v1/orders              - Inclusao/Edicao de Entrega
- *   POST   /v1/orders/delete      - Exclusao
- *   PUT    /v1/orders/cancel      - Cancelamento
- *   GET    /v1/orders/situation   - Consulta situacao
- *   GET    /v1/orders/finish      - Consulta com ocorrencias
- *   GET    /v1/tracking           - Acompanhamento
- *   POST   /v1/occurrences        - Criar/editar tipo ocorrencia
- *   GET    /v1/occurrences        - Listar ocorrencias
- */
-var axios = require('axios');
-var config = require('../config');
-var logger = require('../utils/logger');
-var retry = require('../utils/retry').retry;
+// ============================================================
+// services/tudoentregue.js — Client completo da API TudoEntregue
+// Adaptado para usar config/ centralizado do projeto unificado
+// ============================================================
+const axios = require('axios');
+const config = require('../config');
+const { retryWithBackoff } = require('../utils/retry');
 
-// --- Situacoes da Entrega (conforme doc) ---
-var SITUATION = {
-  RECEBIDA_TORRE: 0,
-  ENVIADA_MOTORISTA: 1,
-  AGUARDANDO_CONFIRMACAO: 2,       // descontinuado
-  RECEBIDA_MOTORISTA: 3,
-  RECUSADA_MOTORISTA: 4,           // descontinuado
-  FINALIZADA_MOTORISTA: 5,
-  FINALIZADA_TORRE: 6,
-  OPERACAO_FINALIZADA: 7,          // descontinuado
-  CANCELADA: 8,
-  NOTIFICACAO_CANCELAMENTO: 9,
-  TRANSFERIDA: 11,
+// Constantes
+const API_LIMITS = {
+  MAX_PAYLOAD_BYTES: 1 * 1024 * 1024,
+  MAX_ORDERS_PER_REQUEST: 50,
 };
 
-var SITUATION_LABELS = {};
-SITUATION_LABELS[0] = 'Recebida pela Torre de Controle';
-SITUATION_LABELS[1] = 'Enviada ao Motorista';
-SITUATION_LABELS[2] = 'Aguardando Confirmacao';
-SITUATION_LABELS[3] = 'Recebida pelo Motorista';
-SITUATION_LABELS[4] = 'Recusada pelo Motorista';
-SITUATION_LABELS[5] = 'Finalizada pelo Motorista';
-SITUATION_LABELS[6] = 'Finalizada pela Torre de Controle';
-SITUATION_LABELS[7] = 'Operacao Finalizada';
-SITUATION_LABELS[8] = 'Operacao Cancelada';
-SITUATION_LABELS[9] = 'Notificacao de Cancelamento Enviada';
-SITUATION_LABELS[11] = 'Transferida';
+const SITUATION = {
+  AGUARDANDO: 0,
+  EM_ROTA: 1,
+  ENTREGUE: 3,
+  NAO_ENTREGUE: 5,
+  PARCIAL: 6,
+  CANCELADA: 8,
+  ATRASADA: 9,
+  EM_SEPARACAO: 10,
+  TRANSFERIDA: 11,
+  BAIXADA: 12,
+};
 
-var ORDER_TYPE = {
+const SITUATION_LABELS = {
+  [SITUATION.AGUARDANDO]: 'Aguardando',
+  [SITUATION.EM_ROTA]: 'Em Rota',
+  [SITUATION.ENTREGUE]: 'Entregue',
+  [SITUATION.NAO_ENTREGUE]: 'Nao Entregue',
+  [SITUATION.PARCIAL]: 'Entrega Parcial',
+  [SITUATION.CANCELADA]: 'Cancelada',
+  [SITUATION.ATRASADA]: 'Atrasada',
+  [SITUATION.EM_SEPARACAO]: 'Em Separacao',
+  [SITUATION.TRANSFERIDA]: 'Transferida',
+  [SITUATION.BAIXADA]: 'Baixada',
+};
+
+const SITUATION_TO_ODOO_STATE = {
+  [SITUATION.AGUARDANDO]: 'assigned',
+  [SITUATION.EM_SEPARACAO]: 'assigned',
+  [SITUATION.EM_ROTA]: 'confirmed',
+  [SITUATION.ENTREGUE]: 'done',
+  [SITUATION.NAO_ENTREGUE]: 'done',
+  [SITUATION.PARCIAL]: 'done',
+  [SITUATION.CANCELADA]: 'cancel',
+  [SITUATION.TRANSFERIDA]: 'assigned',
+  [SITUATION.BAIXADA]: 'done',
+  [SITUATION.ATRASADA]: 'confirmed',
+};
+
+const ORDER_TYPES = {
   ENTREGA: 1,
   COLETA: 2,
+  DEVOLUCAO: 3,
+  TROCA: 4,
+  OUTROS: 5,
 };
 
-function getBaseUrl() {
-  return config.tudoentregue.baseUrl.replace(/\/+$/, '') + '/v1';
-}
+class TudoEntregueClient {
+  constructor() {
+    this.baseUrl = config.tudoentregue.baseUrl;
+    this.appKey = config.tudoentregue.appKey;
+    this.requesterKey = config.tudoentregue.requesterKey;
+    this.pageIntervalMs = config.tudoentregue.pageIntervalMs || 5000;
+    this.maxEmptyPages = config.tudoentregue.maxEmptyPages || 10;
 
-function getHeaders() {
-  return {
-    'Content-Type': 'application/json',
-    'AppKey': config.tudoentregue.appKey,
-    'RequesterKey': config.tudoentregue.requesterKey,
-  };
-}
-
-/**
- * POST /v1/orders - Inclusao/Edicao de Entrega
- * Body: array de OrderViewModel
- * Returns: array de OrderInsertUpdateReturn
- */
-function createOrders(orders) {
-  logger.info('[TE] Criando ' + orders.length + ' entrega(s) via /v1/orders');
-  return retry(function() {
-    return axios.post(getBaseUrl() + '/orders', orders, {
-      headers: getHeaders(),
+    this.httpClient = axios.create({
+      baseURL: this.baseUrl,
       timeout: 30000,
+      headers: {
+        'Content-Type': 'application/json',
+        'AppKey': this.appKey,
+        'RequesterKey': this.requesterKey,
+      },
     });
-  }, { label: 'TE createOrders', maxRetries: 2 }).then(function(resp) {
-    logger.info('[TE] createOrders status: ' + resp.status);
-    return resp.data;
-  });
+
+    this.httpClient.interceptors.request.use((cfg) => {
+      console.log(`[TE] ${cfg.method?.toUpperCase()} ${cfg.url}`);
+      return cfg;
+    });
+
+    this.httpClient.interceptors.response.use(
+      (res) => res,
+      (err) => {
+        const msg = err.response?.data?.Message || err.message;
+        console.error(`[TE] Error: ${err.config?.url} — ${msg}`);
+        return Promise.reject(err);
+      }
+    );
+  }
+
+  _validatePayload(data) {
+    const bytes = Buffer.byteLength(JSON.stringify(data), 'utf-8');
+    if (bytes > API_LIMITS.MAX_PAYLOAD_BYTES) {
+      throw new Error(`Payload excede 1MB (${(bytes / 1024).toFixed(0)}KB). Divida em lotes menores.`);
+    }
+  }
+
+  async _request(method, url, data = null, params = null) {
+    return retryWithBackoff(
+      () => this.httpClient.request({ method, url, data, params }),
+      {
+        maxRetries: 3,
+        shouldRetry: (err) => {
+          const status = err.response?.status;
+          return !status || status >= 500 || status === 429;
+        },
+      }
+    );
+  }
+
+  // -------------------------------------------------------
+  // POST /api/Entregas/Cadastro
+  // -------------------------------------------------------
+  async createDeliveries(deliveries) {
+    if (!Array.isArray(deliveries)) deliveries = [deliveries];
+    if (deliveries.length > API_LIMITS.MAX_ORDERS_PER_REQUEST) {
+      throw new Error(`Maximo ${API_LIMITS.MAX_ORDERS_PER_REQUEST} entregas por request. Enviado: ${deliveries.length}`);
+    }
+    this._validatePayload(deliveries);
+
+    const { data } = await this._request('POST', '/api/Entregas/Cadastro', deliveries);
+    console.log(`[TE] Cadastro: ${deliveries.length} entregas enviadas`);
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // PUT /api/Entregas/Edicao
+  // -------------------------------------------------------
+  async editDeliveries(deliveries) {
+    if (!Array.isArray(deliveries)) deliveries = [deliveries];
+    if (deliveries.length > API_LIMITS.MAX_ORDERS_PER_REQUEST) {
+      throw new Error(`Maximo ${API_LIMITS.MAX_ORDERS_PER_REQUEST} entregas por edicao.`);
+    }
+    this._validatePayload(deliveries);
+
+    const { data } = await this._request('PUT', '/api/Entregas/Edicao', deliveries);
+    console.log(`[TE] Edicao: ${deliveries.length} entregas editadas`);
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // DELETE /api/Entregas/Cancelamento
+  // -------------------------------------------------------
+  async cancelDeliveries(orders) {
+    if (!Array.isArray(orders)) orders = [orders];
+    const { data } = await this._request('DELETE', '/api/Entregas/Cancelamento', orders);
+    console.log(`[TE] Cancelamento: ${orders.length} entregas canceladas`);
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // GET /api/Entregas
+  // -------------------------------------------------------
+  async getDeliveries(params = {}) {
+    const { data } = await this._request('GET', '/api/Entregas', null, { page: 1, ...params });
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // GET /api/Entregas/Ocorrencia
+  // -------------------------------------------------------
+  async getDeliveriesWithOccurrence(params = {}) {
+    const { data } = await this._request('GET', '/api/Entregas/Ocorrencia', null, { page: 1, ...params });
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // GET /api/Entregas/Situacao
+  // -------------------------------------------------------
+  async getSituations() {
+    const { data } = await this._request('GET', '/api/Entregas/Situacao');
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // GET /orders/situation — Situacao detalhada da entrega
+  // -------------------------------------------------------
+  async getOrderSituation(params = {}) {
+    const { data } = await this._request('GET', '/orders/situation', null, params);
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // GET /tracking — Acompanhamento de entrega por tracking code
+  // -------------------------------------------------------
+  async getTracking(trackingCode) {
+    const { data } = await this._request('GET', '/tracking', null, { trackingCode });
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // GET /customers?DriverDetail=true — Lista motoristas
+  // -------------------------------------------------------
+  async getCustomers(driverDetail = true) {
+    const { data } = await this._request('GET', '/customers', null, { DriverDetail: driverDetail });
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // POST /customers/addDriver — Cadastrar / editar motorista
+  // -------------------------------------------------------
+  async addDriver(customerDoc, driverName, driverPhoneCountry, driverPhoneNumber) {
+    const payload = {
+      Customer: {
+        DocumentType: 'CNPJ',
+        DocumentNumber: customerDoc.replace(/\D/g, ''),
+      },
+      Driver: {
+        Name: driverName,
+        PhoneCountry: driverPhoneCountry,
+        PhoneNumber: driverPhoneNumber,
+      },
+    };
+    const { data, status } = await this.httpClient.post('/customers/addDriver', payload);
+    console.log(`[TE] addDriver: ${driverName} -> status ${status}`);
+    return { data, status };
+  }
+
+  // -------------------------------------------------------
+  // PUT /drivers/customer/changeSituation — Ativar/Desativar
+  // -------------------------------------------------------
+  async changeDriverSituation(customerDoc, driverPhoneCountry, driverPhoneNumber, enable) {
+    const payload = {
+      Customer: {
+        DocumentType: 'CNPJ',
+        DocumentNumber: customerDoc.replace(/\D/g, ''),
+        Enable: enable,
+      },
+      Driver: {
+        PhoneCountry: driverPhoneCountry,
+        PhoneNumber: driverPhoneNumber,
+      },
+    };
+    const { data } = await this.httpClient.put('/drivers/customer/changeSituation', payload);
+    console.log(`[TE] changeDriverSituation: phone=${driverPhoneNumber} -> ${enable ? 'Ativo' : 'Inativo'}`);
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // Paginacao automatica
+  // -------------------------------------------------------
+  async fetchAllPages(endpoint, params = {}) {
+    const allResults = [];
+    let page = 1;
+    let emptyCount = 0;
+
+    while (true) {
+      const response = await this._request('GET', endpoint, null, { ...params, page });
+      const items = response.data?.Result || [];
+
+      if (items.length === 0) {
+        emptyCount++;
+        if (emptyCount >= this.maxEmptyPages || !response.data?.HasNextPage) break;
+      } else {
+        emptyCount = 0;
+        allResults.push(...items);
+      }
+
+      if (!response.data?.HasNextPage) break;
+      page++;
+
+      if (page > 1) {
+        console.log(`[TE] Paginacao: esperando ${this.pageIntervalMs}ms antes da pagina ${page}`);
+        await new Promise((r) => setTimeout(r, this.pageIntervalMs));
+      }
+    }
+
+    console.log(`[TE] Paginacao finalizada: ${allResults.length} itens em ${page} paginas`);
+    return allResults;
+  }
 }
 
-/**
- * POST /v1/orders - Edicao (mesmo endpoint, mesma estrutura)
- */
-function editOrders(orders) {
-  logger.info('[TE] Editando ' + orders.length + ' entrega(s) via /v1/orders');
-  return retry(function() {
-    return axios.post(getBaseUrl() + '/orders', orders, {
-      headers: getHeaders(),
-      timeout: 30000,
-    });
-  }, { label: 'TE editOrders', maxRetries: 2 }).then(function(resp) {
-    logger.info('[TE] editOrders status: ' + resp.status);
-    return resp.data;
-  });
-}
-
-/**
- * PUT /v1/orders/cancel - Cancelamento
- */
-function cancelOrders(orders) {
-  logger.info('[TE] Cancelando ' + orders.length + ' entrega(s)');
-  return retry(function() {
-    return axios.put(getBaseUrl() + '/orders/cancel', orders, {
-      headers: getHeaders(),
-      timeout: 30000,
-    });
-  }, { label: 'TE cancelOrders', maxRetries: 2 }).then(function(resp) {
-    return resp.data;
-  });
-}
-
-/**
- * POST /v1/orders/delete - Exclusao permanente
- */
-function deleteOrders(orders) {
-  logger.info('[TE] Excluindo ' + orders.length + ' entrega(s)');
-  return retry(function() {
-    return axios.post(getBaseUrl() + '/orders/delete', orders, {
-      headers: getHeaders(),
-      timeout: 30000,
-    });
-  }, { label: 'TE deleteOrders', maxRetries: 2 }).then(function(resp) {
-    return resp.data;
-  });
-}
-
-/**
- * GET /v1/orders/situation - Consulta situacao
- * Query: phoneCountry, phoneNumber, orderType, orderID
- */
-function getSituation(params) {
-  return retry(function() {
-    return axios.get(getBaseUrl() + '/orders/situation', {
-      headers: getHeaders(),
-      params: params,
-      timeout: 15000,
-    });
-  }, { label: 'TE getSituation', maxRetries: 1 }).then(function(resp) {
-    return resp.data;
-  });
-}
-
-/**
- * GET /v1/orders/finish - Consulta entregas com ocorrencia
- * Query: phoneCountry, phoneNumber, orderType, orderID, partial
- */
-function getFinished(params) {
-  return retry(function() {
-    return axios.get(getBaseUrl() + '/orders/finish', {
-      headers: getHeaders(),
-      params: params,
-      timeout: 15000,
-    });
-  }, { label: 'TE getFinished', maxRetries: 1 }).then(function(resp) {
-    return resp.data;
-  });
-}
-
-/**
- * GET /v1/tracking?trackingCode=XXX - Acompanhamento
- */
-function getTracking(trackingCode) {
-  return retry(function() {
-    return axios.get(getBaseUrl() + '/tracking', {
-      headers: getHeaders(),
-      params: { trackingCode: trackingCode },
-      timeout: 15000,
-    });
-  }, { label: 'TE getTracking', maxRetries: 1 }).then(function(resp) {
-    return resp.data;
-  });
-}
-
-/**
- * GET /v1/occurrences - Listar tipos de ocorrencia
- */
-function getOccurrences() {
-  return retry(function() {
-    return axios.get(getBaseUrl() + '/occurrences', {
-      headers: getHeaders(),
-      timeout: 15000,
-    });
-  }, { label: 'TE getOccurrences', maxRetries: 1 }).then(function(resp) {
-    return resp.data;
-  });
-}
+// Exporta singleton + constantes
+const client = new TudoEntregueClient();
 
 module.exports = {
-  createOrders: createOrders,
-  editOrders: editOrders,
-  cancelOrders: cancelOrders,
-  deleteOrders: deleteOrders,
-  getSituation: getSituation,
-  getFinished: getFinished,
-  getTracking: getTracking,
-  getOccurrences: getOccurrences,
-  SITUATION: SITUATION,
-  SITUATION_LABELS: SITUATION_LABELS,
-  ORDER_TYPE: ORDER_TYPE,
+  client,
+  SITUATION,
+  SITUATION_LABELS,
+  SITUATION_TO_ODOO_STATE,
+  ORDER_TYPES,
+  API_LIMITS,
 };
