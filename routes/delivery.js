@@ -536,7 +536,8 @@ function buildErrorCard(title, message) {
 // Body: { invoice_id: number }
 // ============================================================
 router.post('/send-invoice', async (req, res) => {
-  const invId = req.body.invoice_id;
+  console.log('[TE-SEND-INVOICE] Body recebido: ' + JSON.stringify(req.body));
+  const invId = req.body.invoice_id || req.body.id;
   if (!invId) return res.status(400).json({ success: false, error: 'invoice_id obrigatorio' });
 
   try {
@@ -545,7 +546,7 @@ router.post('/send-invoice', async (req, res) => {
     // 1. Encontra a venda relacionada
     const saleOrder = await odooTe.findSaleOrderByInvoice(invId);
     if (!saleOrder) {
-      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO</b><br/>Venda nao encontrada para esta fatura.');
+      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO</b><br/>Nenhuma venda (sale.order) encontrada para esta fatura. Verifique se a fatura esta vinculada a um pedido de venda.');
       return res.status(404).json({ success: false, error: 'Venda nao encontrada para esta fatura' });
     }
     console.log('[TE-SEND-INVOICE] Venda: ' + saleOrder.name + ' (id=' + saleOrder.id + ')');

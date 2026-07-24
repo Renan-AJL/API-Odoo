@@ -385,43 +385,98 @@ class OdooTeClient {
   // -------------------------------------------------------
 
   async findSaleOrderByInvoice(invoiceId) {
-    // Tenta busca direta: sale.order onde invoice_ids contem esta fatura
+    console.log('[ODOO-TE] findSaleOrderByInvoice: invoiceId=' + invoiceId);
+
+    // Estrategia 1: Tenta busca direta: sale.order onde invoice_ids contem esta fatura
     try {
       const saleIds = await this.searchRead(
         'sale.order',
         [['invoice_ids', 'in', [invoiceId]]],
         ['id', 'name']
       );
-      if (saleIds.length > 0) return saleIds[0];
+      if (saleIds.length > 0) {
+        console.log('[ODOO-TE] Estrategia 1 (invoice_ids) encontrou: ' + saleIds[0].name + ' (id=' + saleIds[0].id + ')');
+        return saleIds[0];
+      }
+      console.log('[ODOO-TE] Estrategia 1 (invoice_ids): sem resultados');
     } catch (err) {
-      console.warn('[ODOO-TE] Busca direta invoice->sale falhou: ' + err.message);
+      console.warn('[ODOO-TE] Estrategia 1 falhou: ' + err.message);
     }
-    // Fallback: via account.move.line -> sale_line_ids -> order_id
+
+    // Estrategia 2: Tenta ler sale_order_ids da propria fatura (campo computado do modulo sale)
     try {
-      const lines = await this.searchRead(
-        'account.move.line',
-        [['move_id', '=', invoiceId], ['sale_line_ids', '!=', false]],
-        ['sale_line_ids']
-      );
-      if (lines.length > 0 && lines[0].sale_line_ids?.length) {
-        const saleLineId = lines[0].sale_line_ids[0];
-        const saleLines = await this.searchRead(
-          'sale.order.line',
-          [['id', '=', saleLineId]],
-          ['order_id']
-        );
-        if (saleLines.length > 0 && saleLines[0].order_id) {
-          const orderId = saleLines[0].order_id[0];
-          const orders = await this.searchRead(
-            'sale.order', [['id', '=', orderId]],
-            ['id', 'name']
-          );
-          return orders.length > 0 ? orders[0] : null;
+      const invData = await this.read('account.move', [invoiceId], ['id', 'partner_id', 'sale_order_ids']);
+      const inv = Array.isArray(invData) ? invData[0] : invData;
+      console.log('[ODOO-TE] Fatura lida: id=' + inv.id + ', partner=' + JSON.stringify(inv.partner_id) + ', sale_order_ids=' + JSON.stringify(inv.sale_order_ids));
+      if (inv.sale_order_ids && inv.sale_order_ids.length > 0) {
+        const soId = Array.isArray(inv.sale_order_ids[0]) ? inv.sale_order_ids[0][0] : inv.sale_order_ids[0];
+        const orders = await this.searchRead('sale.order', [['id', '=', soId]], ['id', 'name']);
+        if (orders.length > 0) {
+          console.log('[ODOO-TE] Estrategia 2 (sale_order_ids) encontrou: ' + orders[0].name + ' (id=' + orders[0].id + ')');
+          return orders[0];
         }
       }
+      console.log('[ODOO-TE] Estrategia 2 (sale_order_ids): sem resultados');
     } catch (err) {
-      console.warn('[ODOO-TE] Busca via linhas falhou: ' + err.message);
+      console.warn('[ODOO-TE] Estrategia 2 falhou: ' + err.message);
     }
+
+    // Estrategia 3: Via account.move.line -> sale_line_ids -> order_id
+    try {
+      const invData = await this.read('account.move', [invoiceId], ['line_ids']);
+      const inv = Array.isArray(invData) ? invData[0] : invData;
+      const lineIds = inv.line_ids || [];
+      console.log('[ODOO-TE] Estrategia 3: lendo ' + lineIds.length + ' linhas da fatura');
+      if (lineIds.length) {
+        // Le as linhas em batch
+        const lines = await this.read('account.move.line', lineIds, ['sale_line_ids']);
+        const linesArr = Array.isArray(lines) ? lines : [lines];
+        for (const line of linesArr) {
+          const sli = line.sale_line_ids;
+          if (sli && sli.length > 0) {
+            const saleLineId = Array.isArray(sli[0]) ? sli[0][0] : sli[0];
+            const saleLines = await this.read('sale.order.line', [saleLineId], ['order_id']);
+            const slArr = Array.isArray(saleLines) ? saleLines : [saleLines];
+            if (slArr.length > 0 && slArr[0].order_id) {
+              const orderId = Array.isArray(slArr[0].order_id) ? slArr[0].order_id[0] : slArr[0].order_id;
+              const orders = await this.searchRead('sale.order', [['id', '=', orderId]], ['id', 'name']);
+              if (orders.length > 0) {
+                console.log('[ODOO-TE] Estrategia 3 (lines) encontrou: ' + orders[0].name + ' (id=' + orders[0].id + ')');
+                return orders[0];
+              }
+            }
+          }
+        }
+      }
+      console.log('[ODOO-TE] Estrategia 3 (lines): sem resultados');
+    } catch (err) {
+      console.warn('[ODOO-TE] Estrategia 3 falhou: ' + err.message);
+    }
+
+    // Estrategia 4: Fallback via partner_id — busca sale.order mais recente do mesmo cliente
+    try {
+      const invData = await this.read('account.move', [invoiceId], ['partner_id']);
+      const inv = Array.isArray(invData) ? invData[0] : invData;
+      const partnerId = inv.partner_id ? (Array.isArray(inv.partner_id) ? inv.partner_id[0] : inv.partner_id) : null;
+      if (partnerId) {
+        console.log('[ODOO-TE] Estrategia 4: buscando sale.order por partner_id=' + partnerId);
+        const orders = await this.searchRead(
+          'sale.order',
+          [['partner_id', '=', partnerId], ['state', 'in', ['sale', 'done']]],
+          ['id', 'name', 'state'],
+          5, 0, 'id desc'
+        );
+        if (orders.length > 0) {
+          console.log('[ODOO-TE] Estrategia 4 (partner) encontrou ' + orders.length + ' pedidos. Usando mais recente: ' + orders[0].name + ' (id=' + orders[0].id + ')');
+          return orders[0];
+        }
+        console.log('[ODOO-TE] Estrategia 4 (partner): sem pedidos para este cliente');
+      }
+    } catch (err) {
+      console.warn('[ODOO-TE] Estrategia 4 falhou: ' + err.message);
+    }
+
+    console.error('[ODOO-TE] Nenhuma estrategia encontrou sale.order para invoice ' + invoiceId);
     return null;
   }
 
