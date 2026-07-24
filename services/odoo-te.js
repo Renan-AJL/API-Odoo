@@ -91,7 +91,7 @@ var PICKING_CUSTOM_FIELDS = [
   'x_studio_motorista',
 ];
 var INVOICE_FIELDS = ['id', 'name', 'state', 'move_type', 'partner_id', 'invoice_date', 'amount_total', 'payment_state'];
-var INVOICE_CUSTOM_FIELDS = ['x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_status_de_entrega_te'];
+var INVOICE_CUSTOM_FIELDS = ['x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_status_de_entrega_te', 'x_studio_motorista'];
 var INVOICE_LINE_FIELDS = ['id', 'name', 'product_id', 'quantity', 'price_unit', 'price_subtotal'];
 
 var OPTIONAL_FIELDS = {
@@ -375,11 +375,29 @@ async function readInvoiceFull(invoiceId) {
 
 async function getInvoiceLines(invoiceId) {
   try {
-    var ids = await executeKw('account.move.line', 'search', [
-      ['move_id', '=', invoiceId], ['product_id', '!=', false],
-    ]);
-    if (!ids || !ids.length) return [];
-    return await executeKw('account.move.line', 'read', [ids], { fields: INVOICE_LINE_FIELDS });
+    // Evita account.move.line.search — Odoo 19.2 SaaS tem override de
+    // search_fetch com _get_recon_limit_from_domain que rejeita certos dominios.
+    // Em vez disso, le line_ids direto da fatura.
+    var invData = await executeKw('account.move', 'read', [[invoiceId]], { fields: ['line_ids'] });
+    var inv = invData && invData[0];
+    if (!inv || !inv.line_ids || !inv.line_ids.length) return [];
+
+    // line_ids pode vir como [id, id, ...] ou [[id, name], ...]
+    var lineIds = inv.line_ids.map(function(item) {
+      return Array.isArray(item) ? item[0] : item;
+    });
+
+    var lines = await executeKw('account.move.line', 'read', [lineIds], { fields: INVOICE_LINE_FIELDS });
+    if (!lines || !lines.length) return [];
+
+    // Filtra apenas linhas com produto (product_id != false)
+    return lines.filter(function(line) {
+      if (!line.product_id) return false;
+      // product_id pode ser [id, name] ou false
+      if (Array.isArray(line.product_id) && line.product_id[0]) return true;
+      if (typeof line.product_id === 'number' && line.product_id) return true;
+      return false;
+    });
   } catch (err) {
     logger.warn('[ODOO-TE] getInvoiceLines falhou: ' + err.message);
     return [];

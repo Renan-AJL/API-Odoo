@@ -616,8 +616,9 @@ router.post('/send-invoice', async (req, res) => {
     // 6. Le dados da empresa (remetente)
     const company = await odooTe.getCompany();
 
-    // 6b. Motorista: le x_studio_motorista da sale.order (ou picking como fallback)
-    //    e busca telefone no TE
+    // 6b. Motorista: prioridade 1) sale.order.x_studio_motorista
+    //    2) picking.x_studio_motorista
+    //    3) account.move.x_studio_motorista (fallback p/ faturas sem venda vinculada)
     let motoristaName = null;
     let teDriver = null;
     if (saleFull && saleFull.x_studio_motorista) {
@@ -626,6 +627,9 @@ router.post('/send-invoice', async (req, res) => {
     } else if (picking && picking.x_studio_motorista) {
       motoristaName = picking.x_studio_motorista;
       console.log('[TE-SEND-INVOICE] Motorista do picking (fallback): ' + motoristaName);
+    } else if (invoice && invoice.x_studio_motorista) {
+      motoristaName = invoice.x_studio_motorista;
+      console.log('[TE-SEND-INVOICE] Motorista da fatura/account.move (fallback): ' + motoristaName);
     }
     if (motoristaName) {
       try {
