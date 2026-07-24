@@ -66,6 +66,7 @@ class TudoEntregueClient {
     this.requesterKey = config.tudoentregue.requesterKey;
     this.pageIntervalMs = config.tudoentregue.pageIntervalMs || 5000;
     this.maxEmptyPages = config.tudoentregue.maxEmptyPages || 10;
+    this._driverCache = null;  // Cache de motoristas: { nome_normalizado: { PhoneCountry, PhoneNumber } }
 
     this.httpClient = axios.create({
       baseURL: this.baseUrl,
@@ -190,6 +191,66 @@ class TudoEntregueClient {
   async getSituations() {
     const { data } = await this._request('GET', '/v1/occurrences');
     return data;
+  }
+
+  // -------------------------------------------------------
+  // GET /customers?DriverDetail=true — Lista motoristas (com cache 1h)
+  // -------------------------------------------------------
+  async getDrivers() {
+    // Cache por 1 hora
+    if (this._driverCache && (Date.now() - this._driverCache._ts) < 3600000) {
+      return this._driverCache.list;
+    }
+    try {
+      const { data } = await this._request('GET', '/customers', null, { DriverDetail: true });
+      const customers = Array.isArray(data) ? data : (data?.Result || data?.Customers || []);
+      const driverMap = {};
+      customers.forEach(function(cust) {
+        const drivers = cust.Drivers || cust.drivers || [];
+        drivers.forEach(function(d) {
+          if (d.Name) {
+            const key = d.Name.toUpperCase().trim();
+            driverMap[key] = {
+              Name: d.Name,
+              PhoneCountry: d.PhoneCountry || '55',
+              PhoneNumber: d.PhoneNumber || '',
+            };
+          }
+        });
+      });
+      this._driverCache = { _ts: Date.now(), list: driverMap };
+      console.log('[TE] ' + Object.keys(driverMap).length + ' motoristas cacheados');
+      return driverMap;
+    } catch (err) {
+      console.warn('[TE] Falha ao buscar motoristas: ' + err.message);
+      return this._driverCache ? this._driverCache.list : {};
+    }
+  }
+
+  /**
+   * Busca motorista por nome (fuzzy match). Retorna { PhoneCountry, PhoneNumber } ou null.
+   * @param {string} motoristaName - Nome vindo do Odoo (ex: 'ADRIANO' ou key 'adriano')
+   */
+  async findDriverByName(motoristaName) {
+    if (!motoristaName) return null;
+    const drivers = await this.getDrivers();
+    if (!drivers || !Object.keys(drivers).length) return null;
+
+    const search = motoristaName.toUpperCase().trim();
+    // Match exato
+    if (drivers[search]) return drivers[search];
+    // Match parcial (nome contem ou e contido)
+    for (const key of Object.keys(drivers)) {
+      if (key.indexOf(search) !== -1 || search.indexOf(key) !== -1) return drivers[key];
+    }
+    // Match pela primeira palavra
+    const firstWord = search.split(/\s+/)[0];
+    if (firstWord.length >= 3) {
+      for (const key of Object.keys(drivers)) {
+        if (key.indexOf(firstWord) !== -1 || firstWord.indexOf(key) !== -1) return drivers[key];
+      }
+    }
+    return null;
   }
 
   // -------------------------------------------------------

@@ -616,6 +616,24 @@ router.post('/send-invoice', async (req, res) => {
     // 6. Le dados da empresa (remetente)
     const company = await odooTe.getCompany();
 
+    // 6b. Motorista: le x_studio_motorista da sale.order e busca no TE
+    let motoristaName = null;
+    let teDriver = null;
+    if (saleFull && saleFull.x_studio_motorista) {
+      motoristaName = saleFull.x_studio_motorista;  // key do selection (ex: 'adriano')
+      console.log('[TE-SEND-INVOICE] Motorista Odoo: ' + motoristaName);
+      try {
+        teDriver = await teClient.findDriverByName(motoristaName);
+        if (teDriver) {
+          console.log('[TE-SEND-INVOICE] Motorista encontrado no TE: ' + teDriver.Name + ' (' + teDriver.PhoneNumber + ')');
+        } else {
+          console.warn('[TE-SEND-INVOICE] Motorista "' + motoristaName + '" NAO encontrado no TE');
+        }
+      } catch (err) {
+        console.warn('[TE-SEND-INVOICE] Erro ao buscar motorista no TE: ' + err.message);
+      }
+    }
+
     // 7. Mapeia para TE (picking sera sintetico pelo mapper se null)
     const delivery = Mapper.odooToTeDelivery({
       picking: picking,
@@ -626,6 +644,8 @@ router.post('/send-invoice', async (req, res) => {
       companyCnpj: config.empresa.cnpj,
       orderLines: orderLines,
       productsMap: productsMap,
+      motoristaName: motoristaName,
+      teDriver: teDriver,
     });
     if (!delivery) {
       return res.status(500).json({ success: false, error: 'Falha no mapeamento dos dados' });
@@ -646,6 +666,14 @@ router.post('/send-invoice', async (req, res) => {
     }
     if (!saleOrder) {
       chatterMsg += '<br/><i>Sem sale.order vinculada — fluxo direto fatura</i>';
+    }
+    if (motoristaName) {
+      chatterMsg += '<br/>Motorista: ' + motoristaName.toUpperCase();
+      if (teDriver) {
+        chatterMsg += ' (' + teDriver.PhoneNumber + ')';
+      } else {
+        chatterMsg += ' <b style="color:#e65100;">NAO encontrado no TE</b>';
+      }
     }
     await odooTe.postChatter('account.move', invId, chatterMsg);
     if (picking) await odooTe.postChatter('stock.picking', picking.id, chatterMsg);
@@ -690,11 +718,18 @@ router.post('/send-invoice', async (req, res) => {
         '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Cidade</span><span style="font-size:12px;font-weight:500;">' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '</span></div>' +
         (delivery.Weight ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Peso</span><span style="font-size:12px;font-weight:500;">' + delivery.Weight + ' kg</span></div>' : '') +
         (delivery.Volume ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Volumes</span><span style="font-size:12px;font-weight:500;">' + delivery.Volume + '</span></div>' : '') +
+        (motoristaName ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Motorista</span><span style="font-size:12px;font-weight:500;color:#2e7d32;">' + motoristaName.toUpperCase() + (teDriver ? ' &#10003;' : ' &#9888;') + '</span></div>' : '') +
         '</div>' +
         '<div style="background:#f5f5f5;padding:8px 16px;font-size:10px;color:#aaa;text-align:right;">' + new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '</div>' +
         '</div>';
       try { await odooTe.updateInvoiceStatusHtml(invId, invoiceCard); } catch (err) {
         console.warn('[TE-SEND-INVOICE] Nao conseguiu gravar card HTML na fatura: ' + err.message);
+      }
+      // Grava card HTML tambem na sale.order (se existir)
+      if (saleOrder) {
+        try { await odooTe.updateSaleOrderStatusHtml(saleOrder.id, invoiceCard); } catch (err) {
+          console.warn('[TE-SEND-INVOICE] Nao conseguiu gravar card HTML na sale.order: ' + err.message);
+        }
       }
 
       res.json({
@@ -836,7 +871,7 @@ router.post('/delivery-status', async (req, res) => {
 // O campo x_studio_motorista e um selection com 17 opcoes (key/label)
 // ============================================================
 const MOTORISTA_OPTIONS = [
-  'adelson', 'anderlucio', 'antonio', 'carlos', 'daniel',
+  'adelson', 'adriano', 'anderlucio', 'antonio', 'carlos', 'daniel',
   'diego', 'eduardo', 'fellipe', 'gerson', 'glauber',
   'henrique', 'italo', 'jeferson', 'joao_pedro', 'lucas',
   'matheus', 'rafael',

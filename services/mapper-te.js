@@ -240,7 +240,7 @@ function buildDocuments(invoice, orderLines, productsMap) {
 /**
  * Mapeia picking Odoo + partner + saleOrder + invoice + company para OrderViewModel do TE
  *
- * @param {Object} ctx - { picking, partner, saleOrder, invoice, company, companyCnpj, orderLines, productsMap }
+ * @param {Object} ctx - { picking, partner, saleOrder, invoice, company, companyCnpj, orderLines, productsMap, motoristaName, teDriver }
  */
 function odooToTeDelivery(ctx) {
   var picking = ctx.picking;
@@ -251,6 +251,8 @@ function odooToTeDelivery(ctx) {
   var companyCnpj = ctx.companyCnpj;
   var orderLines = ctx.orderLines || [];
   var productsMap = ctx.productsMap;
+  var motoristaName = ctx.motoristaName || null;  // Nome do motorista do Odoo
+  var teDriver = ctx.teDriver || null;              // { PhoneCountry, PhoneNumber } do TE
 
   if (!partner) return null;
 
@@ -334,12 +336,26 @@ function odooToTeDelivery(ctx) {
     observation += (observation ? ' | ' : '') + 'Valor: R$ ' + Number(amountTotal).toFixed(2).replace('.', ',');
   }
 
-  // Driver: TE define o motorista automaticamente
-  var driver = {
-    PhoneCountry: '55',
-    PhoneNumber: '99999999999',
-    DefineDriverAfter: 1,
-  };
+  // Driver: se tem motorista selecionado no Odoo e encontramos no TE, usa o telefone dele
+  // Senao DefineDriverAfter=1 para TE atribuir automaticamente
+  var driver;
+  if (teDriver && teDriver.PhoneNumber) {
+    driver = {
+      PhoneCountry: teDriver.PhoneCountry || '55',
+      PhoneNumber: teDriver.PhoneNumber,
+      DefineDriverAfter: 0,
+    };
+    logger.info('[MAPPER] Motorista especificado: ' + (motoristaName || teDriver.PhoneNumber) + ' -> ' + teDriver.PhoneNumber);
+  } else {
+    driver = {
+      PhoneCountry: '55',
+      PhoneNumber: '99999999999',
+      DefineDriverAfter: 1,
+    };
+    if (motoristaName) {
+      logger.warn('[MAPPER] Motorista "' + motoristaName + '" nao encontrado no TE, usando DefineDriverAfter=1');
+    }
+  }
 
   var delivery = {
     Customer: {
