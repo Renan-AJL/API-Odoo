@@ -324,50 +324,6 @@ router.get('/deliveries/pull', async (req, res) => {
   }
 });
 
-// ============================================================
-// MOTORISTA: Mapa nome -> telefone (configurar os telefones)
-// ============================================================
-// Mapeamento dos motoristas do Odoo (selection key) para telefone TE
-// Formato: telefone com DDD (ex: '41999999999')
-// IMPORTANTE: Preencha os telefones reais dos motoristas
-const MOTORISTA_PHONE_MAP = {
-  'ADRIANO':       '',
-  'EDUARDO':       '',
-  'EMERSON':       '',
-  'FELIX':         '',
-  'GIAN':          '',
-  'HAIME':         '',
-  'HUGTHON':       '',
-  'Leonardo | Active': '',
-  'LUCAS':         '',
-  'Lucas Mateus':  '',
-  'LUIS':          '',
-  'MARCOS':        '',
-  'MARCOS2':       '',
-  'PAULO':         '',
-  'ROBERTO':       '',
-  'STRADA PINHAIS':'',
-  'WELINGTON':     '',
-  'WELINGTON2':    '',
-};
-
-// ============================================================
-// STATUS LABELS para /orders/situation (codigo diferente do /api/Entregas)
-// ============================================================
-const SITUATION_ORDER_LABELS = {
-  0:  'Nao Enviada',
-  1:  'Envio Solicitado',
-  2:  'Enviada ao Motorista - Aguardando Confirmacao',
-  3:  'Enviada ao Motorista - Confirmada',
-  4:  'Enviada ao Motorista - Recusada',
-  5:  'Finalizada pelo Motorista',
-  6:  'Finalizada pelo Cliente',
-  7:  'Operacao Finalizada',
-  8:  'Operacao Cancelada',
-  9:  'Cancelamento Enviado ao Motorista',
-  11: 'Transferida',
-};
-
 const SITUATION_ORDER_COLORS = {
   0:  '#9e9e9e',  // cinza - Aguardando
   1:  '#2196f3',  // azul - Em Rota
@@ -386,203 +342,194 @@ const SITUATION_ORDER_COLORS = {
 };
 
 // ============================================================
-// HTML CARD BUILDERS
+// HTML CARD BUILDER — Um card com tudo que vem do TE
 // ============================================================
 
-function buildDeliveryStatusCard(delivery, trackingData, situationData) {
-  const sitCode = delivery.Situation ?? delivery.situation ?? null;
-  const sitLabel = SITUATION_LABELS[sitCode] || `Situacao ${sitCode}`;
-  const sitColor = SITUATION_ORDER_COLORS[sitCode] || '#607d8b';
-  const trackingCode = delivery.TrackingCode || delivery.trackingCode || '';
-  const driverName = delivery.DriverName || delivery.driverName || '';
-  const driverPhone = delivery.DriverPhone || delivery.driverPhone || '';
-  const orderNum = delivery.OrderNumber || delivery.orderNumber || '';
-  const custName = delivery.CustomerName || delivery.customerName || '';
-  const docNum = delivery.DocumentNumber || delivery.documentNumber || '';
-  const scheduled = delivery.ScheduledDate || delivery.scheduledDate || '';
-  const deliveredDate = delivery.DeliveredDate || delivery.deliveredDate || '';
-  const occDesc = delivery.OccurrenceDescription || delivery.occurrenceDescription || '';
+// Labels para /orders/situation (codigo diferente do /api/Entregas)
+const SIT_ORDER_LABELS = {
+  0: 'Nao Enviada', 1: 'Envio Solicitado',
+  2: 'Enviada ao Motorista - Aguardando',
+  3: 'Enviada ao Motorista - Confirmada',
+  4: 'Enviada ao Motorista - Recusada',
+  5: 'Finalizada pelo Motorista', 6: 'Finalizada pelo Cliente',
+  7: 'Operacao Finalizada', 8: 'Operacao Cancelada',
+  9: 'Cancelamento ao Motorista', 11: 'Transferida',
+};
 
-  // Build timeline from situationData.Status[]
-  let timelineHtml = '';
-  const statuses = situationData?.Status || [];
-  if (statuses.length > 0) {
-    timelineHtml = `
-      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e0e0e0;">
-        <div style="font-size: 11px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Historico de Status</div>
-        ${statuses.map((s, i) => {
-          const sLabel = SITUATION_ORDER_LABELS[s.Status] || `Status ${s.Status}`;
-          const sColor = SITUATION_ORDER_COLORS[s.Status] || '#607d8b';
-          const sDate = s.Date ? formatDate(s.Date) : '';
-          const isFirst = i === 0;
-          return `
-          <div style="display: flex; gap: 10px; align-items: flex-start; margin-bottom: ${isFirst ? '8px' : '6px'};">
-            <div style="min-width: 10px; min-height: 10px; width: 10px; height: 10px; border-radius: 50%; background: ${sColor}; margin-top: 4px; ${isFirst ? 'box-shadow: 0 0 0 3px ' + sColor + '33;' : 'opacity: 0.6;'}"></div>
-            <div style="flex: 1;">
-              <div style="font-size: 12px; color: #333; font-weight: ${isFirst ? '600' : '400'};">${sLabel}</div>
-              ${sDate ? `<div style="font-size: 10px; color: #999; margin-top: 2px;">${sDate}</div>` : ''}
-            </div>
-          </div>`;
-        }).join('')}
-      </div>`;
-  }
-
-  // Tracking statuses from /tracking
-  let trackingHtml = '';
-  const trackStatuses = trackingData?.TrackingStatus || [];
-  if (trackStatuses.length > 0) {
-    trackingHtml = `
-      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e0e0e0;">
-        <div style="font-size: 11px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Ocorrencias</div>
-        ${trackStatuses.map(ts => {
-          const isOk = ts.Status === 'check';
-          const icon = isOk ? '&#10003;' : '&#9888;';
-          const color = isOk ? '#4caf50' : '#ff9800';
-          const tsDate = ts.Date ? formatDate(ts.Date) : '';
-          const images = (ts.AttachmentsImagesUrls || []).filter(Boolean);
-          return `
-          <div style="display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; padding: 8px; background: ${isOk ? '#f1f8e9' : '#fff3e0'}; border-radius: 6px;">
-            <div style="color: ${color}; font-size: 16px; font-weight: bold; min-width: 20px; text-align: center;">${icon}</div>
-            <div style="flex: 1;">
-              <div style="font-size: 12px; color: #333;">${ts.Description || ''}</div>
-              ${tsDate ? `<div style="font-size: 10px; color: #999; margin-top: 2px;">${tsDate}</div>` : ''}
-              ${images.length > 0 ? images.map(img => `<img src="${img}" style="max-width: 120px; max-height: 80px; border-radius: 4px; margin-top: 6px; margin-right: 4px; cursor: pointer;" />`).join('') : ''}
-            </div>
-          </div>`;
-        }).join('')}
-      </div>`;
-  }
-
-  return `
-<div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; border: 1px solid #e0e0e0; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-  <!-- Header -->
-  <div style="background: linear-gradient(135deg, #1565c0, #1e88e5); color: white; padding: 14px 16px; display: flex; align-items: center; gap: 10px;">
-    <div style="font-size: 22px;">&#128666;</div>
-    <div style="flex: 1;">
-      <div style="font-size: 14px; font-weight: 700;">Status de Entrega</div>
-      <div style="font-size: 11px; opacity: 0.85;">TudoEntregue</div>
-    </div>
-    <div style="background: ${sitColor}; color: white; font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px; text-transform: uppercase;">${sitLabel}</div>
-  </div>
-  <!-- Body -->
-  <div style="padding: 14px 16px;">
-    ${orderNum ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Pedido</span><span style="font-size: 12px; font-weight: 600; color: #333;">${orderNum}</span></div>` : ''}
-    ${trackingCode ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Rastreio</span><span style="font-size: 12px; font-weight: 600; color: #1565c0;"><a href="https://app.tudoentregue.com.br/rastreamento/${trackingCode}" target="_blank" style="color: #1565c0; text-decoration: none;">${trackingCode}</a></span></div>` : ''}
-    ${custName ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Cliente</span><span style="font-size: 12px; color: #333;">${custName}</span></div>` : ''}
-    ${driverName ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Motorista</span><span style="font-size: 12px; color: #333;">${driverName}</span></div>` : ''}
-    ${driverPhone ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Tel Motorista</span><span style="font-size: 12px; color: #333;"><a href="tel:+55${driverPhone}" style="color: #333; text-decoration: none;">${driverPhone}</a></span></div>` : ''}
-    ${scheduled ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Agendamento</span><span style="font-size: 12px; color: #333;">${formatDate(scheduled)}</span></div>` : ''}
-    ${deliveredDate ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Entregue em</span><span style="font-size: 12px; color: #4caf50; font-weight: 600;">${formatDate(deliveredDate)}</span></div>` : ''}
-    ${occDesc ? `<div style="margin-top: 10px; padding: 8px 12px; background: #fff3e0; border-radius: 6px; border-left: 3px solid #ff9800;"><div style="font-size: 11px; color: #888; margin-bottom: 2px;">Ocorrencia</div><div style="font-size: 12px; color: #e65100;">${occDesc}</div></div>` : ''}
-    ${timelineHtml}
-    ${trackingHtml}
-  </div>
-  <!-- Footer -->
-  <div style="background: #f5f5f5; padding: 8px 16px; font-size: 10px; color: #aaa; text-align: right;">Atualizado: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</div>
-</div>`;
-}
-
-function buildMotoristaCard(driverName, driverFromTe) {
-  if (!driverFromTe) {
-    return buildMotoristaNotFoundCard(driverName);
-  }
-
-  const phone = driverFromTe.PhoneNumber || '';
-  const phoneCountry = driverFromTe.PhoneCountry || '55';
-  const fullPhone = phone ? `+${phoneCountry} ${phone}` : 'N/A';
-  const enable = driverFromTe.Enable;
-  const lastAccess = driverFromTe.LastAccess || '';
-  const appInstalled = driverFromTe.ApplicationInstallMobile;
-  const email = driverFromTe.Email || '';
-  const city = driverFromTe.City || '';
-  const state = driverFromTe.State || '';
-
-  const statusColor = enable ? '#4caf50' : '#f44336';
-  const statusText = enable ? 'ATIVO' : 'INATIVO';
-  const statusIcon = enable ? '&#10003;' : '&#10007;';
-  const appIcon = appInstalled ? '&#9989;' : '&#10060;';
-  const appText = appInstalled ? 'Instalado' : 'Nao Instalado';
-
-  return `
-<div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; border: 1px solid #e0e0e0; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-  <!-- Header -->
-  <div style="background: linear-gradient(135deg, #2e7d32, #43a047); color: white; padding: 14px 16px; display: flex; align-items: center; gap: 10px;">
-    <div style="font-size: 22px;">&#128100;</div>
-    <div style="flex: 1;">
-      <div style="font-size: 14px; font-weight: 700;">Motorista TE</div>
-      <div style="font-size: 11px; opacity: 0.85;">${driverName}</div>
-    </div>
-    <div style="background: ${statusColor}; color: white; font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px; text-transform: uppercase; display: flex; align-items: center; gap: 4px;">${statusIcon} ${statusText}</div>
-  </div>
-  <!-- Body -->
-  <div style="padding: 14px 16px;">
-    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-      <span style="font-size: 11px; color: #888;">Telefone</span>
-      <span style="font-size: 12px; font-weight: 600; color: #2e7d32;"><a href="tel:+${phoneCountry}${phone}" style="color: #2e7d32; text-decoration: none;">${fullPhone}</a></span>
-    </div>
-    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-      <span style="font-size: 11px; color: #888;">Aplicativo</span>
-      <span style="font-size: 12px; color: #333;">${appIcon} ${appText}</span>
-    </div>
-    ${lastAccess ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Ultimo Acesso</span><span style="font-size: 12px; color: #333;">${formatDate(lastAccess)}</span></div>` : ''}
-    ${email ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">E-mail</span><span style="font-size: 12px; color: #333;">${email}</span></div>` : ''}
-    ${(city || state) ? `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="font-size: 11px; color: #888;">Cidade</span><span style="font-size: 12px; color: #333;">${city}${state ? '/' + state : ''}</span></div>` : ''}
-    ${!enable ? `<div style="margin-top: 10px; padding: 8px 12px; background: #ffebee; border-radius: 6px; border-left: 3px solid #f44336;"><div style="font-size: 12px; color: #c62828;">Motorista inativo no TudoEntregue</div></div>` : ''}
-    ${enable && !appInstalled ? `<div style="margin-top: 10px; padding: 8px 12px; background: #fff3e0; border-radius: 6px; border-left: 3px solid #ff9800;"><div style="font-size: 12px; color: #e65100;">Aplicativo nao instalado. SMS com link de download enviado.</div></div>` : ''}
-  </div>
-  <!-- Footer -->
-  <div style="background: #f5f5f5; padding: 8px 16px; font-size: 10px; color: #aaa; text-align: right;">Atualizado: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</div>
-</div>`;
-}
-
-function buildMotoristaNotFoundCard(driverName) {
-  return `
-<div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; border: 1px solid #e0e0e0; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-  <div style="background: linear-gradient(135deg, #e65100, #ff9800); color: white; padding: 14px 16px; display: flex; align-items: center; gap: 10px;">
-    <div style="font-size: 22px;">&#128100;</div>
-    <div style="flex: 1;">
-      <div style="font-size: 14px; font-weight: 700;">Motorista TE</div>
-      <div style="font-size: 11px; opacity: 0.85;">${driverName}</div>
-    </div>
-    <div style="background: #f44336; color: white; font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px;">NAO ENCONTRADO</div>
-  </div>
-  <div style="padding: 14px 16px;">
-    <div style="padding: 10px 12px; background: #fff3e0; border-radius: 6px; border-left: 3px solid #ff9800;">
-      <div style="font-size: 12px; color: #e65100;">Motorista nao encontrado no TudoEntregue. Configure o telefone no mapa MOTORISTA_PHONE_MAP para cadastro automatico.</div>
-    </div>
-  </div>
-  <div style="background: #f5f5f5; padding: 8px 16px; font-size: 10px; color: #aaa; text-align: right;">Atualizado: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</div>
-</div>`;
-}
-
-function buildErrorCard(title, message) {
-  return `
-<div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; border: 1px solid #e0e0e0; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-  <div style="background: linear-gradient(135deg, #c62828, #e53935); color: white; padding: 14px 16px; display: flex; align-items: center; gap: 10px;">
-    <div style="font-size: 22px;">&#9888;</div>
-    <div style="font-size: 14px; font-weight: 700;">${title}</div>
-  </div>
-  <div style="padding: 14px 16px;">
-    <div style="font-size: 12px; color: #c62828;">${message}</div>
-  </div>
-  <div style="background: #f5f5f5; padding: 8px 16px; font-size: 10px; color: #aaa; text-align: right;">${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}</div>
-</div>`;
-}
-
-function formatDate(dateStr) {
+function fmtDate(dateStr) {
   if (!dateStr) return '';
   try {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return dateStr;
-    return d.toLocaleString('pt-BR', {
-      timeZone: 'America/Sao_Paulo',
-      day: '2-digit', month: '2-digit', year: 'numeric',
-      hour: '2-digit', minute: '2-digit',
-    });
-  } catch {
-    return dateStr;
-  }
+    return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo',
+      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch { return dateStr; }
 }
+
+function buildTeCard(delivery, trackingData, situationData) {
+  // Dados da entrega
+  const sitCode = delivery.Situation ?? delivery.situation ?? null;
+  const sitLabel = SITUATION_LABELS[sitCode] || ("Situacao " + sitCode);
+  const sitColor = SITUATION_ORDER_COLORS[sitCode] || '#607d8b';
+  const trackingCode = delivery.TrackingCode || delivery.trackingCode || '';
+  const orderNum = delivery.OrderNumber || delivery.orderNumber || '';
+  const custName = delivery.CustomerName || delivery.customerName || '';
+  const scheduled = delivery.ScheduledDate || delivery.scheduledDate || '';
+  const deliveredDate = delivery.DeliveredDate || delivery.deliveredDate || '';
+  const occDesc = delivery.OccurrenceDescription || delivery.occurrenceDescription || '';
+  const proofUrl = delivery.ProofUrl || delivery.proofUrl || '';
+
+  // Motorista — vem do /api/Entregas
+  let driverName = delivery.DriverName || delivery.driverName || '';
+  let driverPhone = delivery.DriverPhone || delivery.driverPhone || '';
+
+  // Motorista — complementa do /orders/situation (telefone completo com pais)
+  const sitDriver = situationData?.Driver;
+  if (sitDriver) {
+    if (!driverName && sitDriver.Name) driverName = sitDriver.Name;
+    if (!driverPhone && sitDriver.PhoneNumber) {
+      const pc = sitDriver.PhoneCountry || '55';
+      driverPhone = '+' + pc + ' ' + sitDriver.PhoneNumber;
+    }
+  }
+
+  // Motorista — complementa do /tracking (nome + foto)
+  const trackOrder = trackingData?.Order;
+  const trackDriver = trackOrder?.Driver;
+  if (trackDriver) {
+    if (!driverName && trackDriver.Name) driverName = trackDriver.Name;
+  }
+
+  // --- Linhas de informacao ---
+  const row = (label, value, color, href) => {
+    if (!value) return '';
+    const valHtml = href
+      ? '<a href="' + href + '" target="_blank" style="color:' + (color || '#333') + ';text-decoration:none;">' + value + '</a>'
+      : '<span style="color:' + (color || '#333') + ';">' + value + '</span>';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+      '<span style="font-size:11px;color:#888;">' + label + '</span>' +
+      '<span style="font-size:12px;font-weight:500;">' + valHtml + '</span></div>';
+  };
+
+  // --- Bloco do motorista (destacado) ---
+  let motoristaHtml = '';
+  if (driverName) {
+    const phoneLink = driverPhone ? ('tel:' + driverPhone.replace(/[^0-9+]/g, '')) : '';
+    const driverPhoto = trackDriver?.PictureUrl || '';
+    motoristaHtml =
+      '<div style="margin-top:10px;padding:12px;background:linear-gradient(135deg,#e8f5e9,#f1f8e9);border-radius:8px;border:1px solid #c8e6c9;">' +
+        '<div style="display:flex;align-items:center;gap:10px;">' +
+          (driverPhoto
+            ? '<img src="' + driverPhoto + '" style="width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid #43a047;" />'
+            : '<div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#2e7d32,#43a047);display:flex;align-items:center;justify-content:center;color:white;font-size:18px;">&#128100;</div>') +
+          '<div style="flex:1;">' +
+            '<div style="font-size:13px;font-weight:700;color:#1b5e20;">' + driverName + '</div>' +
+            (driverPhone
+              ? '<div style="font-size:11px;color:#555;"><a href="' + phoneLink + '" style="color:#2e7d32;text-decoration:none;font-weight:600;">' + driverPhone + '</a></div>'
+              : '') +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  // --- Timeline de status (do /orders/situation) ---
+  let timelineHtml = '';
+  const statuses = situationData?.Status || [];
+  if (statuses.length > 0) {
+    const items = statuses.map((s, i) => {
+      const label = SIT_ORDER_LABELS[s.Status] || ('Status ' + s.Status);
+      const color = SITUATION_ORDER_COLORS[s.Status] || '#607d8b';
+      const date = s.Date ? fmtDate(s.Date) : '';
+      const first = (i === 0);
+      return '<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:' + (first ? '8' : '5') + 'px;">' +
+        '<div style="min-width:10px;min-height:10px;width:10px;height:10px;border-radius:50%;background:' + color + ';margin-top:4px;' +
+          (first ? 'box-shadow:0 0 0 3px ' + color + '33;' : 'opacity:0.5;') + '"></div>' +
+        '<div style="flex:1;">' +
+          '<div style="font-size:12px;color:#333;font-weight:' + (first ? '600' : '400') + ';">' + label + '</div>' +
+          (date ? '<div style="font-size:10px;color:#999;margin-top:1px;">' + date + '</div>' : '') +
+        '</div></div>';
+    }).join('');
+    timelineHtml = '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #e0e0e0;">' +
+      '<div style="font-size:11px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Historico</div>' +
+      items + '</div>';
+  }
+
+  // --- Ocorrencias com fotos (do /tracking) ---
+  let occHtml = '';
+  const trackStatuses = trackingData?.TrackingStatus || [];
+  if (trackStatuses.length > 0) {
+    const occItems = trackStatuses.map(ts => {
+      const ok = (ts.Status === 'check');
+      const icon = ok ? '&#10003;' : '&#9888;';
+      const color = ok ? '#4caf50' : '#ff9800';
+      const date = ts.Date ? fmtDate(ts.Date) : '';
+      const images = (ts.AttachmentsImagesUrls || []).filter(Boolean);
+      return '<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;padding:8px;background:' +
+        (ok ? '#f1f8e9' : '#fff3e0') + ';border-radius:6px;">' +
+        '<div style="color:' + color + ';font-size:16px;font-weight:bold;min-width:20px;text-align:center;">' + icon + '</div>' +
+        '<div style="flex:1;">' +
+          '<div style="font-size:12px;color:#333;">' + (ts.Description || '') + '</div>' +
+          (date ? '<div style="font-size:10px;color:#999;margin-top:2px;">' + date + '</div>' : '') +
+          (images.length > 0
+            ? '<div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;">' +
+                images.map(img => '<img src="' + img + '" style="max-width:120px;max-height:80px;border-radius:4px;cursor:pointer;" />').join('') +
+              '</div>'
+            : '') +
+        '</div></div>';
+    }).join('');
+    occHtml = '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #e0e0e0;">' +
+      '<div style="font-size:11px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Ocorrencias</div>' +
+      occItems + '</div>';
+  }
+
+  // --- Ocorrencia principal (do /api/Entregas) ---
+  let mainOccHtml = '';
+  if (occDesc) {
+    mainOccHtml = '<div style="margin-top:10px;padding:8px 12px;background:#fff3e0;border-radius:6px;border-left:3px solid #ff9800;">' +
+      '<div style="font-size:11px;color:#888;margin-bottom:2px;">Ocorrencia</div>' +
+      '<div style="font-size:12px;color:#e65100;">' + occDesc + '</div></div>';
+  }
+
+  // --- Comprovante ---
+  let proofHtml = '';
+  if (proofUrl) {
+    proofHtml = '<div style="margin-top:10px;text-align:center;">' +
+      '<a href="' + proofUrl + '" target="_blank" style="display:inline-block;padding:8px 20px;background:#1565c0;color:white;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;">&#128196; Ver Comprovante de Entrega</a></div>';
+  }
+
+  return '<div style="font-family:\'Segoe UI\',Arial,sans-serif;max-width:480px;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">' +
+    '<div style="background:linear-gradient(135deg,#1565c0,#1e88e5);color:white;padding:14px 16px;display:flex;align-items:center;gap:10px;">' +
+      '<div style="font-size:22px;">&#128666;</div>' +
+      '<div style="flex:1;"><div style="font-size:14px;font-weight:700;">TudoEntregue</div>' +
+      '<div style="font-size:11px;opacity:0.85;">Status de Entrega</div></div>' +
+      '<div style="background:' + sitColor + ';color:white;font-size:10px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;">' + sitLabel + '</div>' +
+    '</div>' +
+    '<div style="padding:14px 16px;">' +
+      row('Pedido', orderNum) +
+      (trackingCode ? row('Rastreio', trackingCode, '#1565c0', 'https://app.tudoentregue.com.br/rastreamento/' + trackingCode) : '') +
+      row('Cliente', custName) +
+      row('Agendamento', fmtDate(scheduled)) +
+      (deliveredDate ? row('Entregue em', fmtDate(deliveredDate), '#4caf50') : '') +
+      motoristaHtml +
+      mainOccHtml +
+      timelineHtml +
+      occHtml +
+      proofHtml +
+    '</div>' +
+    '<div style="background:#f5f5f5;padding:8px 16px;font-size:10px;color:#aaa;text-align:right;">Atualizado: ' +
+      new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '</div>' +
+  '</div>';
+}
+
+function buildErrorCard(title, message) {
+  return '<div style="font-family:\'Segoe UI\',Arial,sans-serif;max-width:480px;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">' +
+    '<div style="background:linear-gradient(135deg,#c62828,#e53935);color:white;padding:14px 16px;display:flex;align-items:center;gap:10px;">' +
+    '<div style="font-size:22px;">&#9888;</div>' +
+    '<div style="font-size:14px;font-weight:700;">' + title + '</div></div>' +
+    '<div style="padding:14px 16px;"><div style="font-size:12px;color:#c62828;">' + message + '</div></div>' +
+    '<div style="background:#f5f5f5;padding:8px 16px;font-size:10px;color:#aaa;text-align:right;">' +
+    new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '</div></div>';
+}</arg_value><arg_key>old_str
 
 // ============================================================
 // POST /api/v1/te/delivery-status — Busca status TE e grava card HTML
