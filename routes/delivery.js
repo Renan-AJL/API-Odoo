@@ -549,18 +549,12 @@ router.post('/send-invoice', async (req, res) => {
     }
     console.log('[TE-SEND-INVOICE] Fatura: ' + invoice.name + ' (id=' + invoice.id + ', partner=' + JSON.stringify(invoice.partner_id) + ')');
 
-    // 2. Le o partner da fatura
+    // 2. Le o partner da fatura (usa getPartner com safeReadCustom — fallback automatico)
     const partnerId = invoice.partner_id ? (Array.isArray(invoice.partner_id) ? invoice.partner_id[0] : invoice.partner_id) : null;
     if (!partnerId) {
       return res.status(400).json({ success: false, error: 'Fatura sem parceiro' });
     }
-    const partnerArr = await odooTe.read('res.partner', [partnerId], [
-      'id', 'name', 'cnpj_cpf', 'vat', 'phone', 'mobile', 'email',
-      'street', 'street_number', 'street2', 'zip', 'city',
-      'l10n_br_district', 'partner_latitude', 'partner_longitude', 'state_id', 'country_id',
-      ...odooTe.getStudioFields('res.partner'),
-    ]);
-    const partnerData = Array.isArray(partnerArr) ? partnerArr[0] : partnerArr;
+    const partnerData = await odooTe.getPartner(partnerId);
 
     // 3. Tenta encontrar a venda (3 vias)
     let saleOrder = null;
