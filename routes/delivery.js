@@ -529,7 +529,7 @@ function buildErrorCard(title, message) {
     '<div style="padding:14px 16px;"><div style="font-size:12px;color:#c62828;">' + message + '</div></div>' +
     '<div style="background:#f5f5f5;padding:8px 16px;font-size:10px;color:#aaa;text-align:right;">' +
     new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '</div></div>';
-}</arg_value><arg_key>old_str
+}
 
 // ============================================================
 // POST /api/v1/te/delivery-status — Busca status TE e grava card HTML
