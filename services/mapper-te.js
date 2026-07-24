@@ -199,7 +199,7 @@ function buildDocuments(invoice, orderLines, productsMap) {
   // Se tem linhas do pedido, monta volumes com os itens
   if (orderLines && orderLines.length) {
     orderLines.forEach(function(line) {
-      var qty = line.product_uom_qty || 0;
+      var qty = line.product_uom_qty || line.quantity || 0;
       if (qty <= 0) return;
 
       var productId = line.product_id ? line.product_id[0] : null;
@@ -252,7 +252,23 @@ function odooToTeDelivery(ctx) {
   var orderLines = ctx.orderLines || [];
   var productsMap = ctx.productsMap;
 
-  if (!picking || !partner) return null;
+  if (!partner) return null;
+
+  // Se nao tem picking (fluxo via fatura sem sale.order), cria picking sintetico a partir da invoice
+  if (!picking) {
+    if (invoice) {
+      picking = {
+        id: invoice.id,
+        name: invoice.name || String(invoice.id),
+        origin: invoice.name || '',
+        scheduled_date: invoice.invoice_date || invoice.create_date || '',
+        note: '',
+      };
+      logger.info('[MAPPER] Picking sintetico a partir da fatura ' + (invoice.name || invoice.id));
+    } else {
+      return null;
+    }
+  }
 
   // OrderNumber: prioriza nome do sale.order (ex: S00176), senao picking.origin, senao picking.name
   var orderNumber = '';
@@ -281,7 +297,7 @@ function odooToTeDelivery(ctx) {
   var totalQty = 0;
   if (orderLines && orderLines.length) {
     orderLines.forEach(function(line) {
-      var qty = line.product_uom_qty || 0;
+      var qty = line.product_uom_qty || line.quantity || 0;
       if (qty <= 0) return;
       var productId = line.product_id ? line.product_id[0] : null;
       var product = productId ? (productsMap[productId] || {}) : {};

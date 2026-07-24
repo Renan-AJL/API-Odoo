@@ -533,7 +533,8 @@ function buildErrorCard(title, message) {
 
 // ============================================================
 // POST /api/v1/te/send-invoice — Envia fatura ao TE (botao Odoo)
-// Body: { invoice_id: number }
+// Body: { invoice_id: number, sale_order_id?: number }
+// Funciona COM ou SEM sale.order vinculada
 // ============================================================
 router.post('/send-invoice', async (req, res) => {
   console.log('[TE-SEND-INVOICE] Body recebido: ' + JSON.stringify(req.body));
@@ -541,74 +542,93 @@ router.post('/send-invoice', async (req, res) => {
   if (!invId) return res.status(400).json({ success: false, error: 'invoice_id obrigatorio' });
 
   try {
-    console.log('[TE-SEND-INVOICE] invoice_id=' + invId);
-
-    // 1. Encontra a venda relacionada
-    const saleOrder = await odooTe.findSaleOrderByInvoice(invId);
-    if (!saleOrder) {
-      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO</b><br/>Nenhuma venda (sale.order) encontrada para esta fatura. Verifique se a fatura esta vinculada a um pedido de venda.');
-      return res.status(404).json({ success: false, error: 'Venda nao encontrada para esta fatura' });
+    // 1. Le a fatura completa
+    const invoice = await odooTe.readInvoiceFull(invId);
+    if (!invoice) {
+      return res.status(404).json({ success: false, error: 'Fatura ' + invId + ' nao encontrada' });
     }
-    console.log('[TE-SEND-INVOICE] Venda: ' + saleOrder.name + ' (id=' + saleOrder.id + ')');
+    console.log('[TE-SEND-INVOICE] Fatura: ' + invoice.name + ' (id=' + invoice.id + ', partner=' + JSON.stringify(invoice.partner_id) + ')');
 
-    // 2. Encontra o picking de entrega
-    const picking = await odooTe.findDeliveryPicking(saleOrder.id);
-    if (!picking) {
-      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO</b><br/>Picking de entrega nao encontrado para ' + saleOrder.name + '. Confirme o pedido primeiro.');
-      return res.status(404).json({ success: false, error: 'Picking de entrega nao encontrado' });
+    // 2. Le o partner da fatura
+    const partnerId = invoice.partner_id ? (Array.isArray(invoice.partner_id) ? invoice.partner_id[0] : invoice.partner_id) : null;
+    if (!partnerId) {
+      return res.status(400).json({ success: false, error: 'Fatura sem parceiro' });
     }
-    console.log('[TE-SEND-INVOICE] Picking: ' + picking.name + ' (id=' + picking.id + ')');
-
-    // 3. Le o partner
-    const partnerId = picking.partner_id ? picking.partner_id[0] : null;
-    if (!partnerId) return res.status(400).json({ success: false, error: 'Picking sem parceiro' });
-    const partner = await odooTe.read('res.partner', [partnerId], [
+    const partnerArr = await odooTe.read('res.partner', [partnerId], [
       'id', 'name', 'cnpj_cpf', 'vat', 'phone', 'mobile', 'email',
       'street', 'street_number', 'street2', 'zip', 'city',
       'l10n_br_district', 'partner_latitude', 'partner_longitude', 'state_id', 'country_id',
       ...odooTe.getStudioFields('res.partner'),
     ]);
-    const partnerData = Array.isArray(partner) ? partner[0] : partner;
+    const partnerData = Array.isArray(partnerArr) ? partnerArr[0] : partnerArr;
 
-    // 4. Le a venda completa (com x_studio_motorista)
-    const saleFull = await odooTe.readSaleOrderFull(saleOrder.id);
+    // 3. Tenta encontrar a venda (3 vias)
+    let saleOrder = null;
+    let saleFull = null;
+    let picking = null;
 
-    // 5. Le a fatura (numero NF + valor)
-    let invoice = { id: invId, name: String(invId), amount_total: 0 };
-    try {
-      const invRead = await odooTe.read('account.move', [invId], ['id', 'name', 'amount_total']);
-      if (Array.isArray(invRead) && invRead[0]) invoice = invRead[0];
-    } catch (err) {
-      console.warn('[TE-SEND-INVOICE] Erro lendo fatura: ' + err.message);
+    // 3a. Se Odoo enviou sale_order_id diretamente no body
+    if (req.body.sale_order_id) {
+      console.log('[TE-SEND-INVOICE] sale_order_id direto: ' + req.body.sale_order_id);
+      saleOrder = await odooTe.findSaleOrderById(req.body.sale_order_id);
     }
 
-    // 6. Le linhas do pedido + produtos
-    const orderLines = await odooTe.getSaleOrderLines(saleOrder.id);
+    // 3b. Busca automatica via relacao invoice -> sale.order
+    if (!saleOrder) {
+      saleOrder = await odooTe.findSaleOrderByInvoice(invId);
+    }
+
+    // 4. Se tem venda, busca dados completos (picking, linhas, motorista)
+    let orderLines = [];
+    let productsMap = {};
+
+    if (saleOrder) {
+      console.log('[TE-SEND-INVOICE] Venda encontrada: ' + saleOrder.name + ' (id=' + saleOrder.id + ')');
+      saleFull = await odooTe.readSaleOrderFull(saleOrder.id);
+      picking = await odooTe.findDeliveryPicking(saleOrder.id);
+      if (picking) {
+        console.log('[TE-SEND-INVOICE] Picking: ' + picking.name + ' (id=' + picking.id + ')');
+      } else {
+        console.log('[TE-SEND-INVOICE] Picking nao encontrado, usando fatura como base');
+      }
+      orderLines = await odooTe.getSaleOrderLines(saleOrder.id);
+    } else {
+      console.log('[TE-SEND-INVOICE] Venda NAO encontrada. Fluxo direto fatura->TE (sem motorista, sem picking)');
+      // Usa linhas da fatura como orderLines
+      try {
+        orderLines = await odooTe.getInvoiceLines(invId);
+        console.log('[TE-SEND-INVOICE] ' + orderLines.length + ' linhas da fatura com produto');
+      } catch (err) {
+        console.warn('[TE-SEND-INVOICE] Erro lendo linhas da fatura: ' + err.message);
+      }
+    }
+
+    // 5. Busca produtos das linhas
     const productIds = [];
-    if (orderLines.length) {
-      orderLines.forEach(function(line) {
-        if (line.product_id && line.product_id[0]) productIds.push(line.product_id[0]);
-      });
-    }
-    const productsMap = await odooTe.getProducts(productIds);
+    orderLines.forEach(function(line) {
+      if (line.product_id && line.product_id[0]) productIds.push(line.product_id[0]);
+    });
+    if (productIds.length) productsMap = await odooTe.getProducts(productIds);
 
-    // 7. Le dados da empresa (remetente)
+    // 6. Le dados da empresa (remetente)
     const company = await odooTe.getCompany();
 
-    // 8. Mapeia para TE
+    // 7. Mapeia para TE (picking sera sintetico pelo mapper se null)
     const delivery = Mapper.odooToTeDelivery({
       picking: picking,
       partner: partnerData,
-      saleOrder: saleFull,
+      saleOrder: saleFull || saleOrder,
       invoice: invoice,
       company: company,
       companyCnpj: config.empresa.cnpj,
       orderLines: orderLines,
       productsMap: productsMap,
     });
-    if (!delivery) return res.status(500).json({ success: false, error: 'Falha no mapeamento dos dados' });
+    if (!delivery) {
+      return res.status(500).json({ success: false, error: 'Falha no mapeamento dos dados' });
+    }
 
-    // 9. Chatter: enviando
+    // 8. Chatter: enviando (so em account.move + se tiver, sale.order/picking)
     var chatterMsg = '<b>TudoEntregue</b><br/>';
     chatterMsg += 'Enviando ao TudoEntregue...<br/>';
     chatterMsg += 'Pedido: ' + delivery.OrderNumber + '<br/>';
@@ -621,36 +641,41 @@ router.post('/send-invoice', async (req, res) => {
     if (delivery.Documents && delivery.Documents.length) {
       chatterMsg += '<br/>NF: ' + (delivery.Documents[0].DocumentNumber || '');
     }
+    if (!saleOrder) {
+      chatterMsg += '<br/><i>Sem sale.order vinculada — fluxo direto fatura</i>';
+    }
     await odooTe.postChatter('account.move', invId, chatterMsg);
-    await odooTe.postChatter('stock.picking', picking.id, chatterMsg);
-    await odooTe.postChatter('sale.order', saleOrder.id, chatterMsg);
+    if (picking) await odooTe.postChatter('stock.picking', picking.id, chatterMsg);
+    if (saleOrder) await odooTe.postChatter('sale.order', saleOrder.id, chatterMsg);
 
-    // 10. Envia ao TE
+    // 9. Envia ao TE
     console.log('[TE-SEND-INVOICE] Enviando ao TE...');
     const teResult = await teClient.createDeliveries([delivery]);
     const teResp = Array.isArray(teResult) ? teResult[0] : teResult;
 
-    // 11. Grava retorno
+    // 10. Grava retorno
     if (teResp) {
       const odooData = Mapper.teCreateToOdoo(teResp);
       await odooTe.markInvoiceSynced([invId], teResp.OrderID || null);
-      if (Object.keys(odooData).length) {
-        await odooTe.updatePickingTeData(picking.id, odooData);
-        await odooTe.updateSaleOrderTeData(saleOrder.id, odooData);
+      if (picking) {
+        if (Object.keys(odooData).length) await odooTe.updatePickingTeData(picking.id, odooData);
+        await odooTe.markPickingsSynced([picking.id], teResp.OrderID || null);
       }
-      await odooTe.markPickingsSynced([picking.id], teResp.OrderID || null);
-      await odooTe.markSaleOrdersSynced([saleOrder.id], teResp.OrderID || null);
+      if (saleOrder) {
+        if (Object.keys(odooData).length) await odooTe.updateSaleOrderTeData(saleOrder.id, odooData);
+        await odooTe.markSaleOrdersSynced([saleOrder.id], teResp.OrderID || null);
+      }
 
       var resultMsg = Mapper.chatterCreateMessage(teResp, delivery);
       await odooTe.postChatter('account.move', invId, resultMsg);
-      await odooTe.postChatter('stock.picking', picking.id, resultMsg);
-      await odooTe.postChatter('sale.order', saleOrder.id, resultMsg);
+      if (picking) await odooTe.postChatter('stock.picking', picking.id, resultMsg);
+      if (saleOrder) await odooTe.postChatter('sale.order', saleOrder.id, resultMsg);
 
       res.json({
         success: true,
         invoice_id: invId,
-        sale: saleOrder.name,
-        picking: picking.name,
+        sale: saleOrder ? saleOrder.name : null,
+        picking: picking ? picking.name : null,
         te_order_id: teResp.OrderID,
         te_received: teResp.Received,
         te_tracking: teResp.TrackingCode,

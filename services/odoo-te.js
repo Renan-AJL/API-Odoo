@@ -559,6 +559,26 @@ class OdooTeClient {
     if (teOrderId) vals.x_studio_te_order_id = String(teOrderId);
     return this.write('account.move', invoiceIds, vals);
   }
+
+  // -------------------------------------------------------
+  // INVOICE HELPERS (para send-invoice sem sale.order)
+  // -------------------------------------------------------
+
+  async readInvoiceFull(invoiceId) {
+    const results = await this.read('account.move', [invoiceId], [
+      'id', 'name', 'amount_total', 'partner_id', 'invoice_date', 'create_date',
+      'payment_reference', 'ref',
+    ]);
+    return Array.isArray(results) ? results[0] : results;
+  }
+
+  async getInvoiceLines(invoiceId) {
+    return this.searchRead(
+      'account.move.line',
+      [['move_id', '=', invoiceId], ['product_id', '!=', false], ['display_type', '=', false]],
+      ['id', 'name', 'product_id', 'quantity', 'price_unit', 'price_subtotal']
+    );
+  }
 }
 
 module.exports = new OdooTeClient();
