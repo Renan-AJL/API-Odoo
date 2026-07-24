@@ -340,24 +340,9 @@ async function findSaleOrderByInvoice(invoiceId) {
     console.log('[ODOO-TE] Estrategia 3 (lines): sem resultados');
   } catch (err) { console.warn('[ODOO-TE] Estrategia 3 falhou: ' + err.message); }
 
-  // Estrategia 4: partner_id fallback
-  try {
-    var invData = await executeKw('account.move', 'read', [[invoiceId]], { fields: ['partner_id'] });
-    var inv = invData && invData[0];
-    var partnerId = inv && inv.partner_id ? (Array.isArray(inv.partner_id) ? inv.partner_id[0] : inv.partner_id) : null;
-    if (partnerId) {
-      console.log('[ODOO-TE] Estrategia 4: buscando sale.order por partner_id=' + partnerId);
-      var orders = await safeReadCustom('sale.order', null, ['id', 'name', 'state'], []);
-      // search + read
-      var ids = await executeKw('sale.order', 'search', [
-        ['partner_id', '=', partnerId], ['state', 'in', ['sale', 'done']],
-      ], { limit: 5, order: 'id desc' });
-      if (ids && ids.length) {
-        var orders = await executeKw('sale.order', 'read', [ids], { fields: ['id', 'name'] });
-        if (orders && orders[0]) { console.log('[ODOO-TE] Estrategia 4 (partner) encontrou: ' + orders[0].name); return orders[0]; }
-      }
-    }
-  } catch (err) { console.warn('[ODOO-TE] Estrategia 4 falhou: ' + err.message); }
+  // NOTA: Estrategia 4 (partner_id fallback) removida — achava vendas nao
+  // relacionadas ao mesmo cliente. Para send-invoice sem venda vinculada,
+  // o fluxo correto e usar as linhas da fatura diretamente.
 
   console.error('[ODOO-TE] Nenhuma estrategia encontrou sale.order para invoice ' + invoiceId);
   return null;

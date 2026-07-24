@@ -573,22 +573,31 @@ router.post('/send-invoice', async (req, res) => {
     }
 
     // 4. Se tem venda, busca dados completos (picking, linhas, motorista)
+    //    Se qualquer etapa falhar, cai pro fluxo direto fatura->TE
     let orderLines = [];
     let productsMap = {};
 
     if (saleOrder) {
-      console.log('[TE-SEND-INVOICE] Venda encontrada: ' + saleOrder.name + ' (id=' + saleOrder.id + ')');
-      saleFull = await odooTe.readSaleOrderFull(saleOrder.id);
-      picking = await odooTe.findDeliveryPicking(saleOrder.id);
-      if (picking) {
-        console.log('[TE-SEND-INVOICE] Picking: ' + picking.name + ' (id=' + picking.id + ')');
-      } else {
-        console.log('[TE-SEND-INVOICE] Picking nao encontrado, usando fatura como base');
+      try {
+        console.log('[TE-SEND-INVOICE] Venda encontrada: ' + saleOrder.name + ' (id=' + saleOrder.id + ')');
+        saleFull = await odooTe.readSaleOrderFull(saleOrder.id);
+        picking = await odooTe.findDeliveryPicking(saleOrder.id);
+        if (picking) {
+          console.log('[TE-SEND-INVOICE] Picking: ' + picking.name + ' (id=' + picking.id + ')');
+        } else {
+          console.log('[TE-SEND-INVOICE] Picking nao encontrado, usando fatura como base');
+        }
+        orderLines = await odooTe.getSaleOrderLines(saleOrder.id);
+      } catch (err) {
+        console.warn('[TE-SEND-INVOICE] Erro ao buscar venda/picking, usando fatura direto: ' + err.message);
+        saleOrder = null;
+        saleFull = null;
+        picking = null;
       }
-      orderLines = await odooTe.getSaleOrderLines(saleOrder.id);
-    } else {
-      console.log('[TE-SEND-INVOICE] Venda NAO encontrada. Fluxo direto fatura->TE (sem motorista, sem picking)');
-      // Usa linhas da fatura como orderLines
+    }
+
+    if (!saleOrder) {
+      console.log('[TE-SEND-INVOICE] Fluxo direto fatura->TE (sem motorista, sem picking)');
       try {
         orderLines = await odooTe.getInvoiceLines(invId);
         console.log('[TE-SEND-INVOICE] ' + orderLines.length + ' linhas da fatura com produto');
