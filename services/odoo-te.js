@@ -423,11 +423,18 @@ async function getCompany() {
   try {
     var ids = await executeKw('res.company', 'search', [[]], { limit: 1 });
     if (!ids || !ids.length) return null;
-    var companies = await executeKw('res.company', 'read', [ids], {
-      fields: ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id',
-               'phone', 'email', 'partner_id', 'vat', 'l10n_br_cnpj_cpf', 'district', 'number'],
-    });
-    return companies ? companies[0] : null;
+    // Tenta com campos opcionais primeiro
+    try {
+      return (await executeKw('res.company', 'read', [ids], {
+        fields: ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id',
+                 'phone', 'email', 'partner_id', 'vat', 'district', 'number'],
+      }))[0] || null;
+    } catch (err) {
+      // Fallback: campos nativos garantidos
+      return (await executeKw('res.company', 'read', [ids], {
+        fields: ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id', 'phone', 'email', 'partner_id', 'vat'],
+      }))[0] || null;
+    }
   } catch (err) {
     logger.warn('[ODOO-TE] Erro lendo res.company: ' + err.message);
     return null;

@@ -347,7 +347,7 @@ function odooToTeDelivery(ctx) {
       DocumentNumber: (companyCnpj || '').replace(/\D/g, ''),
     },
     Driver: driver,
-    OrderType: teApi.ORDER_TYPE.ENTREGA,
+    OrderType: (teApi.ORDER_TYPES || teApi.ORDER_TYPE || {}).ENTREGA || 1,
     OrderID: String(picking.id),
     OrderNumber: orderNumber,
     OrderDescription: 'NF-e',
