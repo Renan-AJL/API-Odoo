@@ -594,7 +594,7 @@ router.post('/delivery-status', async (req, res) => {
     }
 
     // 5. Monta card HTML
-    const cardHtml = buildDeliveryStatusCard(deliveryData, trackingData, situationData);
+    const cardHtml = buildTeCard(deliveryData || {}, trackingData, situationData);
 
     // 6. Tambem atualiza campos padrao do TE
     if (deliveryData) {
@@ -603,7 +603,20 @@ router.post('/delivery-status', async (req, res) => {
       await odooTe.updateSaleOrderTeData(saleOrderId, soMapped);
     }
 
-    // 7. Grava card no campo HTML
+    // 7. Atualiza campo de motorista (selection) a partir do TE
+    let motoristaAtualizado = null;
+    if (deliveryData) {
+      const driverName = deliveryData.DriverName || deliveryData.driverName || '';
+      if (driverName) {
+        motoristaAtualizado = matchMotoristaSelection(driverName);
+        if (motoristaAtualizado) {
+          await odooTe.updateSaleOrderMotorista(saleOrderId, motoristaAtualizado);
+          console.log(`[TE-DELIVERY-STATUS] Motorista: ${driverName} -> ${motoristaAtualizado}`);
+        }
+      }
+    }
+
+    // 8. Grava card no campo HTML
     await odooTe.updateSaleOrderStatusHtml(saleOrderId, cardHtml);
 
     console.log(`[TE-DELIVERY-STATUS] Card atualizado: SO ${orderName} (${saleOrderId})`);
@@ -612,6 +625,7 @@ router.post('/delivery-status', async (req, res) => {
       orderName,
       teOrderId,
       trackingCode,
+      motorista: motoristaAtualizado || null,
       hasDeliveryData: !!deliveryData,
       hasSituationData: !!situationData,
       hasTrackingData: !!trackingData,
@@ -629,107 +643,39 @@ router.post('/delivery-status', async (req, res) => {
 });
 
 // ============================================================
-// POST /api/v1/te/sync-motorista — Sincroniza motorista com TE
-// Body: { saleOrderId: number }
+// MATCH MOTORISTA — Faz match do nome do TE com as opcoes do campo selection
+// O campo x_studio_motorista e um selection com 17 opcoes (key/label)
 // ============================================================
-router.post('/sync-motorista', async (req, res) => {
-  try {
-    const { saleOrderId } = req.body;
-    if (!saleOrderId) {
-      return res.status(400).json({ success: false, error: 'Informe saleOrderId' });
-    }
+const MOTORISTA_OPTIONS = [
+  'adelson', 'anderlucio', 'antonio', 'carlos', 'daniel',
+  'diego', 'eduardo', 'fellipe', 'gerson', 'glauber',
+  'henrique', 'italo', 'jeferson', 'joao_pedro', 'lucas',
+  'matheus', 'rafael',
+];
 
-    // 1. Busca sale order e o motorista selecionado
-    const so = await odooTe.findSaleOrderById(saleOrderId);
-    if (!so) {
-      return res.status(404).json({ success: false, error: `Sale Order ${saleOrderId} nao encontrada` });
-    }
+function matchMotoristaSelection(driverNameFromTe) {
+  if (!driverNameFromTe) return null;
+  const name = driverNameFromTe.toUpperCase().trim();
+  // Remove sufixos comuns como "MOTORISTA", "FRETE", etc
+  const cleanName = name
+    .replace(/\b(MOTORISTA|FRETE|ENTREGAS|MOTOBOY)\b/g, '')
+    .replace(/[^A-ZÀ-Ú\s]/g, '')
+    .trim();
+  const parts = cleanName.split(/\s+/).filter(Boolean);
 
-    const f = odooTe.FIELDS['sale.order'];
-    const motoristaKey = so[f.teMotorista];
-    if (!motoristaKey) {
-      const noCard = buildErrorCard('Motorista nao Selecionado', 'Selecione um motorista no campo Motorista do pedido.');
-      await odooTe.updateSaleOrderStatusHtml(saleOrderId, noCard);
-      return res.json({ success: false, error: 'Nenhum motorista selecionado', card: noCard });
-    }
-
-    // 2. Busca lista de motoristas do TE
-    let customerData = null;
-    try {
-      customerData = await teClient.getCustomers(true);
-    } catch (err) {
-      console.error('[TE-SYNC-MOTORISTA] Erro ao buscar motoristas TE:', err.message);
-    }
-
-    // 3. Procura motorista pelo nome na lista do TE
-    let driverFromTe = null;
-    if (customerData?.Driver && Array.isArray(customerData.Driver)) {
-      driverFromTe = customerData.Driver.find(d => {
-        const teName = (d.Name || '').toUpperCase().trim();
-        const odooName = motoristaKey.toUpperCase().trim();
-        return teName === odooName || teName.includes(odooName) || odooName.includes(teName);
-      });
-    }
-
-    // 4. Se nao encontrou, tenta cadastrar no TE (se tiver telefone no mapa)
-    if (!driverFromTe) {
-      const phone = MOTORISTA_PHONE_MAP[motoristaKey] || '';
-      if (phone) {
-        console.log(`[TE-SYNC-MOTORISTA] Cadastrando ${motoristaKey} no TE (tel: ${phone})`);
-        try {
-          const customerDoc = config.empresa.cnpj;
-          await teClient.addDriver(customerDoc, motoristaKey, '55', phone);
-
-          // Busca novamente para confirmar
-          await new Promise(r => setTimeout(r, 2000));
-          const updatedCustomerData = await teClient.getCustomers(true);
-          if (updatedCustomerData?.Driver) {
-            driverFromTe = updatedCustomerData.Driver.find(d => {
-              const teName = (d.Name || '').toUpperCase().trim();
-              const odooName = motoristaKey.toUpperCase().trim();
-              return teName === odooName || teName.includes(odooName) || odooName.includes(teName);
-            });
-          }
-        } catch (err) {
-          console.error(`[TE-SYNC-MOTORISTA] Erro ao cadastrar ${motoristaKey}:`, err.message);
-        }
-      }
-    }
-
-    // 5. Monta card HTML do motorista
-    const motoristaCard = buildMotoristaCard(motoristaKey, driverFromTe);
-
-    // 6. Le o HTML atual do campo e concatena (novo status em cima, antigo embaixo)
-    const existingHtml = so[f.teStatusHtml] || '';
-    let finalHtml = motoristaCard;
-    if (existingHtml && existingHtml.includes('Motorista TE')) {
-      // Remove cards de motorista antigos e coloca o novo em cima
-      // Divide em blocos de cards (cada card comeca com <div)
-      finalHtml = motoristaCard + '\n' + existingHtml;
-    } else if (existingHtml) {
-      // Tem card de entrega mas nao de motorista — coloca motorista em cima
-      finalHtml = motoristaCard + '\n' + existingHtml;
-    }
-
-    // 7. Grava no campo HTML
-    await odooTe.updateSaleOrderStatusHtml(saleOrderId, finalHtml);
-
-    console.log(`[TE-SYNC-MOTORISTA] Motorista ${motoristaKey} sincronizado: SO ${so.name} (${saleOrderId})`);
-    res.json({
-      success: true,
-      motorista: motoristaKey,
-      foundInTe: !!driverFromTe,
-      driverData: driverFromTe || null,
-      card: motoristaCard,
-    });
-  } catch (err) {
-    console.error('[TE-SYNC-MOTORISTA] Erro:', err.message);
-    try {
-      await odooTe.updateSaleOrderStatusHtml(req.body.saleOrderId, buildErrorCard('Erro ao Sincronizar Motorista', err.message));
-    } catch {}
-    const status = err.isAxiosError ? (err.response?.status || 502) : 500;
-    res.status(status).json({ success: false, error: err.message });
+  // Tenta match exato com a key ou com o primeiro/ultimo nome
+  for (const key of MOTORISTA_OPTIONS) {
+    const keyUpper = key.toUpperCase();
+    if (name.includes(keyUpper) || keyUpper.includes(name)) return key;
   }
-});
+  // Tenta match com qualquer parte do nome
+  for (const part of parts) {
+    if (part.length < 3) continue;
+    for (const key of MOTORISTA_OPTIONS) {
+      if (key.toUpperCase() === part || part.includes(key.toUpperCase())) return key;
+    }
+  }
+  return null;
+}
 
 module.exports = router;

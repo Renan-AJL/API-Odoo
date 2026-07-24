@@ -118,7 +118,6 @@ app.get('/', (req, res) => {
       te_send_invoice: 'POST /api/v1/te/send-invoice',
       te_webhook: 'POST /api/v1/te/webhook/tudoentregue',
       te_delivery_status: 'POST /api/v1/te/delivery-status',
-      te_sync_motorista: 'POST /api/v1/te/sync-motorista',
     },
     auth: 'Envie header X-API-Key para autenticacao.',
   });
