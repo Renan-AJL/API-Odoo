@@ -113,7 +113,7 @@ class TudoEntregueClient {
   }
 
   // -------------------------------------------------------
-  // POST /api/Entregas/Cadastro
+  // POST /v1/orders — Inclusao/Edicao de Entrega (Swagger v1.0.20)
   // -------------------------------------------------------
   async createDeliveries(deliveries) {
     if (!Array.isArray(deliveries)) deliveries = [deliveries];
@@ -122,13 +122,13 @@ class TudoEntregueClient {
     }
     this._validatePayload(deliveries);
 
-    const { data } = await this._request('POST', '/api/Entregas/Cadastro', deliveries);
-    console.log(`[TE] Cadastro: ${deliveries.length} entregas enviadas`);
+    const { data } = await this._request('POST', '/v1/orders', deliveries);
+    console.log(`[TE] Cadastro: ${deliveries.length} entregas enviadas via /v1/orders`);
     return data;
   }
 
   // -------------------------------------------------------
-  // PUT /api/Entregas/Edicao
+  // POST /v1/orders — Edicao (mesmo endpoint, mesma estrutura do create)
   // -------------------------------------------------------
   async editDeliveries(deliveries) {
     if (!Array.isArray(deliveries)) deliveries = [deliveries];
@@ -137,66 +137,58 @@ class TudoEntregueClient {
     }
     this._validatePayload(deliveries);
 
-    const { data } = await this._request('PUT', '/api/Entregas/Edicao', deliveries);
-    console.log(`[TE] Edicao: ${deliveries.length} entregas editadas`);
+    const { data } = await this._request('POST', '/v1/orders', deliveries);
+    console.log(`[TE] Edicao: ${deliveries.length} entregas editadas via /v1/orders`);
     return data;
   }
 
   // -------------------------------------------------------
-  // DELETE /api/Entregas/Cancelamento
+  // PUT /v1/orders/cancel — Cancelamento
   // -------------------------------------------------------
   async cancelDeliveries(orders) {
     if (!Array.isArray(orders)) orders = [orders];
-    const { data } = await this._request('DELETE', '/api/Entregas/Cancelamento', orders);
+    const { data } = await this._request('PUT', '/v1/orders/cancel', orders);
     console.log(`[TE] Cancelamento: ${orders.length} entregas canceladas`);
     return data;
   }
 
   // -------------------------------------------------------
-  // GET /api/Entregas
+  // GET /v1/orders/finish — Consulta entregas com ocorrencia
   // -------------------------------------------------------
   async getDeliveries(params = {}) {
-    const { data } = await this._request('GET', '/api/Entregas', null, { page: 1, ...params });
+    const { data } = await this._request('GET', '/v1/orders/finish', null, params);
     return data;
   }
 
   // -------------------------------------------------------
-  // GET /api/Entregas/Ocorrencia
+  // GET /v1/orders/situation — Consulta situacao detalhada
   // -------------------------------------------------------
   async getDeliveriesWithOccurrence(params = {}) {
-    const { data } = await this._request('GET', '/api/Entregas/Ocorrencia', null, { page: 1, ...params });
+    const { data } = await this._request('GET', '/v1/orders/situation', null, params);
     return data;
   }
 
   // -------------------------------------------------------
-  // GET /api/Entregas/Situacao
-  // -------------------------------------------------------
-  async getSituations() {
-    const { data } = await this._request('GET', '/api/Entregas/Situacao');
-    return data;
-  }
-
-  // -------------------------------------------------------
-  // GET /orders/situation — Situacao detalhada da entrega
+  // GET /v1/orders/situation — Situacao detalhada da entrega
   // -------------------------------------------------------
   async getOrderSituation(params = {}) {
-    const { data } = await this._request('GET', '/orders/situation', null, params);
+    const { data } = await this._request('GET', '/v1/orders/situation', null, params);
     return data;
   }
 
   // -------------------------------------------------------
-  // GET /tracking — Acompanhamento de entrega por tracking code
+  // GET /v1/tracking — Acompanhamento de entrega por tracking code
   // -------------------------------------------------------
   async getTracking(trackingCode) {
-    const { data } = await this._request('GET', '/tracking', null, { trackingCode });
+    const { data } = await this._request('GET', '/v1/tracking', null, { trackingCode });
     return data;
   }
 
   // -------------------------------------------------------
-  // GET /customers?DriverDetail=true — Lista motoristas
+  // GET /v1/occurrences — Listar tipos de ocorrencia
   // -------------------------------------------------------
-  async getCustomers(driverDetail = true) {
-    const { data } = await this._request('GET', '/customers', null, { DriverDetail: driverDetail });
+  async getSituations() {
+    const { data } = await this._request('GET', '/v1/occurrences');
     return data;
   }
 

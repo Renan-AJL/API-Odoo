@@ -52,10 +52,10 @@ var FIELDS = {
 // ============================================================
 var PARTNER_FIELDS = [
   'id', 'name', 'city', 'state_id', 'zip', 'phone', 'email',
-  'street', 'street2', 'country_id',
+  'street', 'street2', 'country_id', 'vat',
 ];
 var PARTNER_OPTIONAL_FIELDS = [
-  'vat', 'cnpj_cpf', 'number', 'district', 'l10n_br_district',
+  'cnpj_cpf', 'number', 'district', 'l10n_br_district',
   'l10n_br_city_id', 'mobile', 'partner_latitude', 'partner_longitude',
   'street_number',
   'x_studio_te_codigo', 'x_studio_te_razao_social',
@@ -90,7 +90,7 @@ var PICKING_CUSTOM_FIELDS = [
   'x_studio_te_estado_destino', 'x_studio_te_ultimo_webhook',
 ];
 var INVOICE_FIELDS = ['id', 'name', 'state', 'move_type', 'partner_id', 'invoice_date', 'amount_total', 'payment_state'];
-var INVOICE_CUSTOM_FIELDS = ['x_studio_te_sync', 'x_studio_te_order_id'];
+var INVOICE_CUSTOM_FIELDS = ['x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_status_de_entrega_te'];
 var INVOICE_LINE_FIELDS = ['id', 'name', 'product_id', 'quantity', 'price_unit', 'price_subtotal'];
 
 var OPTIONAL_FIELDS = {
@@ -355,6 +355,10 @@ async function markInvoiceSynced(invoiceIds, teOrderId) {
   logger.info('[ODOO-TE] ' + invoiceIds.length + ' fatura(s) sync | te_order_id=' + teOrderId);
 }
 
+async function updateInvoiceStatusHtml(invoiceId, html) {
+  await safeWriteCustom('account.move', [invoiceId], { x_studio_status_de_entrega_te: html });
+}
+
 // ============================================================
 // INVOICE HELPERS (send-invoice sem sale.order)
 // ============================================================
@@ -556,6 +560,7 @@ module.exports = {
   // Invoice
   findSaleOrderByInvoice: findSaleOrderByInvoice,
   markInvoiceSynced: markInvoiceSynced,
+  updateInvoiceStatusHtml: updateInvoiceStatusHtml,
   readInvoiceFull: readInvoiceFull,
   getInvoiceLines: getInvoiceLines,
   // Partner

@@ -674,6 +674,29 @@ router.post('/send-invoice', async (req, res) => {
       if (picking) await odooTe.postChatter('stock.picking', picking.id, resultMsg);
       if (saleOrder) await odooTe.postChatter('sale.order', saleOrder.id, resultMsg);
 
+      // Grava card HTML na fatura (x_studio_status_de_entrega_te)
+      var invoiceCard = '<div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">' +
+        '<div style="background:linear-gradient(135deg,#1565c0,#1e88e5);color:white;padding:14px 16px;display:flex;align-items:center;gap:10px;">' +
+        '<div style="font-size:22px;">&#128666;</div>' +
+        '<div style="flex:1;"><div style="font-size:14px;font-weight:700;">TudoEntregue</div>' +
+        '<div style="font-size:11px;opacity:0.85;">Entrega Criada</div></div>' +
+        '<div style="background:#ff9800;color:white;font-size:10px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;">Enviada</div>' +
+        '</div>' +
+        '<div style="padding:14px 16px;">' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Pedido</span><span style="font-size:12px;font-weight:500;">' + (delivery.OrderNumber || '') + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Order ID</span><span style="font-size:12px;font-weight:500;">' + (teResp.OrderID || 'N/A') + '</span></div>' +
+        (teResp.TrackingCode ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Rastreio</span><a href="https://app.tudoentregue.com.br/rastreamento/' + teResp.TrackingCode + '" target="_blank" style="font-size:12px;font-weight:500;color:#1565c0;text-decoration:none;">' + teResp.TrackingCode + '</a></div>' : '') +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Destinatario</span><span style="font-size:12px;font-weight:500;">' + (delivery.DestinationAddress.Name || '') + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Cidade</span><span style="font-size:12px;font-weight:500;">' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '</span></div>' +
+        (delivery.Weight ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Peso</span><span style="font-size:12px;font-weight:500;">' + delivery.Weight + ' kg</span></div>' : '') +
+        (delivery.Volume ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Volumes</span><span style="font-size:12px;font-weight:500;">' + delivery.Volume + '</span></div>' : '') +
+        '</div>' +
+        '<div style="background:#f5f5f5;padding:8px 16px;font-size:10px;color:#aaa;text-align:right;">' + new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '</div>' +
+        '</div>';
+      try { await odooTe.updateInvoiceStatusHtml(invId, invoiceCard); } catch (err) {
+        console.warn('[TE-SEND-INVOICE] Nao conseguiu gravar card HTML na fatura: ' + err.message);
+      }
+
       res.json({
         success: true,
         invoice_id: invId,
