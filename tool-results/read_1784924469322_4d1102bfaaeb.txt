@@ -1,0 +1,662 @@
+     1→    20→router.post('/deliveries/send', async (req, res, next) => {
+     2→    21→  try {
+     3→    22→    const { orderIds, pickingIds, orderType = 1 } = req.body;
+     4→    23→
+     5→    24→    if (!orderIds?.length && !pickingIds?.length) {
+     6→    25→      return res.status(400).json({ success: false, error: 'Informe orderIds ou pickingIds' });
+     7→    26→    }
+     8→    27→
+     9→    28→    // 1. Busca pedidos ODOO
+    10→    29→    const pickings = [];
+    11→    30→    const saleOrders = [];
+    12→    31→
+    13→    32→    if (pickingIds?.length) {
+    14→    33→      const found = await odooTe.read('stock.picking', pickingIds, [
+    15→    34→        'id', 'name', 'partner_id', 'scheduled_date', 'move_line_count', 'origin',
+    16→    35→      ]);
+    17→    36→      pickings.push(...found);
+    18→    37→    }
+    19→    38→
+    20→    39→    if (orderIds?.length) {
+    21→    40→      const soFields = odooTe.getStudioFields('sale.order');
+    22→    41→      const found = await odooTe.read('sale.order', orderIds, [
+    23→    42→        'id', 'name', 'state', 'partner_id', 'amount_total', 'note', ...soFields,
+    24→    43→      ]);
+    25→    44→      saleOrders.push(...found);
+    26→    45→    }
+    27→    46→
+    28→    47→    // 2. Busca parceiros
+    29→    48→    const partnerIds = [
+    30→    49→      ...pickings.map(p => p.partner_id?.[0]),
+    31→    50→      ...saleOrders.map(o => o.partner_id?.[0]),
+    32→    51→    ].filter(Boolean);
+    33→    52→
+    34→    53→    const partners = partnerIds.length > 0
+    35→    54→      ? await odooTe.read('res.partner', [...new Set(partnerIds)], [
+    36→    55→          'id', 'name', 'cnpj_cpf', 'vat', 'phone', 'mobile', 'email',
+    37→    56→          'street', 'street_number', 'street2', 'zip', 'city',
+    38→    57→          'l10n_br_district', 'partner_latitude', 'partner_longitude',
+    39→    58→          'state_id', 'country_id',
+    40→    59→          ...odooTe.getStudioFields('res.partner'),
+    41→    60→        ])
+    42→    61→      : [];
+    43→    62→
+    44→    63→    const partnerMap = {};
+    45→    64→    partners.forEach(p => { partnerMap[p.id] = p; });
+    46→    65→
+    47→    66→    // 3. Mapeia para entregas TE
+    48→    67→    const teDeliveries = [];
+    49→    68→
+    50→    69→    for (const so of saleOrders) {
+    51→    70→      const partner = partnerMap[so.partner_id?.[0]] || {};
+    52→    71→      const picking = pickings.find(p => p.origin === so.name) || null;
+    53→    72→      const teDelivery = Mapper.odooToTeDelivery(so, partner, picking);
+    54→    73→      teDelivery.OrderType = orderType;
+    55→    74→      teDeliveries.push(teDelivery);
+    56→    75→    }
+    57→    76→
+    58→    77→    for (const picking of pickings) {
+    59→    78→      if (saleOrders.some(so => so.name === picking.origin)) continue; // ja mapeado
+    60→    79→      const partner = partnerMap[picking.partner_id?.[0]] || {};
+    61→    80→      const fakeSo = { name: picking.origin || `WH-${picking.id}`, note: '', id: 0 };
+    62→    81→      const teDelivery = Mapper.odooToTeDelivery(fakeSo, partner, picking);
+    63→    82→      teDelivery.OrderType = orderType;
+    64→    83→      teDeliveries.push(teDelivery);
+    65→    84→    }
+    66→    85→
+    67→    86→    if (teDeliveries.length === 0) {
+    68→    87→      return res.json({ success: true, sent: 0, message: 'Nenhuma entrega para enviar' });
+    69→    88→    }
+    70→    89→
+    71→    90→    // 4. Envia ao TE em lotes de 50
+    72→    91→    const results = [];
+    73→    92→    const BATCH = 50;
+    74→    93→
+    75→    94→    for (let i = 0; i < teDeliveries.length; i += BATCH) {
+    76→    95→      const batch = teDeliveries.slice(i, i + BATCH);
+    77→    96→      const result = await teClient.createDeliveries(batch);
+    78→    97→      results.push(result);
+    79→    98→
+    80→    99→      // 5. Marca como sincronizado no ODOO
+    81→   100→      const batchOrderNums = batch.map(d => d.OrderNumber);
+    82→   101→
+    83→   102→      const syncedSo = saleOrders.filter(so =>
+    84→   103→        batchOrderNums.includes(so.name) || batchOrderNums.includes(`WH-${so.id}`)
+    85→   104→      );
+    86→   105→      const syncedPickings = pickings.filter(p =>
+    87→   106→        batchOrderNums.includes(p.origin) || batchOrderNums.includes(`WH-${p.id}`)
+    88→   107→      );
+    89→   108→
+    90→   109→      if (syncedSo.length > 0) {
+    91→   110→        await odooTe.markSaleOrdersSynced(syncedSo.map(s => s.id), batchOrderNums[0], orderType);
+    92→   111→      }
+    93→   112→      if (syncedPickings.length > 0) {
+    94→   113→        await odooTe.markPickingsSynced(syncedPickings.map(p => p.id), batchOrderNums[0]);
+    95→   114→      }
+    96→   115→    }
+    97→   116→
+    98→   117→    console.log(`[TE-DELIVERY] Enviadas ${teDeliveries.length} entregas ao TE`);
+    99→   118→    res.json({
+   100→   119→      success: true,
+   101→   120→      sent: teDeliveries.length,
+   102→   121→      batches: results.length,
+   103→   122→      results,
+   104→   123→    });
+   105→   124→  } catch (err) {
+   106→   125→    console.error('[TE-DELIVERY] Erro:', err.message);
+   107→   126→    const status = err.isAxiosError ? (err.response?.status || 502) : 500;
+   108→   127→    res.status(status).json({ success: false, error: err.message });
+   109→   128→  }
+   110→   129→});
+   111→   130→
+   112→   131→// -------------------------------------------------------
+   113→   132→// POST /api/v1/te/deliveries/sync-unsynced — Busca pendentes e envia
+   114→   133→// -------------------------------------------------------
+   115→   134→router.post('/deliveries/sync-unsynced', async (req, res, next) => {
+   116→   135→  try {
+   117→   136→    const { limit = 50, orderType = 1 } = req.body;
+   118→   137→
+   119→   138→    const saleOrders = await odooTe.getUnsyncedSaleOrders(limit);
+   120→   139→    const pickings = await odooTe.getUnsyncedPickings(limit);
+   121→   140→
+   122→   141→    if (saleOrders.length === 0 && pickings.length === 0) {
+   123→   142→      return res.json({ success: true, sent: 0, message: 'Nenhum pedido pendente' });
+   124→   143→    }
+   125→   144→
+   126→   145→    // Delega para /send via redirect interno
+   127→   146→    req.body = {
+   128→   147→      orderIds: saleOrders.map(o => o.id),
+   129→   148→      pickingIds: pickings.map(p => p.id),
+   130→   149→      orderType,
+   131→   150→    };
+   132→   151→    return router.handle(req, res, next);
+   133→   152→  } catch (err) {
+   134→   153→    console.error('[TE-DELIVERY] Erro sync-unsynced:', err.message);
+   135→   154→    res.status(500).json({ success: false, error: err.message });
+   136→   155→  }
+   137→   156→});
+   138→   157→
+   139→   158→// -------------------------------------------------------
+   140→   159→// GET /api/v1/te/deliveries/status/:orderNumber — Consulta situacao no TE
+   141→   160→// -------------------------------------------------------
+   142→   161→router.get('/deliveries/status/:orderNumber', async (req, res) => {
+   143→   162→  try {
+   144→   163→    const { orderNumber } = req.params;
+   145→   164→
+   146→   165→    const result = await teClient.getDeliveries({ orderNumber, page: 1 });
+   147→   166→    const delivery = result?.Result?.[0] || null;
+   148→   167→
+   149→   168→    if (!delivery) {
+   150→   169→      return res.status(404).json({ success: false, error: `Entrega ${orderNumber} nao encontrada no TE` });
+   151→   170→    }
+   152→   171→
+   153→   172→    const mapped = Mapper.teToOdooPicking(delivery);
+   154→   173→
+   155→   174→    // Atualiza no ODOO
+   156→   175→    const picking = await odooTe.findPickingByTeId(orderNumber);
+   157→   176→    if (picking) await odooTe.updatePickingTeData(picking.id, mapped);
+   158→   177→
+   159→   178→    const saleOrder = await odooTe.findSaleOrderByTeId(orderNumber);
+   160→   179→    if (saleOrder) {
+   161→   180→      await odooTe.updateSaleOrderTeData(saleOrder.id, Mapper.teToOdooSaleOrder(delivery));
+   162→   181→    }
+   163→   182→
+   164→   183→    res.json({
+   165→   184→      success: true,
+   166→   185→      orderNumber,
+   167→   186→      situation: mapped.situation,
+   168→   187→      situationLabel: mapped.situationLabel,
+   169→   188→      trackingCode: mapped.trackingCode,
+   170→   189→      driverName: mapped.driverName,
+   171→   190→      odooUpdated: !!(picking || saleOrder),
+   172→   191→      raw: delivery,
+   173→   192→    });
+   174→   193→  } catch (err) {
+   175→   194→    console.error('[TE-DELIVERY] Erro status:', err.message);
+   176→   195→    res.status(500).json({ success: false, error: err.message });
+   177→   196→  }
+   178→   197→});
+   179→   198→
+   180→   199→// -------------------------------------------------------
+   181→   200→// GET /api/v1/te/deliveries/occurrences/:orderNumber
+   182→   201→// -------------------------------------------------------
+   183→   202→router.get('/deliveries/occurrences/:orderNumber', async (req, res) => {
+   184→   203→  try {
+   185→   204→    const { orderNumber } = req.params;
+   186→   205→
+   187→   206→    const result = await teClient.getDeliveriesWithOccurrence({ orderNumber, page: 1 });
+   188→   207→    const delivery = result?.Result?.[0] || null;
+   189→   208→
+   190→   209→    if (!delivery) {
+   191→   210→      return res.status(404).json({ success: false, error: `Ocorrencia de ${orderNumber} nao encontrada` });
+   192→   211→    }
+   193→   212→
+   194→   213→    const mapped = Mapper.teToOdooPicking(delivery);
+   195→   214→
+   196→   215→    res.json({
+   197→   216→      success: true,
+   198→   217→      orderNumber,
+   199→   218→      occurrenceDescription: delivery.OccurrenceDescription || delivery.occurrenceDescription,
+   200→   219→      occurrenceDate: delivery.OccurrenceDate || delivery.occurrenceDate,
+   201→   220→      situation: mapped.situation,
+   202→   221→      situationLabel: mapped.situationLabel,
+   203→   222→      raw: delivery,
+   204→   223→    });
+   205→   224→  } catch (err) {
+   206→   225→    console.error('[TE-DELIVERY] Erro occurrences:', err.message);
+   207→   226→    res.status(500).json({ success: false, error: err.message });
+   208→   227→  }
+   209→   228→});
+   210→   229→
+   211→   230→// -------------------------------------------------------
+   212→   231→// PUT /api/v1/te/deliveries/edit — Edita entregas no TE
+   213→   232→// -------------------------------------------------------
+   214→   233→router.put('/deliveries/edit', async (req, res) => {
+   215→   234→  try {
+   216→   235→    const { deliveries } = req.body;
+   217→   236→    if (!deliveries?.length) {
+   218→   237→      return res.status(400).json({ success: false, error: 'Informe o array "deliveries"' });
+   219→   238→    }
+   220→   239→
+   221→   240→    const result = await teClient.editDeliveries(deliveries);
+   222→   241→    res.json({ success: true, result });
+   223→   242→  } catch (err) {
+   224→   243→    console.error('[TE-DELIVERY] Erro edit:', err.message);
+   225→   244→    res.status(500).json({ success: false, error: err.message });
+   226→   245→  }
+   227→   246→});
+   228→   247→
+   229→   248→// -------------------------------------------------------
+   230→   249→// DELETE /api/v1/te/deliveries/cancel — Cancela entregas no TE
+   231→   250→// -------------------------------------------------------
+   232→   251→router.delete('/deliveries/cancel', async (req, res) => {
+   233→   252→  try {
+   234→   253→    const { orders } = req.body;
+   235→   254→    if (!orders?.length) {
+   236→   255→      return res.status(400).json({ success: false, error: 'Informe o array "orders" com OrderNumber e OrderType' });
+   237→   256→    }
+   238→   257→
+   239→   258→    const result = await teClient.cancelDeliveries(orders);
+   240→   259→    res.json({ success: true, result });
+   241→   260→  } catch (err) {
+   242→   261→    console.error('[TE-DELIVERY] Erro cancel:', err.message);
+   243→   262→    res.status(500).json({ success: false, error: err.message });
+   244→   263→  }
+   245→   264→});
+   246→   265→
+   247→   266→// -------------------------------------------------------
+   248→   267→// GET /api/v1/te/deliveries/situations — Lista situacoes
+   249→   268→// -------------------------------------------------------
+   250→   269→router.get('/deliveries/situations', async (req, res) => {
+   251→   270→  try {
+   252→   271→    const situations = await teClient.getSituations();
+   253→   272→    res.json({ success: true, situations });
+   254→   273→  } catch (err) {
+   255→   274→    console.error('[TE-DELIVERY] Erro situations:', err.message);
+   256→   275→    res.status(500).json({ success: false, error: err.message });
+   257→   276→  }
+   258→   277→});
+   259→   278→
+   260→   279→// -------------------------------------------------------
+   261→   280→// GET /api/v1/te/deliveries/pull — Puxa status e atualiza ODOO
+   262→   281→// -------------------------------------------------------
+   263→   282→router.get('/deliveries/pull', async (req, res) => {
+   264→   283→  try {
+   265→   284→    const { dateFrom, dateTo, situation } = req.query;
+   266→   285→
+   267→   286→    const params = { page: 1 };
+   268→   287→    if (dateFrom) params.dateFrom = dateFrom;
+   269→   288→    if (dateTo) params.dateTo = dateTo;
+   270→   289→    if (situation) params.situation = parseInt(situation, 10);
+   271→   290→
+   272→   291→    const allDeliveries = await teClient.fetchAllPages('/api/Entregas', params);
+   273→   292→
+   274→   293→    let updated = 0;
+   275→   294→    let notFound = 0;
+   276→   295→
+   277→   296→    for (const d of allDeliveries) {
+   278→   297→      const orderNum = d.OrderNumber || d.orderNumber;
+   279→   298→      const picking = await odooTe.findPickingByTeId(orderNum);
+   280→   299→
+   281→   300→      if (picking) {
+   282→   301→        const mapped = Mapper.teToOdooPicking(d);
+   283→   302→        await odooTe.updatePickingTeData(picking.id, mapped);
+   284→   303→        updated++;
+   285→   304→      } else {
+   286→   305→        const so = await odooTe.findSaleOrderByTeId(orderNum);
+   287→   306→        if (so) {
+   288→   307→          await odooTe.updateSaleOrderTeData(so.id, Mapper.teToOdooSaleOrder(d));
+   289→   308→          updated++;
+   290→   309→        } else {
+   291→   310→          notFound++;
+   292→   311→        }
+   293→   312→      }
+   294→   313→    }
+   295→   314→
+   296→   315→    res.json({
+   297→   316→      success: true,
+   298→   317→      totalFetched: allDeliveries.length,
+   299→   318→      updatedInOdoo: updated,
+   300→   319→      notFoundInOdoo: notFound,
+   301→   320→    });
+   302→   321→  } catch (err) {
+   303→   322→    console.error('[TE-DELIVERY] Erro pull:', err.message);
+   304→   323→    res.status(500).json({ success: false, error: err.message });
+   305→   324→  }
+   306→   325→});
+   307→   326→
+   308→   327→const SITUATION_ORDER_COLORS = {
+   309→   328→  0:  '#9e9e9e',  // cinza - Aguardando
+   310→   329→  1:  '#2196f3',  // azul - Em Rota
+   311→   330→  3:  '#4caf50',  // verde - Entregue
+   312→   331→  5:  '#f44336',  // vermelho - Nao Entregue
+   313→   332→  6:  '#ff9800',  // laranja - Parcial
+   314→   333→  8:  '#b71c1c',  // vermelho escuro - Cancelada
+   315→   334→  9:  '#ff5722',  // laranja escuro - Atrasada
+   316→   335→  10: '#0097a7',  // teal - Em Separacao
+   317→   336→  11: '#9c27b0',  // roxo - Transferida
+   318→   337→  12: '#1b5e20',  // verde escuro - Baixada
+   319→   338→  // /orders/situation codes (usados no timeline)
+   320→   339→  2:  '#42a5f5',  // azul claro
+   321→   340→  4:  '#e53935',  // vermelho
+   322→   341→  7:  '#1b5e20',  // verde escuro - Operacao Finalizada
+   323→   342→};
+   324→   343→
+   325→   344→// ============================================================
+   326→   345→// HTML CARD BUILDER — Um card com tudo que vem do TE
+   327→   346→// ============================================================
+   328→   347→
+   329→   348→// Labels para /orders/situation (codigo diferente do /api/Entregas)
+   330→   349→const SIT_ORDER_LABELS = {
+   331→   350→  0: 'Nao Enviada', 1: 'Envio Solicitado',
+   332→   351→  2: 'Enviada ao Motorista - Aguardando',
+   333→   352→  3: 'Enviada ao Motorista - Confirmada',
+   334→   353→  4: 'Enviada ao Motorista - Recusada',
+   335→   354→  5: 'Finalizada pelo Motorista', 6: 'Finalizada pelo Cliente',
+   336→   355→  7: 'Operacao Finalizada', 8: 'Operacao Cancelada',
+   337→   356→  9: 'Cancelamento ao Motorista', 11: 'Transferida',
+   338→   357→};
+   339→   358→
+   340→   359→function fmtDate(dateStr) {
+   341→   360→  if (!dateStr) return '';
+   342→   361→  try {
+   343→   362→    const d = new Date(dateStr);
+   344→   363→    if (isNaN(d.getTime())) return dateStr;
+   345→   364→    return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo',
+   346→   365→      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+   347→   366→  } catch { return dateStr; }
+   348→   367→}
+   349→   368→
+   350→   369→function buildTeCard(delivery, trackingData, situationData) {
+   351→   370→  // Dados da entrega
+   352→   371→  const sitCode = delivery.Situation ?? delivery.situation ?? null;
+   353→   372→  const sitLabel = SITUATION_LABELS[sitCode] || ("Situacao " + sitCode);
+   354→   373→  const sitColor = SITUATION_ORDER_COLORS[sitCode] || '#607d8b';
+   355→   374→  const trackingCode = delivery.TrackingCode || delivery.trackingCode || '';
+   356→   375→  const orderNum = delivery.OrderNumber || delivery.orderNumber || '';
+   357→   376→  const custName = delivery.CustomerName || delivery.customerName || '';
+   358→   377→  const scheduled = delivery.ScheduledDate || delivery.scheduledDate || '';
+   359→   378→  const deliveredDate = delivery.DeliveredDate || delivery.deliveredDate || '';
+   360→   379→  const occDesc = delivery.OccurrenceDescription || delivery.occurrenceDescription || '';
+   361→   380→  const proofUrl = delivery.ProofUrl || delivery.proofUrl || '';
+   362→   381→
+   363→   382→  // Motorista — vem do /api/Entregas
+   364→   383→  let driverName = delivery.DriverName || delivery.driverName || '';
+   365→   384→  let driverPhone = delivery.DriverPhone || delivery.driverPhone || '';
+   366→   385→
+   367→   386→  // Motorista — complementa do /orders/situation (telefone completo com pais)
+   368→   387→  const sitDriver = situationData?.Driver;
+   369→   388→  if (sitDriver) {
+   370→   389→    if (!driverName && sitDriver.Name) driverName = sitDriver.Name;
+   371→   390→    if (!driverPhone && sitDriver.PhoneNumber) {
+   372→   391→      const pc = sitDriver.PhoneCountry || '55';
+   373→   392→      driverPhone = '+' + pc + ' ' + sitDriver.PhoneNumber;
+   374→   393→    }
+   375→   394→  }
+   376→   395→
+   377→   396→  // Motorista — complementa do /tracking (nome + foto)
+   378→   397→  const trackOrder = trackingData?.Order;
+   379→   398→  const trackDriver = trackOrder?.Driver;
+   380→   399→  if (trackDriver) {
+   381→   400→    if (!driverName && trackDriver.Name) driverName = trackDriver.Name;
+   382→   401→  }
+   383→   402→
+   384→   403→  // --- Linhas de informacao ---
+   385→   404→  const row = (label, value, color, href) => {
+   386→   405→    if (!value) return '';
+   387→   406→    const valHtml = href
+   388→   407→      ? '<a href="' + href + '" target="_blank" style="color:' + (color || '#333') + ';text-decoration:none;">' + value + '</a>'
+   389→   408→      : '<span style="color:' + (color || '#333') + ';">' + value + '</span>';
+   390→   409→    return '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+   391→   410→      '<span style="font-size:11px;color:#888;">' + label + '</span>' +
+   392→   411→      '<span style="font-size:12px;font-weight:500;">' + valHtml + '</span></div>';
+   393→   412→  };
+   394→   413→
+   395→   414→  // --- Bloco do motorista (destacado) ---
+   396→   415→  let motoristaHtml = '';
+   397→   416→  if (driverName) {
+   398→   417→    const phoneLink = driverPhone ? ('tel:' + driverPhone.replace(/[^0-9+]/g, '')) : '';
+   399→   418→    const driverPhoto = trackDriver?.PictureUrl || '';
+   400→   419→    motoristaHtml =
+   401→   420→      '<div style="margin-top:10px;padding:12px;background:linear-gradient(135deg,#e8f5e9,#f1f8e9);border-radius:8px;border:1px solid #c8e6c9;">' +
+   402→   421→        '<div style="display:flex;align-items:center;gap:10px;">' +
+   403→   422→          (driverPhoto
+   404→   423→            ? '<img src="' + driverPhoto + '" style="width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid #43a047;" />'
+   405→   424→            : '<div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#2e7d32,#43a047);display:flex;align-items:center;justify-content:center;color:white;font-size:18px;">&#128100;</div>') +
+   406→   425→          '<div style="flex:1;">' +
+   407→   426→            '<div style="font-size:13px;font-weight:700;color:#1b5e20;">' + driverName + '</div>' +
+   408→   427→            (driverPhone
+   409→   428→              ? '<div style="font-size:11px;color:#555;"><a href="' + phoneLink + '" style="color:#2e7d32;text-decoration:none;font-weight:600;">' + driverPhone + '</a></div>'
+   410→   429→              : '') +
+   411→   430→          '</div>' +
+   412→   431→        '</div>' +
+   413→   432→      '</div>';
+   414→   433→  }
+   415→   434→
+   416→   435→  // --- Timeline de status (do /orders/situation) ---
+   417→   436→  let timelineHtml = '';
+   418→   437→  const statuses = situationData?.Status || [];
+   419→   438→  if (statuses.length > 0) {
+   420→   439→    const items = statuses.map((s, i) => {
+   421→   440→      const label = SIT_ORDER_LABELS[s.Status] || ('Status ' + s.Status);
+   422→   441→      const color = SITUATION_ORDER_COLORS[s.Status] || '#607d8b';
+   423→   442→      const date = s.Date ? fmtDate(s.Date) : '';
+   424→   443→      const first = (i === 0);
+   425→   444→      return '<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:' + (first ? '8' : '5') + 'px;">' +
+   426→   445→        '<div style="min-width:10px;min-height:10px;width:10px;height:10px;border-radius:50%;background:' + color + ';margin-top:4px;' +
+   427→   446→          (first ? 'box-shadow:0 0 0 3px ' + color + '33;' : 'opacity:0.5;') + '"></div>' +
+   428→   447→        '<div style="flex:1;">' +
+   429→   448→          '<div style="font-size:12px;color:#333;font-weight:' + (first ? '600' : '400') + ';">' + label + '</div>' +
+   430→   449→          (date ? '<div style="font-size:10px;color:#999;margin-top:1px;">' + date + '</div>' : '') +
+   431→   450→        '</div></div>';
+   432→   451→    }).join('');
+   433→   452→    timelineHtml = '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #e0e0e0;">' +
+   434→   453→      '<div style="font-size:11px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Historico</div>' +
+   435→   454→      items + '</div>';
+   436→   455→  }
+   437→   456→
+   438→   457→  // --- Ocorrencias com fotos (do /tracking) ---
+   439→   458→  let occHtml = '';
+   440→   459→  const trackStatuses = trackingData?.TrackingStatus || [];
+   441→   460→  if (trackStatuses.length > 0) {
+   442→   461→    const occItems = trackStatuses.map(ts => {
+   443→   462→      const ok = (ts.Status === 'check');
+   444→   463→      const icon = ok ? '&#10003;' : '&#9888;';
+   445→   464→      const color = ok ? '#4caf50' : '#ff9800';
+   446→   465→      const date = ts.Date ? fmtDate(ts.Date) : '';
+   447→   466→      const images = (ts.AttachmentsImagesUrls || []).filter(Boolean);
+   448→   467→      return '<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;padding:8px;background:' +
+   449→   468→        (ok ? '#f1f8e9' : '#fff3e0') + ';border-radius:6px;">' +
+   450→   469→        '<div style="color:' + color + ';font-size:16px;font-weight:bold;min-width:20px;text-align:center;">' + icon + '</div>' +
+   451→   470→        '<div style="flex:1;">' +
+   452→   471→          '<div style="font-size:12px;color:#333;">' + (ts.Description || '') + '</div>' +
+   453→   472→          (date ? '<div style="font-size:10px;color:#999;margin-top:2px;">' + date + '</div>' : '') +
+   454→   473→          (images.length > 0
+   455→   474→            ? '<div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;">' +
+   456→   475→                images.map(img => '<img src="' + img + '" style="max-width:120px;max-height:80px;border-radius:4px;cursor:pointer;" />').join('') +
+   457→   476→              '</div>'
+   458→   477→            : '') +
+   459→   478→        '</div></div>';
+   460→   479→    }).join('');
+   461→   480→    occHtml = '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #e0e0e0;">' +
+   462→   481→      '<div style="font-size:11px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Ocorrencias</div>' +
+   463→   482→      occItems + '</div>';
+   464→   483→  }
+   465→   484→
+   466→   485→  // --- Ocorrencia principal (do /api/Entregas) ---
+   467→   486→  let mainOccHtml = '';
+   468→   487→  if (occDesc) {
+   469→   488→    mainOccHtml = '<div style="margin-top:10px;padding:8px 12px;background:#fff3e0;border-radius:6px;border-left:3px solid #ff9800;">' +
+   470→   489→      '<div style="font-size:11px;color:#888;margin-bottom:2px;">Ocorrencia</div>' +
+   471→   490→      '<div style="font-size:12px;color:#e65100;">' + occDesc + '</div></div>';
+   472→   491→  }
+   473→   492→
+   474→   493→  // --- Comprovante ---
+   475→   494→  let proofHtml = '';
+   476→   495→  if (proofUrl) {
+   477→   496→    proofHtml = '<div style="margin-top:10px;text-align:center;">' +
+   478→   497→      '<a href="' + proofUrl + '" target="_blank" style="display:inline-block;padding:8px 20px;background:#1565c0;color:white;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;">&#128196; Ver Comprovante de Entrega</a></div>';
+   479→   498→  }
+   480→   499→
+   481→   500→  return '<div style="font-family:\'Segoe UI\',Arial,sans-serif;max-width:480px;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">' +
+   482→   501→    '<div style="background:linear-gradient(135deg,#1565c0,#1e88e5);color:white;padding:14px 16px;display:flex;align-items:center;gap:10px;">' +
+   483→   502→      '<div style="font-size:22px;">&#128666;</div>' +
+   484→   503→      '<div style="flex:1;"><div style="font-size:14px;font-weight:700;">TudoEntregue</div>' +
+   485→   504→      '<div style="font-size:11px;opacity:0.85;">Status de Entrega</div></div>' +
+   486→   505→      '<div style="background:' + sitColor + ';color:white;font-size:10px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;">' + sitLabel + '</div>' +
+   487→   506→    '</div>' +
+   488→   507→    '<div style="padding:14px 16px;">' +
+   489→   508→      row('Pedido', orderNum) +
+   490→   509→      (trackingCode ? row('Rastreio', trackingCode, '#1565c0', 'https://app.tudoentregue.com.br/rastreamento/' + trackingCode) : '') +
+   491→   510→      row('Cliente', custName) +
+   492→   511→      row('Agendamento', fmtDate(scheduled)) +
+   493→   512→      (deliveredDate ? row('Entregue em', fmtDate(deliveredDate), '#4caf50') : '') +
+   494→   513→      motoristaHtml +
+   495→   514→      mainOccHtml +
+   496→   515→      timelineHtml +
+   497→   516→      occHtml +
+   498→   517→      proofHtml +
+   499→   518→    '</div>' +
+   500→   519→    '<div style="background:#f5f5f5;padding:8px 16px;font-size:10px;color:#aaa;text-align:right;">Atualizado: ' +
+   501→   520→      new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '</div>' +
+   502→   521→  '</div>';
+   503→   522→}
+   504→   523→
+   505→   524→function buildErrorCard(title, message) {
+   506→   525→  return '<div style="font-family:\'Segoe UI\',Arial,sans-serif;max-width:480px;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">' +
+   507→   526→    '<div style="background:linear-gradient(135deg,#c62828,#e53935);color:white;padding:14px 16px;display:flex;align-items:center;gap:10px;">' +
+   508→   527→    '<div style="font-size:22px;">&#9888;</div>' +
+   509→   528→    '<div style="font-size:14px;font-weight:700;">' + title + '</div></div>' +
+   510→   529→    '<div style="padding:14px 16px;"><div style="font-size:12px;color:#c62828;">' + message + '</div></div>' +
+   511→   530→    '<div style="background:#f5f5f5;padding:8px 16px;font-size:10px;color:#aaa;text-align:right;">' +
+   512→   531→    new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '</div></div>';
+   513→   532→}
+   514→   533→
+   515→   534→// ============================================================
+   516→   535→// POST /api/v1/te/delivery-status — Busca status TE e grava card HTML
+   517→   536→// Body: { saleOrderId: number }
+   518→   537→// ============================================================
+   519→   538→router.post('/delivery-status', async (req, res) => {
+   520→   539→  try {
+   521→   540→    const { saleOrderId } = req.body;
+   522→   541→    if (!saleOrderId) {
+   523→   542→      return res.status(400).json({ success: false, error: 'Informe saleOrderId' });
+   524→   543→    }
+   525→   544→
+   526→   545→    // 1. Busca sale order no Odoo
+   527→   546→    const so = await odooTe.findSaleOrderById(saleOrderId);
+   528→   547→    if (!so) {
+   529→   548→      return res.status(404).json({ success: false, error: `Sale Order ${saleOrderId} nao encontrada` });
+   530→   549→    }
+   531→   550→
+   532→   551→    const f = odooTe.FIELDS['sale.order'];
+   533→   552→    const orderName = so.name;
+   534→   553→    const teOrderId = so[f.teOrderId];
+   535→   554→    const trackingCode = so[f.teTrackingCode];
+   536→   555→
+   537→   556→    if (!teOrderId && !trackingCode) {
+   538→   557→      // Nenhuma entrega enviada ao TE ainda
+   539→   558→      const noCard = buildErrorCard(
+   540→   559→        'Sem Entrega TE',
+   541→   560→        `Pedido ${orderName} ainda nao foi enviado ao TudoEntregue. Envie a entrega primeiro.`
+   542→   561→      );
+   543→   562→      await odooTe.updateSaleOrderStatusHtml(saleOrderId, noCard);
+   544→   563→      return res.json({ success: true, message: 'Pedido ainda nao enviado ao TE', card: noCard });
+   545→   564→    }
+   546→   565→
+   547→   566→    // 2. Busca dados no TE — /api/Entregas (dados completos da entrega)
+   548→   567→    let deliveryData = null;
+   549→   568→    if (teOrderId) {
+   550→   569→      const result = await teClient.getDeliveries({ orderNumber: teOrderId, page: 1 });
+   551→   570→      deliveryData = result?.Result?.[0] || null;
+   552→   571→    }
+   553→   572→
+   554→   573→    // 3. Busca situacao detalhada — /orders/situation
+   555→   574→    let situationData = null;
+   556→   575→    if (teOrderId) {
+   557→   576→      try {
+   558→   577→        situationData = await teClient.getOrderSituation({
+   559→   578→          orderType: 1,
+   560→   579→          orderID: teOrderId,
+   561→   580→        });
+   562→   581→      } catch (err) {
+   563→   582→        console.warn(`[TE-DELIVERY-STATUS] /orders/situation falhou: ${err.message}`);
+   564→   583→      }
+   565→   584→    }
+   566→   585→
+   567→   586→    // 4. Busca tracking detalhado (ocorrencias com fotos)
+   568→   587→    let trackingData = null;
+   569→   588→    if (trackingCode) {
+   570→   589→      try {
+   571→   590→        trackingData = await teClient.getTracking(trackingCode);
+   572→   591→      } catch (err) {
+   573→   592→        console.warn(`[TE-DELIVERY-STATUS] /tracking falhou: ${err.message}`);
+   574→   593→      }
+   575→   594→    }
+   576→   595→
+   577→   596→    // 5. Monta card HTML
+   578→   597→    const cardHtml = buildTeCard(deliveryData || {}, trackingData, situationData);
+   579→   598→
+   580→   599→    // 6. Tambem atualiza campos padrao do TE
+   581→   600→    if (deliveryData) {
+   582→   601→      const mapped = Mapper.teToOdooPicking(deliveryData);
+   583→   602→      const soMapped = Mapper.teToOdooSaleOrder(deliveryData);
+   584→   603→      await odooTe.updateSaleOrderTeData(saleOrderId, soMapped);
+   585→   604→    }
+   586→   605→
+   587→   606→    // 7. Atualiza campo de motorista (selection) a partir do TE
+   588→   607→    let motoristaAtualizado = null;
+   589→   608→    if (deliveryData) {
+   590→   609→      const driverName = deliveryData.DriverName || deliveryData.driverName || '';
+   591→   610→      if (driverName) {
+   592→   611→        motoristaAtualizado = matchMotoristaSelection(driverName);
+   593→   612→        if (motoristaAtualizado) {
+   594→   613→          await odooTe.updateSaleOrderMotorista(saleOrderId, motoristaAtualizado);
+   595→   614→          console.log(`[TE-DELIVERY-STATUS] Motorista: ${driverName} -> ${motoristaAtualizado}`);
+   596→   615→        }
+   597→   616→      }
+   598→   617→    }
+   599→   618→
+   600→   619→    // 8. Grava card no campo HTML
+   601→   620→    await odooTe.updateSaleOrderStatusHtml(saleOrderId, cardHtml);
+   602→   621→
+   603→   622→    console.log(`[TE-DELIVERY-STATUS] Card atualizado: SO ${orderName} (${saleOrderId})`);
+   604→   623→    res.json({
+   605→   624→      success: true,
+   606→   625→      orderName,
+   607→   626→      teOrderId,
+   608→   627→      trackingCode,
+   609→   628→      motorista: motoristaAtualizado || null,
+   610→   629→      hasDeliveryData: !!deliveryData,
+   611→   630→      hasSituationData: !!situationData,
+   612→   631→      hasTrackingData: !!trackingData,
+   613→   632→      card: cardHtml,
+   614→   633→    });
+   615→   634→  } catch (err) {
+   616→   635→    console.error('[TE-DELIVERY-STATUS] Erro:', err.message);
+   617→   636→    // Grava card de erro no campo
+   618→   637→    try {
+   619→   638→      await odooTe.updateSaleOrderStatusHtml(req.body.saleOrderId, buildErrorCard('Erro ao Buscar Status', err.message));
+   620→   639→    } catch {}
+   621→   640→    const status = err.isAxiosError ? (err.response?.status || 502) : 500;
+   622→   641→    res.status(status).json({ success: false, error: err.message });
+   623→   642→  }
+   624→   643→});
+   625→   644→
+   626→   645→// ============================================================
+   627→   646→// MATCH MOTORISTA — Faz match do nome do TE com as opcoes do campo selection
+   628→   647→// O campo x_studio_motorista e um selection com 17 opcoes (key/label)
+   629→   648→// ============================================================
+   630→   649→const MOTORISTA_OPTIONS = [
+   631→   650→  'adelson', 'anderlucio', 'antonio', 'carlos', 'daniel',
+   632→   651→  'diego', 'eduardo', 'fellipe', 'gerson', 'glauber',
+   633→   652→  'henrique', 'italo', 'jeferson', 'joao_pedro', 'lucas',
+   634→   653→  'matheus', 'rafael',
+   635→   654→];
+   636→   655→
+   637→   656→function matchMotoristaSelection(driverNameFromTe) {
+   638→   657→  if (!driverNameFromTe) return null;
+   639→   658→  const name = driverNameFromTe.toUpperCase().trim();
+   640→   659→  // Remove sufixos comuns como "MOTORISTA", "FRETE", etc
+   641→   660→  const cleanName = name
+   642→   661→    .replace(/\b(MOTORISTA|FRETE|ENTREGAS|MOTOBOY)\b/g, '')
+   643→   662→    .replace(/[^A-ZÀ-Ú\s]/g, '')
+   644→   663→    .trim();
+   645→   664→  const parts = cleanName.split(/\s+/).filter(Boolean);
+   646→   665→
+   647→   666→  // Tenta match exato com a key ou com o primeiro/ultimo nome
+   648→   667→  for (const key of MOTORISTA_OPTIONS) {
+   649→   668→    const keyUpper = key.toUpperCase();
+   650→   669→    if (name.includes(keyUpper) || keyUpper.includes(name)) return key;
+   651→   670→  }
+   652→   671→  // Tenta match com qualquer parte do nome
+   653→   672→  for (const part of parts) {
+   654→   673→    if (part.length < 3) continue;
+   655→   674→    for (const key of MOTORISTA_OPTIONS) {
+   656→   675→      if (key.toUpperCase() === part || part.includes(key.toUpperCase())) return key;
+   657→   676→    }
+   658→   677→  }
+   659→   678→  return null;
+   660→   679→}
+   661→   680→
+   662→   681→module.exports = router;

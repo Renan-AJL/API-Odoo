@@ -379,6 +379,131 @@ class OdooTeClient {
       [f.teMotorista]: motoristaKey,
     });
   }
+
+  // -------------------------------------------------------
+  // HELPERS PARA SEND-INVOICE
+  // -------------------------------------------------------
+
+  async findSaleOrderByInvoice(invoiceId) {
+    // Tenta busca direta: sale.order onde invoice_ids contem esta fatura
+    try {
+      const saleIds = await this.searchRead(
+        'sale.order',
+        [['invoice_ids', 'in', [invoiceId]]],
+        ['id', 'name']
+      );
+      if (saleIds.length > 0) return saleIds[0];
+    } catch (err) {
+      console.warn('[ODOO-TE] Busca direta invoice->sale falhou: ' + err.message);
+    }
+    // Fallback: via account.move.line -> sale_line_ids -> order_id
+    try {
+      const lines = await this.searchRead(
+        'account.move.line',
+        [['move_id', '=', invoiceId], ['sale_line_ids', '!=', false]],
+        ['sale_line_ids']
+      );
+      if (lines.length > 0 && lines[0].sale_line_ids?.length) {
+        const saleLineId = lines[0].sale_line_ids[0];
+        const saleLines = await this.searchRead(
+          'sale.order.line',
+          [['id', '=', saleLineId]],
+          ['order_id']
+        );
+        if (saleLines.length > 0 && saleLines[0].order_id) {
+          const orderId = saleLines[0].order_id[0];
+          const orders = await this.searchRead(
+            'sale.order', [['id', '=', orderId]],
+            ['id', 'name']
+          );
+          return orders.length > 0 ? orders[0] : null;
+        }
+      }
+    } catch (err) {
+      console.warn('[ODOO-TE] Busca via linhas falhou: ' + err.message);
+    }
+    return null;
+  }
+
+  async findDeliveryPicking(saleOrderId) {
+    const pickings = await this.searchRead(
+      'stock.picking',
+      [['sale_id', '=', saleOrderId], ['picking_type_code', '=', 'outgoing']],
+      ['id', 'name', 'partner_id', 'state', 'picking_type_code', 'scheduled_date', 'origin', 'note'],
+      1
+    );
+    return pickings.length > 0 ? pickings[0] : null;
+  }
+
+  async readPicking(pickingId) {
+    const f = FIELDS['stock.picking'];
+    const results = await this.searchRead(
+      'stock.picking', [['id', '=', pickingId]],
+      ['id', 'name', 'partner_id', 'sale_id', 'state', 'picking_type_code', 'scheduled_date', 'origin', 'note',
+       f.teSync, f.teOrderId, f.teSituation, f.teDriverName, f.teDriverPhone]
+    );
+    return results.length > 0 ? results[0] : null;
+  }
+
+  async readSaleOrderFull(orderId) {
+    const f = FIELDS['sale.order'];
+    const results = await this.searchRead(
+      'sale.order', [['id', '=', orderId]],
+      ['id', 'name', 'state', 'partner_id', 'amount_total', 'note',
+       f.teSync, f.teOrderId, f.teTrackingCode, f.teSituation,
+       f.teMotorista, f.teDeliveryType, f.teLastSync, f.teError]
+    );
+    return results.length > 0 ? results[0] : null;
+  }
+
+  async getSaleOrderLines(saleOrderId) {
+    return this.searchRead(
+      'sale.order.line',
+      [['order_id', '=', saleOrderId]],
+      ['id', 'name', 'product_id', 'product_uom_qty', 'price_unit', 'price_subtotal']
+    );
+  }
+
+  async getProducts(productIds) {
+    if (!productIds || !productIds.length) return {};
+    const products = await this.read('product.product', productIds,
+      ['id', 'name', 'weight', 'volume', 'default_code']
+    );
+    const map = {};
+    if (Array.isArray(products)) {
+      products.forEach(p => { map[p.id] = p; });
+    }
+    return map;
+  }
+
+  async getCompany() {
+    const companies = await this.searchRead(
+      'res.company', [],
+      ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id',
+       'phone', 'email', 'partner_id', 'vat', 'l10n_br_cnpj_cpf', 'district', 'number'],
+      1
+    );
+    return companies.length > 0 ? companies[0] : null;
+  }
+
+  async postChatter(model, recordId, body) {
+    try {
+      await this._jsonRpc('mail.message', 'create', {
+        model: model,
+        res_id: recordId,
+        body: body,
+      });
+      console.log('[ODOO-TE] Chatter postado em ' + model + ' ' + recordId);
+    } catch (err) {
+      console.error('[ODOO-TE] Falha chatter: ' + err.message);
+    }
+  }
+
+  async markInvoiceSynced(invoiceIds, teOrderId) {
+    const vals = { x_studio_te_sync: true };
+    if (teOrderId) vals.x_studio_te_order_id = String(teOrderId);
+    return this.write('account.move', invoiceIds, vals);
+  }
 }
 
 module.exports = new OdooTeClient();
