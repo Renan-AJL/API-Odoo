@@ -195,36 +195,83 @@ class TudoEntregueClient {
 
   // -------------------------------------------------------
   // GET /customers?DriverDetail=true — Lista motoristas (com cache 1h)
+  // Tenta tambem /v1/customers como fallback
   // -------------------------------------------------------
   async getDrivers() {
     // Cache por 1 hora
     if (this._driverCache && (Date.now() - this._driverCache._ts) < 3600000) {
       return this._driverCache.list;
     }
-    try {
-      const { data } = await this._request('GET', '/customers', null, { DriverDetail: true });
-      const customers = Array.isArray(data) ? data : (data?.Result || data?.Customers || []);
-      const driverMap = {};
-      customers.forEach(function(cust) {
-        const drivers = cust.Drivers || cust.drivers || [];
-        drivers.forEach(function(d) {
-          if (d.Name) {
-            const key = d.Name.toUpperCase().trim();
-            driverMap[key] = {
-              Name: d.Name,
-              PhoneCountry: d.PhoneCountry || '55',
-              PhoneNumber: d.PhoneNumber || '',
-            };
-          }
-        });
-      });
-      this._driverCache = { _ts: Date.now(), list: driverMap };
-      console.log('[TE] ' + Object.keys(driverMap).length + ' motoristas cacheados');
-      return driverMap;
-    } catch (err) {
-      console.warn('[TE] Falha ao buscar motoristas: ' + err.message);
+
+    var raw = null;
+    var endpoints = ['/customers', '/v1/customers'];
+    for (var i = 0; i < endpoints.length; i++) {
+      try {
+        console.log('[TE] Tentando buscar motoristas via ' + endpoints[i] + '...');
+        var resp = await this._request('GET', endpoints[i], null, { DriverDetail: true });
+        raw = resp.data;
+        console.log('[TE] Motoristas recebidos de ' + endpoints[i] + ': ' + JSON.stringify(raw).substring(0, 500));
+        break;
+      } catch (err) {
+        console.warn('[TE] Endpoint ' + endpoints[i] + ' falhou: ' + err.message);
+      }
+    }
+
+    if (!raw) {
+      console.error('[TE] Nenhum endpoint de motoristas funcionou!');
       return this._driverCache ? this._driverCache.list : {};
     }
+
+    // Tenta varios formatos de resposta
+    var customers = [];
+    if (Array.isArray(raw)) {
+      customers = raw;
+    } else if (raw && Array.isArray(raw.Result)) {
+      customers = raw.Result;
+    } else if (raw && Array.isArray(raw.Customers)) {
+      customers = raw.Customers;
+    } else if (raw && Array.isArray(raw.Drivers)) {
+      // Se vier direto um array de Drivers
+      customers = raw.Drivers.map(function(d) { return { Drivers: [d] }; });
+    } else if (raw && typeof raw === 'object') {
+      // Tenta qualquer chave que seja array
+      for (var k of Object.keys(raw)) {
+        if (Array.isArray(raw[k]) && raw[k].length > 0) {
+          console.log('[TE] Usando chave "' + k + '" para motoristas (' + raw[k].length + ' itens)');
+          customers = raw[k];
+          break;
+        }
+      }
+    }
+
+    console.log('[TE] Processando ' + customers.length + ' customers para extrair motoristas...');
+    const driverMap = {};
+    customers.forEach(function(cust) {
+      // O item pode ser o proprio driver ou um customer com Drivers dentro
+      var drivers = [];
+      if (cust.Drivers && Array.isArray(cust.Drivers)) {
+        drivers = cust.Drivers;
+      } else if (cust.drivers && Array.isArray(cust.drivers)) {
+        drivers = cust.drivers;
+      } else if (cust.Name || cust.PhoneNumber) {
+        // O proprio item e um driver
+        drivers = [cust];
+      }
+      drivers.forEach(function(d) {
+        if (d.Name) {
+          const key = d.Name.toUpperCase().trim();
+          driverMap[key] = {
+            Name: d.Name,
+            PhoneCountry: d.PhoneCountry || '55',
+            PhoneNumber: d.PhoneNumber || '',
+          };
+        }
+      });
+    });
+
+    console.log('[TE] ' + Object.keys(driverMap).length + ' motoristas cacheados: ' + Object.keys(driverMap).join(', '));
+    this._driverCache = { _ts: Date.now(), list: driverMap };
+    return driverMap;
   }
 
   /**

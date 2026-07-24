@@ -88,6 +88,7 @@ var PICKING_CUSTOM_FIELDS = [
   'x_studio_te_nome_motorista', 'x_studio_te_placa_veiculo', 'x_studio_te_rastreio',
   'x_studio_te_ocorrencias', 'x_studio_te_url_comprovante', 'x_studio_te_fone_motorista',
   'x_studio_te_estado_destino', 'x_studio_te_ultimo_webhook',
+  'x_studio_motorista',
 ];
 var INVOICE_FIELDS = ['id', 'name', 'state', 'move_type', 'partner_id', 'invoice_date', 'amount_total', 'payment_state'];
 var INVOICE_CUSTOM_FIELDS = ['x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_status_de_entrega_te'];

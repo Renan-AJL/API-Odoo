@@ -616,22 +616,30 @@ router.post('/send-invoice', async (req, res) => {
     // 6. Le dados da empresa (remetente)
     const company = await odooTe.getCompany();
 
-    // 6b. Motorista: le x_studio_motorista da sale.order e busca no TE
+    // 6b. Motorista: le x_studio_motorista da sale.order (ou picking como fallback)
+    //    e busca telefone no TE
     let motoristaName = null;
     let teDriver = null;
     if (saleFull && saleFull.x_studio_motorista) {
-      motoristaName = saleFull.x_studio_motorista;  // key do selection (ex: 'adriano')
-      console.log('[TE-SEND-INVOICE] Motorista Odoo: ' + motoristaName);
+      motoristaName = saleFull.x_studio_motorista;
+      console.log('[TE-SEND-INVOICE] Motorista da sale.order: ' + motoristaName);
+    } else if (picking && picking.x_studio_motorista) {
+      motoristaName = picking.x_studio_motorista;
+      console.log('[TE-SEND-INVOICE] Motorista do picking (fallback): ' + motoristaName);
+    }
+    if (motoristaName) {
       try {
         teDriver = await teClient.findDriverByName(motoristaName);
         if (teDriver) {
-          console.log('[TE-SEND-INVOICE] Motorista encontrado no TE: ' + teDriver.Name + ' (' + teDriver.PhoneNumber + ')');
+          console.log('[TE-SEND-INVOICE] Motorista TE encontrado: ' + teDriver.Name + ' (' + teDriver.PhoneNumber + ')');
         } else {
-          console.warn('[TE-SEND-INVOICE] Motorista "' + motoristaName + '" NAO encontrado no TE');
+          console.warn('[TE-SEND-INVOICE] Motorista "' + motoristaName + '" NAO encontrado no TE (verificar se esta cadastrado)');
         }
       } catch (err) {
-        console.warn('[TE-SEND-INVOICE] Erro ao buscar motorista no TE: ' + err.message);
+        console.error('[TE-SEND-INVOICE] Erro ao buscar motorista no TE: ' + err.message);
       }
+    } else {
+      console.log('[TE-SEND-INVOICE] Nenhum motorista selecionado no Odoo');
     }
 
     // 7. Mapeia para TE (picking sera sintetico pelo mapper se null)
