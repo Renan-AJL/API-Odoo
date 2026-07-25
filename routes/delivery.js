@@ -507,7 +507,7 @@ function buildTeCard(delivery, trackingData, situationData) {
     '<div style="padding:14px 16px;">' +
       row('Pedido', orderNum) +
       (trackingCode
-        ? '<a href="https://app.tudoentregue.com.br/rastreamento/' + trackingCode + '" target="_blank" style="display:block;text-align:center;background:#e8f5e9;border:1px solid #a5d6a7;color:#2e7d32;padding:10px;border-radius:8px;text-decoration:none;font-weight:600;font-size:12px;margin-bottom:10px;">&#128666; Rastrear Entrega em Tempo Real</a>'
+        ? '<a href="https://app.tudoentregue.com.br/rastreamento/' + trackingCode + '" target="_blank" style="display:block;text-align:center;background:#e8f5e9;border:1px solid #a5d6a7;color:#2e7d32;padding:10px;border-radius:8px;text-decoration:none;font-weight:600;font-size:12px;margin-bottom:10px;">&#128666; Acompanhar Entrega</a>'
         : '') +
       row('Cliente', custName) +
       row('Agendamento', fmtDate(scheduled)) +
@@ -756,7 +756,7 @@ router.post('/send-invoice', async (req, res) => {
       if (saleOrder) await odooTe.postChatter('sale.order', saleOrder.id, resultMsg);
 
       // Grava card HTML na fatura (x_studio_status_de_entrega_te) — prepend, nao sobrescreve
-      var trackUrl = teResp.TrackingCode ? 'https://app.tudoentregue.com.br/rastreamento/' + teResp.TrackingCode : '';
+      var trackUrl = teResp.TrackingUrl || (teResp.TrackingCode ? 'https://app.tudoentregue.com.br/rastreamento/' + teResp.TrackingCode : '');
       var invoiceCard = '<div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">' +
         '<div style="background:linear-gradient(135deg,#1565c0,#1e88e5);color:white;padding:14px 16px;display:flex;align-items:center;gap:10px;">' +
         '<div style="font-size:22px;">&#128666;</div>' +
@@ -767,7 +767,7 @@ router.post('/send-invoice', async (req, res) => {
         '<div style="padding:14px 16px;">' +
         '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Pedido</span><span style="font-size:12px;font-weight:500;">' + (delivery.OrderNumber || '') + '</span></div>' +
         (trackUrl ?
-          '<a href="' + trackUrl + '" target="_blank" style="display:block;text-align:center;background:#e8f5e9;border:1px solid #a5d6a7;color:#2e7d32;padding:10px;border-radius:8px;text-decoration:none;font-weight:600;font-size:12px;margin-bottom:10px;">&#128666; Rastrear Entrega em Tempo Real</a>' :
+          '<a href="' + trackUrl + '" target="_blank" style="display:block;text-align:center;background:#e8f5e9;border:1px solid #a5d6a7;color:#2e7d32;padding:10px;border-radius:8px;text-decoration:none;font-weight:600;font-size:12px;margin-bottom:10px;">&#128666; Acompanhar Entrega</a>' :
           '') +
         '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Destinatario</span><span style="font-size:12px;font-weight:500;">' + (delivery.DestinationAddress.Name || '') + '</span></div>' +
         '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Cidade</span><span style="font-size:12px;font-weight:500;">' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '</span></div>' +
