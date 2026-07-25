@@ -556,20 +556,32 @@ router.post('/send-invoice', async (req, res) => {
     }
     const partnerData = await odooTe.getPartner(partnerId);
 
-    // 3. Tenta encontrar a venda (3 vias)
+    // 3. Tenta encontrar a venda (multiplas vias)
     let saleOrder = null;
     let saleFull = null;
     let picking = null;
 
-    // 3a. Se Odoo enviou sale_order_id diretamente no body
+    // 3a. Se Odoo enviou sale_order_id diretamente no body (acao do servidor)
     if (req.body.sale_order_id) {
-      console.log('[TE-SEND-INVOICE] sale_order_id direto: ' + req.body.sale_order_id);
+      console.log('[TE-SEND-INVOICE] sale_order_id recebido no body: ' + req.body.sale_order_id);
       saleOrder = await odooTe.findSaleOrderById(req.body.sale_order_id);
+      if (saleOrder) {
+        console.log('[TE-SEND-INVOICE] sale.order encontrada via body: ' + saleOrder.name + ' (id=' + saleOrder.id + ')');
+      } else {
+        console.warn('[TE-SEND-INVOICE] sale_order_id=' + req.body.sale_order_id + ' recebido mas NAO encontrado no Odoo!');
+      }
     }
 
     // 3b. Busca automatica via relacao invoice -> sale.order
     if (!saleOrder) {
+      console.log('[TE-SEND-INVOICE] Tentando findSaleOrderByInvoice(' + invId + ')...');
       saleOrder = await odooTe.findSaleOrderByInvoice(invId);
+      if (saleOrder) {
+        console.log('[TE-SEND-INVOICE] sale.order encontrada via findSaleOrderByInvoice: ' + saleOrder.name + ' (id=' + saleOrder.id + ')');
+      } else {
+        console.log('[TE-SEND-INVOICE] findSaleOrderByInvoice retornou NULL. A fatura NAO esta vinculada a nenhuma sale.order.');
+        console.log('[TE-SEND-INVOICE] Solucao: acao do servidor deve enviar sale_order_id no body, ou criar x_studio_motorista na fatura.');
+      }
     }
 
     // 4. Se tem venda, busca dados completos (picking, linhas, motorista)
@@ -621,30 +633,47 @@ router.post('/send-invoice', async (req, res) => {
     //    3) account.move.x_studio_motorista (fallback p/ faturas sem venda vinculada)
     let motoristaName = null;
     let teDriver = null;
+    let motoristaSource = null;
+
+    // Diagnostico: loga todos os campos relevantes
+    console.log('[TE-SEND-INVOICE] --- DIAGNOSTICO MOTORISTA ---');
+    console.log('[TE-SEND-INVOICE] saleFull=' + (saleFull ? 'SIM (id=' + saleFull.id + ', name=' + saleFull.name + ')' : 'NULL (sale.order nao encontrada)'));
+    console.log('[TE-SEND-INVOICE] saleFull.x_studio_motorista=' + (saleFull ? JSON.stringify(saleFull.x_studio_motorista) : 'N/A'));
+    console.log('[TE-SEND-INVOICE] picking=' + (picking ? 'SIM (id=' + picking.id + ')' : 'NULL'));
+    console.log('[TE-SEND-INVOICE] picking.x_studio_motorista=' + (picking ? JSON.stringify(picking.x_studio_motorista) : 'N/A'));
+    console.log('[TE-SEND-INVOICE] invoice.x_studio_motorista=' + JSON.stringify(invoice.x_studio_motorista));
+    console.log('[TE-SEND-INVOICE] req.body.sale_order_id=' + JSON.stringify(req.body.sale_order_id));
+
     if (saleFull && saleFull.x_studio_motorista) {
       motoristaName = saleFull.x_studio_motorista;
-      console.log('[TE-SEND-INVOICE] Motorista da sale.order: ' + motoristaName);
+      motoristaSource = 'sale.order (id=' + saleFull.id + ')';
+      console.log('[TE-SEND-INVOICE] Motorista da sale.order: "' + motoristaName + '"');
     } else if (picking && picking.x_studio_motorista) {
       motoristaName = picking.x_studio_motorista;
-      console.log('[TE-SEND-INVOICE] Motorista do picking (fallback): ' + motoristaName);
+      motoristaSource = 'picking (id=' + picking.id + ')';
+      console.log('[TE-SEND-INVOICE] Motorista do picking: "' + motoristaName + '"');
     } else if (invoice && invoice.x_studio_motorista) {
       motoristaName = invoice.x_studio_motorista;
-      console.log('[TE-SEND-INVOICE] Motorista da fatura/account.move (fallback): ' + motoristaName);
+      motoristaSource = 'account.move/fatura (id=' + invoice.id + ')';
+      console.log('[TE-SEND-INVOICE] Motorista da fatura: "' + motoristaName + '"');
     }
+
     if (motoristaName) {
+      console.log('[TE-SEND-INVOICE] Motorista selecionado: "' + motoristaName + '" (fonte: ' + motoristaSource + ')');
       try {
         teDriver = await teClient.findDriverByName(motoristaName);
         if (teDriver) {
-          console.log('[TE-SEND-INVOICE] Motorista TE encontrado: ' + teDriver.Name + ' (' + teDriver.PhoneNumber + ')');
+          console.log('[TE-SEND-INVOICE] Motorista ENCONTRADO no TE: Name=' + teDriver.Name + ' | Phone=' + teDriver.PhoneNumber + ' | PhoneCountry=' + teDriver.PhoneCountry);
         } else {
-          console.warn('[TE-SEND-INVOICE] Motorista "' + motoristaName + '" NAO encontrado no TE (verificar se esta cadastrado)');
+          console.warn('[TE-SEND-INVOICE] Motorista "' + motoristaName + '" NAO encontrado no TE! Verifique se esta cadastrado como motorista na conta TE.');
         }
       } catch (err) {
         console.error('[TE-SEND-INVOICE] Erro ao buscar motorista no TE: ' + err.message);
       }
     } else {
-      console.log('[TE-SEND-INVOICE] Nenhum motorista selecionado no Odoo');
+      console.log('[TE-SEND-INVOICE] Nenhum motorista selecionado no Odoo. Motivo: saleFull=' + (saleFull ? 'sim' : 'nao') + ' | picking=' + (picking ? 'sim' : 'nao') + ' | invoice.x_studio_motorista=' + JSON.stringify(invoice.x_studio_motorista));
     }
+    console.log('[TE-SEND-INVOICE] --- FIM DIAGNOSTICO MOTORISTA ---');
 
     // 7. Mapeia para TE (picking sera sintetico pelo mapper se null)
     const delivery = Mapper.odooToTeDelivery({
@@ -693,6 +722,7 @@ router.post('/send-invoice', async (req, res) => {
 
     // 9. Envia ao TE
     console.log('[TE-SEND-INVOICE] Enviando ao TE...');
+    console.log('[TE-SEND-INVOICE] Driver block enviado: ' + JSON.stringify(delivery.Driver));
     const teResult = await teClient.createDeliveries([delivery]);
     const teResp = Array.isArray(teResult) ? teResult[0] : teResult;
 
@@ -913,5 +943,20 @@ function matchMotoristaSelection(driverNameFromTe) {
   }
   return null;
 }
+
+// ============================================================
+// GET /api/v1/te/drivers — Lista motoristas cadastrados no TE (debug)
+// ============================================================
+router.get('/drivers', async (req, res) => {
+  try {
+    const drivers = await teClient.getDrivers();
+    const list = Object.entries(drivers || {}).map(function([name, d]) {
+      return { name: name, phoneNumber: d.PhoneNumber, phoneCountry: d.PhoneCountry };
+    });
+    res.json({ success: true, count: list.length, drivers: list });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 module.exports = router;

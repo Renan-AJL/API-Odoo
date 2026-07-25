@@ -281,22 +281,38 @@ class TudoEntregueClient {
   async findDriverByName(motoristaName) {
     if (!motoristaName) return null;
     const drivers = await this.getDrivers();
-    if (!drivers || !Object.keys(drivers).length) return null;
+    const driverKeys = Object.keys(drivers);
+    if (!drivers || !driverKeys.length) {
+      console.warn('[TE-DRIVER] Cache de motoristas vazio ou nao carregado!');
+      return null;
+    }
 
     const search = motoristaName.toUpperCase().trim();
+    console.log('[TE-DRIVER] Buscando motorista: "' + search + '" entre ' + driverKeys.length + ' drivers: [' + driverKeys.join(', ') + ']');
+
     // Match exato
-    if (drivers[search]) return drivers[search];
+    if (drivers[search]) {
+      console.log('[TE-DRIVER] Match EXATO: "' + search + '" -> Phone=' + drivers[search].PhoneNumber);
+      return drivers[search];
+    }
     // Match parcial (nome contem ou e contido)
-    for (const key of Object.keys(drivers)) {
-      if (key.indexOf(search) !== -1 || search.indexOf(key) !== -1) return drivers[key];
+    for (const key of driverKeys) {
+      if (key.indexOf(search) !== -1 || search.indexOf(key) !== -1) {
+        console.log('[TE-DRIVER] Match PARCIAL: "' + search + '" ~= "' + key + '" -> Phone=' + drivers[key].PhoneNumber);
+        return drivers[key];
+      }
     }
     // Match pela primeira palavra
     const firstWord = search.split(/\s+/)[0];
     if (firstWord.length >= 3) {
-      for (const key of Object.keys(drivers)) {
-        if (key.indexOf(firstWord) !== -1 || firstWord.indexOf(key) !== -1) return drivers[key];
+      for (const key of driverKeys) {
+        if (key.indexOf(firstWord) !== -1 || firstWord.indexOf(key) !== -1) {
+          console.log('[TE-DRIVER] Match PRIMEIRA PALAVRA: "' + search + '" ~= "' + key + '" -> Phone=' + drivers[key].PhoneNumber);
+          return drivers[key];
+        }
       }
     }
+    console.warn('[TE-DRIVER] NENHUM match para "' + search + '". Drivers disponiveis: [' + driverKeys.join(', ') + ']');
     return null;
   }
 

@@ -345,7 +345,7 @@ function odooToTeDelivery(ctx) {
       PhoneNumber: teDriver.PhoneNumber,
       DefineDriverAfter: 0,
     };
-    logger.info('[MAPPER] Motorista especificado: ' + (motoristaName || teDriver.PhoneNumber) + ' -> ' + teDriver.PhoneNumber);
+    logger.info('[MAPPER] Driver -> ESPECIFICO: ' + (motoristaName || '?') + ' | PhoneCountry=' + driver.PhoneCountry + ' | PhoneNumber=' + driver.PhoneNumber + ' | DefineDriverAfter=0');
   } else {
     driver = {
       PhoneCountry: '55',
@@ -353,7 +353,10 @@ function odooToTeDelivery(ctx) {
       DefineDriverAfter: 1,
     };
     if (motoristaName) {
-      logger.warn('[MAPPER] Motorista "' + motoristaName + '" nao encontrado no TE, usando DefineDriverAfter=1');
+      logger.warn('[MAPPER] Driver -> AUTO (motorista "' + motoristaName + '" nao encontrado no TE ou sem telefone): PhoneCountry=55 | PhoneNumber=99999999999 | DefineDriverAfter=1');
+      logger.warn('[MAPPER] Motivo: teDriver=' + JSON.stringify(teDriver) + ' | teDriver.PhoneNumber=' + (teDriver ? teDriver.PhoneNumber : 'N/A'));
+    } else {
+      logger.info('[MAPPER] Driver -> AUTO (nenhum motorista selecionado no Odoo): DefineDriverAfter=1');
     }
   }
 
