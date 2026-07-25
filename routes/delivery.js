@@ -506,7 +506,9 @@ function buildTeCard(delivery, trackingData, situationData) {
     '</div>' +
     '<div style="padding:14px 16px;">' +
       row('Pedido', orderNum) +
-      (trackingCode ? row('Rastreio', trackingCode, '#1565c0', 'https://app.tudoentregue.com.br/rastreamento/' + trackingCode) : '') +
+      (trackingCode
+        ? '<a href="https://app.tudoentregue.com.br/rastreamento/' + trackingCode + '" target="_blank" style="display:block;text-align:center;background:#e8f5e9;border:1px solid #a5d6a7;color:#2e7d32;padding:10px;border-radius:8px;text-decoration:none;font-weight:600;font-size:12px;margin-bottom:10px;">&#128666; Rastrear Entrega em Tempo Real</a>'
+        : '') +
       row('Cliente', custName) +
       row('Agendamento', fmtDate(scheduled)) +
       (deliveredDate ? row('Entregue em', fmtDate(deliveredDate), '#4caf50') : '') +
@@ -740,11 +742,21 @@ router.post('/send-invoice', async (req, res) => {
       }
 
       var resultMsg = Mapper.chatterCreateMessage(teResp, delivery);
+      // Adiciona info de motorista ao resultado
+      if (!motoristaName) {
+        resultMsg += '<br/><br/><span style="color:#e65100;"><b>Motorista:</b> NAO enviado ao TE.</span>';
+        resultMsg += '<br/>Motivo: fatura sem sale.order vinculada e sem campo x_studio_motorista na fatura.';
+        resultMsg += '<br/><b>Solucao:</b> atualizar a acao do servidor para enviar sale_order_id, ou criar o campo x_studio_motorista no app financeiro (account.move).';
+      } else if (!teDriver) {
+        resultMsg += '<br/><br/><span style="color:#e65100;"><b>Motorista "' + motoristaName.toUpperCase() + '":</b> NAO encontrado no TE.</span>';
+        resultMsg += '<br/>O motorista precisa estar cadastrado como motorista na conta TudoEntregue.';
+      }
       await odooTe.postChatter('account.move', invId, resultMsg);
       if (picking) await odooTe.postChatter('stock.picking', picking.id, resultMsg);
       if (saleOrder) await odooTe.postChatter('sale.order', saleOrder.id, resultMsg);
 
-      // Grava card HTML na fatura (x_studio_status_de_entrega_te)
+      // Grava card HTML na fatura (x_studio_status_de_entrega_te) — prepend, nao sobrescreve
+      var trackUrl = teResp.TrackingCode ? 'https://app.tudoentregue.com.br/rastreamento/' + teResp.TrackingCode : '';
       var invoiceCard = '<div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">' +
         '<div style="background:linear-gradient(135deg,#1565c0,#1e88e5);color:white;padding:14px 16px;display:flex;align-items:center;gap:10px;">' +
         '<div style="font-size:22px;">&#128666;</div>' +
@@ -754,8 +766,9 @@ router.post('/send-invoice', async (req, res) => {
         '</div>' +
         '<div style="padding:14px 16px;">' +
         '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Pedido</span><span style="font-size:12px;font-weight:500;">' + (delivery.OrderNumber || '') + '</span></div>' +
-        '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Order ID</span><span style="font-size:12px;font-weight:500;">' + (teResp.OrderID || 'N/A') + '</span></div>' +
-        (teResp.TrackingCode ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Rastreio</span><a href="https://app.tudoentregue.com.br/rastreamento/' + teResp.TrackingCode + '" target="_blank" style="font-size:12px;font-weight:500;color:#1565c0;text-decoration:none;">' + teResp.TrackingCode + '</a></div>' : '') +
+        (trackUrl ?
+          '<a href="' + trackUrl + '" target="_blank" style="display:block;text-align:center;background:#e8f5e9;border:1px solid #a5d6a7;color:#2e7d32;padding:10px;border-radius:8px;text-decoration:none;font-weight:600;font-size:12px;margin-bottom:10px;">&#128666; Rastrear Entrega em Tempo Real</a>' :
+          '') +
         '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Destinatario</span><span style="font-size:12px;font-weight:500;">' + (delivery.DestinationAddress.Name || '') + '</span></div>' +
         '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Cidade</span><span style="font-size:12px;font-weight:500;">' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '</span></div>' +
         (delivery.Weight ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Peso</span><span style="font-size:12px;font-weight:500;">' + delivery.Weight + ' kg</span></div>' : '') +

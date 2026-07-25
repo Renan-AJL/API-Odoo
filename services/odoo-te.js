@@ -230,7 +230,16 @@ async function readSaleOrderFull(orderId) {
 }
 
 async function updateSaleOrderStatusHtml(orderId, html) {
-  await safeWriteCustom('sale.order', [orderId], { x_studio_status_de_entrega_te: html });
+  // Le o HTML atual e faz prepend do novo card (nao apaga historico)
+  try {
+    var cur = await executeKw('sale.order', 'read', [[orderId]], { fields: ['x_studio_status_de_entrega_te'] });
+    var existing = (cur && cur[0] && cur[0].x_studio_status_de_entrega_te) || '';
+  } catch (e) { var existing = ''; }
+  var combined = html;
+  if (existing) {
+    combined += '<div style="margin-top:14px;border-top:1px dashed #ddd;padding-top:14px;opacity:0.9;">' + existing + '</div>';
+  }
+  await safeWriteCustom('sale.order', [orderId], { x_studio_status_de_entrega_te: combined });
 }
 
 async function updateSaleOrderMotorista(orderId, motoristaKey) {
@@ -357,7 +366,16 @@ async function markInvoiceSynced(invoiceIds, teOrderId) {
 }
 
 async function updateInvoiceStatusHtml(invoiceId, html) {
-  await safeWriteCustom('account.move', [invoiceId], { x_studio_status_de_entrega_te: html });
+  // Le o HTML atual e faz prepend do novo card (nao apaga historico)
+  try {
+    var cur = await executeKw('account.move', 'read', [[invoiceId]], { fields: ['x_studio_status_de_entrega_te'] });
+    var existing = (cur && cur[0] && cur[0].x_studio_status_de_entrega_te) || '';
+  } catch (e) { var existing = ''; }
+  var combined = html;
+  if (existing) {
+    combined += '<div style="margin-top:14px;border-top:1px dashed #ddd;padding-top:14px;opacity:0.9;">' + existing + '</div>';
+  }
+  await safeWriteCustom('account.move', [invoiceId], { x_studio_status_de_entrega_te: combined });
 }
 
 // ============================================================
