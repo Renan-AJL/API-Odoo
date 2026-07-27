@@ -336,29 +336,13 @@ function odooToTeDelivery(ctx) {
     observation += (observation ? ' | ' : '') + 'Valor: R$ ' + Number(amountTotal).toFixed(2).replace('.', ',');
   }
 
-  // Driver: se tem motorista selecionado no Odoo e encontramos no TE, usa o telefone dele
-  // Senao DefineDriverAfter=1 para TE atribuir automaticamente
-  var driver;
-  if (teDriver && teDriver.PhoneNumber) {
-    driver = {
-      PhoneCountry: teDriver.PhoneCountry || '55',
-      PhoneNumber: teDriver.PhoneNumber,
-      DefineDriverAfter: 0,
-    };
-    logger.info('[MAPPER] Driver -> ESPECIFICO: ' + (motoristaName || '?') + ' | PhoneCountry=' + driver.PhoneCountry + ' | PhoneNumber=' + driver.PhoneNumber + ' | DefineDriverAfter=0');
-  } else {
-    driver = {
-      PhoneCountry: '55',
-      PhoneNumber: '99999999999',
-      DefineDriverAfter: 1,
-    };
-    if (motoristaName) {
-      logger.warn('[MAPPER] Driver -> AUTO (motorista "' + motoristaName + '" nao encontrado no TE ou sem telefone): PhoneCountry=55 | PhoneNumber=99999999999 | DefineDriverAfter=1');
-      logger.warn('[MAPPER] Motivo: teDriver=' + JSON.stringify(teDriver) + ' | teDriver.PhoneNumber=' + (teDriver ? teDriver.PhoneNumber : 'N/A'));
-    } else {
-      logger.info('[MAPPER] Driver -> AUTO (nenhum motorista selecionado no Odoo): DefineDriverAfter=1');
-    }
-  }
+  // Driver: TE atribui automaticamente (DefineDriverAfter=1)
+  var driver = {
+    PhoneCountry: '55',
+    PhoneNumber: '99999999999',
+    DefineDriverAfter: 1,
+  };
+  logger.info('[MAPPER] Driver -> AUTO (TE atribui): DefineDriverAfter=1');
 
   var delivery = {
     Customer: {
@@ -377,18 +361,19 @@ function odooToTeDelivery(ctx) {
     Observation: observation,
   };
 
-  // Data de saida
-  if (scheduledDate) {
-    delivery.DepartureDate = formatTeDate(scheduledDate);
-  }
+  // Data de saida (D+1 — sempre dia seguinte ao da criacao)
+  var departureDate = scheduledDate ? new Date(scheduledDate) : new Date();
+  departureDate.setDate(departureDate.getDate() + 1);
+  delivery.DepartureDate = formatTeDate(departureDate.toISOString());
+  logger.info('[MAPPER] DepartureDate (D+1): ' + delivery.DepartureDate);
 
-  // Previsao de entrega + janela de horario
-  if (deliveryDate) {
-    delivery.DeliveryDate = formatDateOnly(deliveryDate);
-    var startTime = extractTime(deliveryDate);
-    delivery.DeliveryStartTime = startTime || '08:00';
-    delivery.DeliveryEndTime = '18:00';
-  }
+  // Previsao de entrega (D+1 — sempre dia seguinte ao da criacao)
+  var dDate = deliveryDate ? new Date(deliveryDate) : departureDate;
+  dDate.setDate(dDate.getDate() + 1);
+  delivery.DeliveryDate = formatDateOnly(dDate.toISOString());
+  delivery.DeliveryStartTime = '08:00';
+  delivery.DeliveryEndTime = '18:00';
+  logger.info('[MAPPER] DeliveryDate (D+1): ' + delivery.DeliveryDate);
 
   // Peso, volume, cubagem
   if (totalWeight > 0) delivery.Weight = Math.round(totalWeight * 100) / 100;

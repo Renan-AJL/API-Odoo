@@ -630,52 +630,9 @@ router.post('/send-invoice', async (req, res) => {
     // 6. Le dados da empresa (remetente)
     const company = await odooTe.getCompany();
 
-    // 6b. Motorista: prioridade 1) sale.order.x_studio_motorista
-    //    2) picking.x_studio_motorista
-    //    3) account.move.x_studio_motorista (fallback p/ faturas sem venda vinculada)
+    // 6b. Motorista: TE atribui automaticamente (DefineDriverAfter=1)
     let motoristaName = null;
     let teDriver = null;
-    let motoristaSource = null;
-
-    // Diagnostico: loga todos os campos relevantes
-    console.log('[TE-SEND-INVOICE] --- DIAGNOSTICO MOTORISTA ---');
-    console.log('[TE-SEND-INVOICE] saleFull=' + (saleFull ? 'SIM (id=' + saleFull.id + ', name=' + saleFull.name + ')' : 'NULL (sale.order nao encontrada)'));
-    console.log('[TE-SEND-INVOICE] saleFull.x_studio_motorista=' + (saleFull ? JSON.stringify(saleFull.x_studio_motorista) : 'N/A'));
-    console.log('[TE-SEND-INVOICE] picking=' + (picking ? 'SIM (id=' + picking.id + ')' : 'NULL'));
-    console.log('[TE-SEND-INVOICE] picking.x_studio_motorista=' + (picking ? JSON.stringify(picking.x_studio_motorista) : 'N/A'));
-    console.log('[TE-SEND-INVOICE] invoice.x_studio_motorista=' + JSON.stringify(invoice.x_studio_motorista));
-    console.log('[TE-SEND-INVOICE] req.body.sale_order_id=' + JSON.stringify(req.body.sale_order_id));
-
-    if (saleFull && saleFull.x_studio_motorista) {
-      motoristaName = saleFull.x_studio_motorista;
-      motoristaSource = 'sale.order (id=' + saleFull.id + ')';
-      console.log('[TE-SEND-INVOICE] Motorista da sale.order: "' + motoristaName + '"');
-    } else if (picking && picking.x_studio_motorista) {
-      motoristaName = picking.x_studio_motorista;
-      motoristaSource = 'picking (id=' + picking.id + ')';
-      console.log('[TE-SEND-INVOICE] Motorista do picking: "' + motoristaName + '"');
-    } else if (invoice && invoice.x_studio_motorista) {
-      motoristaName = invoice.x_studio_motorista;
-      motoristaSource = 'account.move/fatura (id=' + invoice.id + ')';
-      console.log('[TE-SEND-INVOICE] Motorista da fatura: "' + motoristaName + '"');
-    }
-
-    if (motoristaName) {
-      console.log('[TE-SEND-INVOICE] Motorista selecionado: "' + motoristaName + '" (fonte: ' + motoristaSource + ')');
-      try {
-        teDriver = await teClient.findDriverByName(motoristaName);
-        if (teDriver) {
-          console.log('[TE-SEND-INVOICE] Motorista ENCONTRADO no TE: Name=' + teDriver.Name + ' | Phone=' + teDriver.PhoneNumber + ' | PhoneCountry=' + teDriver.PhoneCountry);
-        } else {
-          console.warn('[TE-SEND-INVOICE] Motorista "' + motoristaName + '" NAO encontrado no TE! Verifique se esta cadastrado como motorista na conta TE.');
-        }
-      } catch (err) {
-        console.error('[TE-SEND-INVOICE] Erro ao buscar motorista no TE: ' + err.message);
-      }
-    } else {
-      console.log('[TE-SEND-INVOICE] Nenhum motorista selecionado no Odoo. Motivo: saleFull=' + (saleFull ? 'sim' : 'nao') + ' | picking=' + (picking ? 'sim' : 'nao') + ' | invoice.x_studio_motorista=' + JSON.stringify(invoice.x_studio_motorista));
-    }
-    console.log('[TE-SEND-INVOICE] --- FIM DIAGNOSTICO MOTORISTA ---');
 
     // 7. Mapeia para TE (picking sera sintetico pelo mapper se null)
     const delivery = Mapper.odooToTeDelivery({
@@ -687,8 +644,8 @@ router.post('/send-invoice', async (req, res) => {
       companyCnpj: config.empresa.cnpj,
       orderLines: orderLines,
       productsMap: productsMap,
-      motoristaName: motoristaName,
-      teDriver: teDriver,
+      motoristaName: null,
+      teDriver: null,
     });
     if (!delivery) {
       return res.status(500).json({ success: false, error: 'Falha no mapeamento dos dados' });
@@ -710,14 +667,7 @@ router.post('/send-invoice', async (req, res) => {
     if (!saleOrder) {
       chatterMsg += '<br/><i>Sem sale.order vinculada — fluxo direto fatura</i>';
     }
-    if (motoristaName) {
-      chatterMsg += '<br/>Motorista: ' + motoristaName.toUpperCase();
-      if (teDriver) {
-        chatterMsg += ' (' + teDriver.PhoneNumber + ')';
-      } else {
-        chatterMsg += ' <b style="color:#e65100;">NAO encontrado no TE</b>';
-      }
-    }
+
     await odooTe.postChatter('account.move', invId, chatterMsg);
     if (picking) await odooTe.postChatter('stock.picking', picking.id, chatterMsg);
     if (saleOrder) await odooTe.postChatter('sale.order', saleOrder.id, chatterMsg);
@@ -742,15 +692,7 @@ router.post('/send-invoice', async (req, res) => {
       }
 
       var resultMsg = Mapper.chatterCreateMessage(teResp, delivery);
-      // Adiciona info de motorista ao resultado
-      if (!motoristaName) {
-        resultMsg += '<br/><br/><span style="color:#e65100;"><b>Motorista:</b> NAO enviado ao TE.</span>';
-        resultMsg += '<br/>Motivo: fatura sem sale.order vinculada e sem campo x_studio_motorista na fatura.';
-        resultMsg += '<br/><b>Solucao:</b> atualizar a acao do servidor para enviar sale_order_id, ou criar o campo x_studio_motorista no app financeiro (account.move).';
-      } else if (!teDriver) {
-        resultMsg += '<br/><br/><span style="color:#e65100;"><b>Motorista "' + motoristaName.toUpperCase() + '":</b> NAO encontrado no TE.</span>';
-        resultMsg += '<br/>O motorista precisa estar cadastrado como motorista na conta TudoEntregue.';
-      }
+
       await odooTe.postChatter('account.move', invId, resultMsg);
       if (picking) await odooTe.postChatter('stock.picking', picking.id, resultMsg);
       if (saleOrder) await odooTe.postChatter('sale.order', saleOrder.id, resultMsg);
@@ -773,7 +715,7 @@ router.post('/send-invoice', async (req, res) => {
         '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Cidade</span><span style="font-size:12px;font-weight:500;">' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '</span></div>' +
         (delivery.Weight ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Peso</span><span style="font-size:12px;font-weight:500;">' + delivery.Weight + ' kg</span></div>' : '') +
         (delivery.Volume ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Volumes</span><span style="font-size:12px;font-weight:500;">' + delivery.Volume + '</span></div>' : '') +
-        (motoristaName ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Motorista</span><span style="font-size:12px;font-weight:500;color:#2e7d32;">' + motoristaName.toUpperCase() + (teDriver ? ' &#10003;' : ' &#9888;') + '</span></div>' : '') +
+
         '</div>' +
         '<div style="background:#f5f5f5;padding:8px 16px;font-size:10px;color:#aaa;text-align:right;">' + new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '</div>' +
         '</div>';

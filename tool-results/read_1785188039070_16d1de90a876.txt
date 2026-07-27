@@ -1,0 +1,726 @@
+   250→// -------------------------------------------------------
+   251→router.delete('/deliveries/cancel', async (req, res) => {
+   252→  try {
+   253→    const { orders } = req.body;
+   254→    if (!orders?.length) {
+   255→      return res.status(400).json({ success: false, error: 'Informe o array "orders" com OrderNumber e OrderType' });
+   256→    }
+   257→
+   258→    const result = await teClient.cancelDeliveries(orders);
+   259→    res.json({ success: true, result });
+   260→  } catch (err) {
+   261→    console.error('[TE-DELIVERY] Erro cancel:', err.message);
+   262→    res.status(500).json({ success: false, error: err.message });
+   263→  }
+   264→});
+   265→
+   266→// -------------------------------------------------------
+   267→// GET /api/v1/te/deliveries/situations — Lista situacoes
+   268→// -------------------------------------------------------
+   269→router.get('/deliveries/situations', async (req, res) => {
+   270→  try {
+   271→    const situations = await teClient.getSituations();
+   272→    res.json({ success: true, situations });
+   273→  } catch (err) {
+   274→    console.error('[TE-DELIVERY] Erro situations:', err.message);
+   275→    res.status(500).json({ success: false, error: err.message });
+   276→  }
+   277→});
+   278→
+   279→// -------------------------------------------------------
+   280→// GET /api/v1/te/deliveries/pull — Puxa status e atualiza ODOO
+   281→// -------------------------------------------------------
+   282→router.get('/deliveries/pull', async (req, res) => {
+   283→  try {
+   284→    const { dateFrom, dateTo, situation } = req.query;
+   285→
+   286→    const params = { page: 1 };
+   287→    if (dateFrom) params.dateFrom = dateFrom;
+   288→    if (dateTo) params.dateTo = dateTo;
+   289→    if (situation) params.situation = parseInt(situation, 10);
+   290→
+   291→    const allDeliveries = await teClient.fetchAllPages('/api/Entregas', params);
+   292→
+   293→    let updated = 0;
+   294→    let notFound = 0;
+   295→
+   296→    for (const d of allDeliveries) {
+   297→      const orderNum = d.OrderNumber || d.orderNumber;
+   298→      const picking = await odooTe.findPickingByTeId(orderNum);
+   299→
+   300→      if (picking) {
+   301→        const mapped = Mapper.teToOdooPicking(d);
+   302→        await odooTe.updatePickingTeData(picking.id, mapped);
+   303→        updated++;
+   304→      } else {
+   305→        const so = await odooTe.findSaleOrderByTeId(orderNum);
+   306→        if (so) {
+   307→          await odooTe.updateSaleOrderTeData(so.id, Mapper.teToOdooSaleOrder(d));
+   308→          updated++;
+   309→        } else {
+   310→          notFound++;
+   311→        }
+   312→      }
+   313→    }
+   314→
+   315→    res.json({
+   316→      success: true,
+   317→      totalFetched: allDeliveries.length,
+   318→      updatedInOdoo: updated,
+   319→      notFoundInOdoo: notFound,
+   320→    });
+   321→  } catch (err) {
+   322→    console.error('[TE-DELIVERY] Erro pull:', err.message);
+   323→    res.status(500).json({ success: false, error: err.message });
+   324→  }
+   325→});
+   326→
+   327→const SITUATION_ORDER_COLORS = {
+   328→  0:  '#9e9e9e',  // cinza - Aguardando
+   329→  1:  '#2196f3',  // azul - Em Rota
+   330→  3:  '#4caf50',  // verde - Entregue
+   331→  5:  '#f44336',  // vermelho - Nao Entregue
+   332→  6:  '#ff9800',  // laranja - Parcial
+   333→  8:  '#b71c1c',  // vermelho escuro - Cancelada
+   334→  9:  '#ff5722',  // laranja escuro - Atrasada
+   335→  10: '#0097a7',  // teal - Em Separacao
+   336→  11: '#9c27b0',  // roxo - Transferida
+   337→  12: '#1b5e20',  // verde escuro - Baixada
+   338→  // /orders/situation codes (usados no timeline)
+   339→  2:  '#42a5f5',  // azul claro
+   340→  4:  '#e53935',  // vermelho
+   341→  7:  '#1b5e20',  // verde escuro - Operacao Finalizada
+   342→};
+   343→
+   344→// ============================================================
+   345→// HTML CARD BUILDER — Um card com tudo que vem do TE
+   346→// ============================================================
+   347→
+   348→// Labels para /orders/situation (codigo diferente do /api/Entregas)
+   349→const SIT_ORDER_LABELS = {
+   350→  0: 'Nao Enviada', 1: 'Envio Solicitado',
+   351→  2: 'Enviada ao Motorista - Aguardando',
+   352→  3: 'Enviada ao Motorista - Confirmada',
+   353→  4: 'Enviada ao Motorista - Recusada',
+   354→  5: 'Finalizada pelo Motorista', 6: 'Finalizada pelo Cliente',
+   355→  7: 'Operacao Finalizada', 8: 'Operacao Cancelada',
+   356→  9: 'Cancelamento ao Motorista', 11: 'Transferida',
+   357→};
+   358→
+   359→function fmtDate(dateStr) {
+   360→  if (!dateStr) return '';
+   361→  try {
+   362→    const d = new Date(dateStr);
+   363→    if (isNaN(d.getTime())) return dateStr;
+   364→    return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo',
+   365→      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+   366→  } catch { return dateStr; }
+   367→}
+   368→
+   369→function buildTeCard(delivery, trackingData, situationData) {
+   370→  // Dados da entrega
+   371→  const sitCode = delivery.Situation ?? delivery.situation ?? null;
+   372→  const sitLabel = SITUATION_LABELS[sitCode] || ("Situacao " + sitCode);
+   373→  const sitColor = SITUATION_ORDER_COLORS[sitCode] || '#607d8b';
+   374→  const trackingCode = delivery.TrackingCode || delivery.trackingCode || '';
+   375→  const orderNum = delivery.OrderNumber || delivery.orderNumber || '';
+   376→  const custName = delivery.CustomerName || delivery.customerName || '';
+   377→  const scheduled = delivery.ScheduledDate || delivery.scheduledDate || '';
+   378→  const deliveredDate = delivery.DeliveredDate || delivery.deliveredDate || '';
+   379→  const occDesc = delivery.OccurrenceDescription || delivery.occurrenceDescription || '';
+   380→  const proofUrl = delivery.ProofUrl || delivery.proofUrl || '';
+   381→
+   382→  // Motorista — vem do /api/Entregas
+   383→  let driverName = delivery.DriverName || delivery.driverName || '';
+   384→  let driverPhone = delivery.DriverPhone || delivery.driverPhone || '';
+   385→
+   386→  // Motorista — complementa do /orders/situation (telefone completo com pais)
+   387→  const sitDriver = situationData?.Driver;
+   388→  if (sitDriver) {
+   389→    if (!driverName && sitDriver.Name) driverName = sitDriver.Name;
+   390→    if (!driverPhone && sitDriver.PhoneNumber) {
+   391→      const pc = sitDriver.PhoneCountry || '55';
+   392→      driverPhone = '+' + pc + ' ' + sitDriver.PhoneNumber;
+   393→    }
+   394→  }
+   395→
+   396→  // Motorista — complementa do /tracking (nome + foto)
+   397→  const trackOrder = trackingData?.Order;
+   398→  const trackDriver = trackOrder?.Driver;
+   399→  if (trackDriver) {
+   400→    if (!driverName && trackDriver.Name) driverName = trackDriver.Name;
+   401→  }
+   402→
+   403→  // --- Linhas de informacao ---
+   404→  const row = (label, value, color, href) => {
+   405→    if (!value) return '';
+   406→    const valHtml = href
+   407→      ? '<a href="' + href + '" target="_blank" style="color:' + (color || '#333') + ';text-decoration:none;">' + value + '</a>'
+   408→      : '<span style="color:' + (color || '#333') + ';">' + value + '</span>';
+   409→    return '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+   410→      '<span style="font-size:11px;color:#888;">' + label + '</span>' +
+   411→      '<span style="font-size:12px;font-weight:500;">' + valHtml + '</span></div>';
+   412→  };
+   413→
+   414→  // --- Bloco do motorista (destacado) ---
+   415→  let motoristaHtml = '';
+   416→  if (driverName) {
+   417→    const phoneLink = driverPhone ? ('tel:' + driverPhone.replace(/[^0-9+]/g, '')) : '';
+   418→    const driverPhoto = trackDriver?.PictureUrl || '';
+   419→    motoristaHtml =
+   420→      '<div style="margin-top:10px;padding:12px;background:linear-gradient(135deg,#e8f5e9,#f1f8e9);border-radius:8px;border:1px solid #c8e6c9;">' +
+   421→        '<div style="display:flex;align-items:center;gap:10px;">' +
+   422→          (driverPhoto
+   423→            ? '<img src="' + driverPhoto + '" style="width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid #43a047;" />'
+   424→            : '<div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#2e7d32,#43a047);display:flex;align-items:center;justify-content:center;color:white;font-size:18px;">&#128100;</div>') +
+   425→          '<div style="flex:1;">' +
+   426→            '<div style="font-size:13px;font-weight:700;color:#1b5e20;">' + driverName + '</div>' +
+   427→            (driverPhone
+   428→              ? '<div style="font-size:11px;color:#555;"><a href="' + phoneLink + '" style="color:#2e7d32;text-decoration:none;font-weight:600;">' + driverPhone + '</a></div>'
+   429→              : '') +
+   430→          '</div>' +
+   431→        '</div>' +
+   432→      '</div>';
+   433→  }
+   434→
+   435→  // --- Timeline de status (do /orders/situation) ---
+   436→  let timelineHtml = '';
+   437→  const statuses = situationData?.Status || [];
+   438→  if (statuses.length > 0) {
+   439→    const items = statuses.map((s, i) => {
+   440→      const label = SIT_ORDER_LABELS[s.Status] || ('Status ' + s.Status);
+   441→      const color = SITUATION_ORDER_COLORS[s.Status] || '#607d8b';
+   442→      const date = s.Date ? fmtDate(s.Date) : '';
+   443→      const first = (i === 0);
+   444→      return '<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:' + (first ? '8' : '5') + 'px;">' +
+   445→        '<div style="min-width:10px;min-height:10px;width:10px;height:10px;border-radius:50%;background:' + color + ';margin-top:4px;' +
+   446→          (first ? 'box-shadow:0 0 0 3px ' + color + '33;' : 'opacity:0.5;') + '"></div>' +
+   447→        '<div style="flex:1;">' +
+   448→          '<div style="font-size:12px;color:#333;font-weight:' + (first ? '600' : '400') + ';">' + label + '</div>' +
+   449→          (date ? '<div style="font-size:10px;color:#999;margin-top:1px;">' + date + '</div>' : '') +
+   450→        '</div></div>';
+   451→    }).join('');
+   452→    timelineHtml = '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #e0e0e0;">' +
+   453→      '<div style="font-size:11px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Historico</div>' +
+   454→      items + '</div>';
+   455→  }
+   456→
+   457→  // --- Ocorrencias com fotos (do /tracking) ---
+   458→  let occHtml = '';
+   459→  const trackStatuses = trackingData?.TrackingStatus || [];
+   460→  if (trackStatuses.length > 0) {
+   461→    const occItems = trackStatuses.map(ts => {
+   462→      const ok = (ts.Status === 'check');
+   463→      const icon = ok ? '&#10003;' : '&#9888;';
+   464→      const color = ok ? '#4caf50' : '#ff9800';
+   465→      const date = ts.Date ? fmtDate(ts.Date) : '';
+   466→      const images = (ts.AttachmentsImagesUrls || []).filter(Boolean);
+   467→      return '<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;padding:8px;background:' +
+   468→        (ok ? '#f1f8e9' : '#fff3e0') + ';border-radius:6px;">' +
+   469→        '<div style="color:' + color + ';font-size:16px;font-weight:bold;min-width:20px;text-align:center;">' + icon + '</div>' +
+   470→        '<div style="flex:1;">' +
+   471→          '<div style="font-size:12px;color:#333;">' + (ts.Description || '') + '</div>' +
+   472→          (date ? '<div style="font-size:10px;color:#999;margin-top:2px;">' + date + '</div>' : '') +
+   473→          (images.length > 0
+   474→            ? '<div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;">' +
+   475→                images.map(img => '<img src="' + img + '" style="max-width:120px;max-height:80px;border-radius:4px;cursor:pointer;" />').join('') +
+   476→              '</div>'
+   477→            : '') +
+   478→        '</div></div>';
+   479→    }).join('');
+   480→    occHtml = '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #e0e0e0;">' +
+   481→      '<div style="font-size:11px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Ocorrencias</div>' +
+   482→      occItems + '</div>';
+   483→  }
+   484→
+   485→  // --- Ocorrencia principal (do /api/Entregas) ---
+   486→  let mainOccHtml = '';
+   487→  if (occDesc) {
+   488→    mainOccHtml = '<div style="margin-top:10px;padding:8px 12px;background:#fff3e0;border-radius:6px;border-left:3px solid #ff9800;">' +
+   489→      '<div style="font-size:11px;color:#888;margin-bottom:2px;">Ocorrencia</div>' +
+   490→      '<div style="font-size:12px;color:#e65100;">' + occDesc + '</div></div>';
+   491→  }
+   492→
+   493→  // --- Comprovante ---
+   494→  let proofHtml = '';
+   495→  if (proofUrl) {
+   496→    proofHtml = '<div style="margin-top:10px;text-align:center;">' +
+   497→      '<a href="' + proofUrl + '" target="_blank" style="display:inline-block;padding:8px 20px;background:#1565c0;color:white;border-radius:6px;text-decoration:none;font-size:12px;font-weight:600;">&#128196; Ver Comprovante de Entrega</a></div>';
+   498→  }
+   499→
+   500→  return '<div style="font-family:\'Segoe UI\',Arial,sans-serif;max-width:480px;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">' +
+   501→    '<div style="background:linear-gradient(135deg,#1565c0,#1e88e5);color:white;padding:14px 16px;display:flex;align-items:center;gap:10px;">' +
+   502→      '<div style="font-size:22px;">&#128666;</div>' +
+   503→      '<div style="flex:1;"><div style="font-size:14px;font-weight:700;">TudoEntregue</div>' +
+   504→      '<div style="font-size:11px;opacity:0.85;">Status de Entrega</div></div>' +
+   505→      '<div style="background:' + sitColor + ';color:white;font-size:10px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;">' + sitLabel + '</div>' +
+   506→    '</div>' +
+   507→    '<div style="padding:14px 16px;">' +
+   508→      row('Pedido', orderNum) +
+   509→      (trackingCode
+   510→        ? '<a href="https://app.tudoentregue.com.br/rastreamento/' + trackingCode + '" target="_blank" style="display:block;text-align:center;background:#e8f5e9;border:1px solid #a5d6a7;color:#2e7d32;padding:10px;border-radius:8px;text-decoration:none;font-weight:600;font-size:12px;margin-bottom:10px;">&#128666; Acompanhar Entrega</a>'
+   511→        : '') +
+   512→      row('Cliente', custName) +
+   513→      row('Agendamento', fmtDate(scheduled)) +
+   514→      (deliveredDate ? row('Entregue em', fmtDate(deliveredDate), '#4caf50') : '') +
+   515→      motoristaHtml +
+   516→      mainOccHtml +
+   517→      timelineHtml +
+   518→      occHtml +
+   519→      proofHtml +
+   520→    '</div>' +
+   521→    '<div style="background:#f5f5f5;padding:8px 16px;font-size:10px;color:#aaa;text-align:right;">Atualizado: ' +
+   522→      new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '</div>' +
+   523→  '</div>';
+   524→}
+   525→
+   526→function buildErrorCard(title, message) {
+   527→  return '<div style="font-family:\'Segoe UI\',Arial,sans-serif;max-width:480px;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">' +
+   528→    '<div style="background:linear-gradient(135deg,#c62828,#e53935);color:white;padding:14px 16px;display:flex;align-items:center;gap:10px;">' +
+   529→    '<div style="font-size:22px;">&#9888;</div>' +
+   530→    '<div style="font-size:14px;font-weight:700;">' + title + '</div></div>' +
+   531→    '<div style="padding:14px 16px;"><div style="font-size:12px;color:#c62828;">' + message + '</div></div>' +
+   532→    '<div style="background:#f5f5f5;padding:8px 16px;font-size:10px;color:#aaa;text-align:right;">' +
+   533→    new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '</div></div>';
+   534→}
+   535→
+   536→// ============================================================
+   537→// POST /api/v1/te/send-invoice — Envia fatura ao TE (botao Odoo)
+   538→// Body: { invoice_id: number, sale_order_id?: number }
+   539→// Funciona COM ou SEM sale.order vinculada
+   540→// ============================================================
+   541→router.post('/send-invoice', async (req, res) => {
+   542→  console.log('[TE-SEND-INVOICE] Body recebido: ' + JSON.stringify(req.body));
+   543→  const invId = req.body.invoice_id || req.body.id;
+   544→  if (!invId) return res.status(400).json({ success: false, error: 'invoice_id obrigatorio' });
+   545→
+   546→  try {
+   547→    // 1. Le a fatura completa
+   548→    const invoice = await odooTe.readInvoiceFull(invId);
+   549→    if (!invoice) {
+   550→      return res.status(404).json({ success: false, error: 'Fatura ' + invId + ' nao encontrada' });
+   551→    }
+   552→    console.log('[TE-SEND-INVOICE] Fatura: ' + invoice.name + ' (id=' + invoice.id + ', partner=' + JSON.stringify(invoice.partner_id) + ')');
+   553→
+   554→    // 2. Le o partner da fatura (usa getPartner com safeReadCustom — fallback automatico)
+   555→    const partnerId = invoice.partner_id ? (Array.isArray(invoice.partner_id) ? invoice.partner_id[0] : invoice.partner_id) : null;
+   556→    if (!partnerId) {
+   557→      return res.status(400).json({ success: false, error: 'Fatura sem parceiro' });
+   558→    }
+   559→    const partnerData = await odooTe.getPartner(partnerId);
+   560→
+   561→    // 3. Tenta encontrar a venda (multiplas vias)
+   562→    let saleOrder = null;
+   563→    let saleFull = null;
+   564→    let picking = null;
+   565→
+   566→    // 3a. Se Odoo enviou sale_order_id diretamente no body (acao do servidor)
+   567→    if (req.body.sale_order_id) {
+   568→      console.log('[TE-SEND-INVOICE] sale_order_id recebido no body: ' + req.body.sale_order_id);
+   569→      saleOrder = await odooTe.findSaleOrderById(req.body.sale_order_id);
+   570→      if (saleOrder) {
+   571→        console.log('[TE-SEND-INVOICE] sale.order encontrada via body: ' + saleOrder.name + ' (id=' + saleOrder.id + ')');
+   572→      } else {
+   573→        console.warn('[TE-SEND-INVOICE] sale_order_id=' + req.body.sale_order_id + ' recebido mas NAO encontrado no Odoo!');
+   574→      }
+   575→    }
+   576→
+   577→    // 3b. Busca automatica via relacao invoice -> sale.order
+   578→    if (!saleOrder) {
+   579→      console.log('[TE-SEND-INVOICE] Tentando findSaleOrderByInvoice(' + invId + ')...');
+   580→      saleOrder = await odooTe.findSaleOrderByInvoice(invId);
+   581→      if (saleOrder) {
+   582→        console.log('[TE-SEND-INVOICE] sale.order encontrada via findSaleOrderByInvoice: ' + saleOrder.name + ' (id=' + saleOrder.id + ')');
+   583→      } else {
+   584→        console.log('[TE-SEND-INVOICE] findSaleOrderByInvoice retornou NULL. A fatura NAO esta vinculada a nenhuma sale.order.');
+   585→        console.log('[TE-SEND-INVOICE] Solucao: acao do servidor deve enviar sale_order_id no body, ou criar x_studio_motorista na fatura.');
+   586→      }
+   587→    }
+   588→
+   589→    // 4. Se tem venda, busca dados completos (picking, linhas, motorista)
+   590→    //    Se qualquer etapa falhar, cai pro fluxo direto fatura->TE
+   591→    let orderLines = [];
+   592→    let productsMap = {};
+   593→
+   594→    if (saleOrder) {
+   595→      try {
+   596→        console.log('[TE-SEND-INVOICE] Venda encontrada: ' + saleOrder.name + ' (id=' + saleOrder.id + ')');
+   597→        saleFull = await odooTe.readSaleOrderFull(saleOrder.id);
+   598→        picking = await odooTe.findDeliveryPicking(saleOrder.id);
+   599→        if (picking) {
+   600→          console.log('[TE-SEND-INVOICE] Picking: ' + picking.name + ' (id=' + picking.id + ')');
+   601→        } else {
+   602→          console.log('[TE-SEND-INVOICE] Picking nao encontrado, usando fatura como base');
+   603→        }
+   604→        orderLines = await odooTe.getSaleOrderLines(saleOrder.id);
+   605→      } catch (err) {
+   606→        console.warn('[TE-SEND-INVOICE] Erro ao buscar venda/picking, usando fatura direto: ' + err.message);
+   607→        saleOrder = null;
+   608→        saleFull = null;
+   609→        picking = null;
+   610→      }
+   611→    }
+   612→
+   613→    if (!saleOrder) {
+   614→      console.log('[TE-SEND-INVOICE] Fluxo direto fatura->TE (sem motorista, sem picking)');
+   615→      try {
+   616→        orderLines = await odooTe.getInvoiceLines(invId);
+   617→        console.log('[TE-SEND-INVOICE] ' + orderLines.length + ' linhas da fatura com produto');
+   618→      } catch (err) {
+   619→        console.warn('[TE-SEND-INVOICE] Erro lendo linhas da fatura: ' + err.message);
+   620→      }
+   621→    }
+   622→
+   623→    // 5. Busca produtos das linhas
+   624→    const productIds = [];
+   625→    orderLines.forEach(function(line) {
+   626→      if (line.product_id && line.product_id[0]) productIds.push(line.product_id[0]);
+   627→    });
+   628→    if (productIds.length) productsMap = await odooTe.getProducts(productIds);
+   629→
+   630→    // 6. Le dados da empresa (remetente)
+   631→    const company = await odooTe.getCompany();
+   632→
+   633→    // 6b. Motorista: prioridade 1) sale.order.x_studio_motorista
+   634→    //    2) picking.x_studio_motorista
+   635→    //    3) account.move.x_studio_motorista (fallback p/ faturas sem venda vinculada)
+   636→    let motoristaName = null;
+   637→    let teDriver = null;
+   638→    let motoristaSource = null;
+   639→
+   640→    // Diagnostico: loga todos os campos relevantes
+   641→    console.log('[TE-SEND-INVOICE] --- DIAGNOSTICO MOTORISTA ---');
+   642→    console.log('[TE-SEND-INVOICE] saleFull=' + (saleFull ? 'SIM (id=' + saleFull.id + ', name=' + saleFull.name + ')' : 'NULL (sale.order nao encontrada)'));
+   643→    console.log('[TE-SEND-INVOICE] saleFull.x_studio_motorista=' + (saleFull ? JSON.stringify(saleFull.x_studio_motorista) : 'N/A'));
+   644→    console.log('[TE-SEND-INVOICE] picking=' + (picking ? 'SIM (id=' + picking.id + ')' : 'NULL'));
+   645→    console.log('[TE-SEND-INVOICE] picking.x_studio_motorista=' + (picking ? JSON.stringify(picking.x_studio_motorista) : 'N/A'));
+   646→    console.log('[TE-SEND-INVOICE] invoice.x_studio_motorista=' + JSON.stringify(invoice.x_studio_motorista));
+   647→    console.log('[TE-SEND-INVOICE] req.body.sale_order_id=' + JSON.stringify(req.body.sale_order_id));
+   648→
+   649→    if (saleFull && saleFull.x_studio_motorista) {
+   650→      motoristaName = saleFull.x_studio_motorista;
+   651→      motoristaSource = 'sale.order (id=' + saleFull.id + ')';
+   652→      console.log('[TE-SEND-INVOICE] Motorista da sale.order: "' + motoristaName + '"');
+   653→    } else if (picking && picking.x_studio_motorista) {
+   654→      motoristaName = picking.x_studio_motorista;
+   655→      motoristaSource = 'picking (id=' + picking.id + ')';
+   656→      console.log('[TE-SEND-INVOICE] Motorista do picking: "' + motoristaName + '"');
+   657→    } else if (invoice && invoice.x_studio_motorista) {
+   658→      motoristaName = invoice.x_studio_motorista;
+   659→      motoristaSource = 'account.move/fatura (id=' + invoice.id + ')';
+   660→      console.log('[TE-SEND-INVOICE] Motorista da fatura: "' + motoristaName + '"');
+   661→    }
+   662→
+   663→    if (motoristaName) {
+   664→      console.log('[TE-SEND-INVOICE] Motorista selecionado: "' + motoristaName + '" (fonte: ' + motoristaSource + ')');
+   665→      try {
+   666→        teDriver = await teClient.findDriverByName(motoristaName);
+   667→        if (teDriver) {
+   668→          console.log('[TE-SEND-INVOICE] Motorista ENCONTRADO no TE: Name=' + teDriver.Name + ' | Phone=' + teDriver.PhoneNumber + ' | PhoneCountry=' + teDriver.PhoneCountry);
+   669→        } else {
+   670→          console.warn('[TE-SEND-INVOICE] Motorista "' + motoristaName + '" NAO encontrado no TE! Verifique se esta cadastrado como motorista na conta TE.');
+   671→        }
+   672→      } catch (err) {
+   673→        console.error('[TE-SEND-INVOICE] Erro ao buscar motorista no TE: ' + err.message);
+   674→      }
+   675→    } else {
+   676→      console.log('[TE-SEND-INVOICE] Nenhum motorista selecionado no Odoo. Motivo: saleFull=' + (saleFull ? 'sim' : 'nao') + ' | picking=' + (picking ? 'sim' : 'nao') + ' | invoice.x_studio_motorista=' + JSON.stringify(invoice.x_studio_motorista));
+   677→    }
+   678→    console.log('[TE-SEND-INVOICE] --- FIM DIAGNOSTICO MOTORISTA ---');
+   679→
+   680→    // 7. Mapeia para TE (picking sera sintetico pelo mapper se null)
+   681→    const delivery = Mapper.odooToTeDelivery({
+   682→      picking: picking,
+   683→      partner: partnerData,
+   684→      saleOrder: saleFull || saleOrder,
+   685→      invoice: invoice,
+   686→      company: company,
+   687→      companyCnpj: config.empresa.cnpj,
+   688→      orderLines: orderLines,
+   689→      productsMap: productsMap,
+   690→      motoristaName: motoristaName,
+   691→      teDriver: teDriver,
+   692→    });
+   693→    if (!delivery) {
+   694→      return res.status(500).json({ success: false, error: 'Falha no mapeamento dos dados' });
+   695→    }
+   696→
+   697→    // 8. Chatter: enviando (so em account.move + se tiver, sale.order/picking)
+   698→    var chatterMsg = '<b>TudoEntregue</b><br/>';
+   699→    chatterMsg += 'Enviando ao TudoEntregue...<br/>';
+   700→    chatterMsg += 'Pedido: ' + delivery.OrderNumber + '<br/>';
+   701→    chatterMsg += 'Destinatario: ' + (delivery.DestinationAddress.Name || '') + '<br/>';
+   702→    chatterMsg += 'CNPJ/CPF: ' + (delivery.DestinationAddress.DocumentNumber || '') + '<br/>';
+   703→    chatterMsg += 'Cidade: ' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '<br/>';
+   704→    chatterMsg += 'CEP: ' + (delivery.DestinationAddress.ZipCode || '');
+   705→    if (delivery.Weight) chatterMsg += '<br/>Peso: ' + delivery.Weight + ' kg';
+   706→    if (delivery.Volume) chatterMsg += ' | Volumes: ' + delivery.Volume;
+   707→    if (delivery.Documents && delivery.Documents.length) {
+   708→      chatterMsg += '<br/>NF: ' + (delivery.Documents[0].DocumentNumber || '');
+   709→    }
+   710→    if (!saleOrder) {
+   711→      chatterMsg += '<br/><i>Sem sale.order vinculada — fluxo direto fatura</i>';
+   712→    }
+   713→    if (motoristaName) {
+   714→      chatterMsg += '<br/>Motorista: ' + motoristaName.toUpperCase();
+   715→      if (teDriver) {
+   716→        chatterMsg += ' (' + teDriver.PhoneNumber + ')';
+   717→      } else {
+   718→        chatterMsg += ' <b style="color:#e65100;">NAO encontrado no TE</b>';
+   719→      }
+   720→    }
+   721→    await odooTe.postChatter('account.move', invId, chatterMsg);
+   722→    if (picking) await odooTe.postChatter('stock.picking', picking.id, chatterMsg);
+   723→    if (saleOrder) await odooTe.postChatter('sale.order', saleOrder.id, chatterMsg);
+   724→
+   725→    // 9. Envia ao TE
+   726→    console.log('[TE-SEND-INVOICE] Enviando ao TE...');
+   727→    console.log('[TE-SEND-INVOICE] Driver block enviado: ' + JSON.stringify(delivery.Driver));
+   728→    const teResult = await teClient.createDeliveries([delivery]);
+   729→    const teResp = Array.isArray(teResult) ? teResult[0] : teResult;
+   730→
+   731→    // 10. Grava retorno
+   732→    if (teResp) {
+   733→      const odooData = Mapper.teCreateToOdoo(teResp);
+   734→      await odooTe.markInvoiceSynced([invId], teResp.OrderID || null);
+   735→      if (picking) {
+   736→        if (Object.keys(odooData).length) await odooTe.updatePickingTeData(picking.id, odooData);
+   737→        await odooTe.markPickingsSynced([picking.id], teResp.OrderID || null);
+   738→      }
+   739→      if (saleOrder) {
+   740→        if (Object.keys(odooData).length) await odooTe.updateSaleOrderTeData(saleOrder.id, odooData);
+   741→        await odooTe.markSaleOrdersSynced([saleOrder.id], teResp.OrderID || null);
+   742→      }
+   743→
+   744→      var resultMsg = Mapper.chatterCreateMessage(teResp, delivery);
+   745→      // Adiciona info de motorista ao resultado
+   746→      if (!motoristaName) {
+   747→        resultMsg += '<br/><br/><span style="color:#e65100;"><b>Motorista:</b> NAO enviado ao TE.</span>';
+   748→        resultMsg += '<br/>Motivo: fatura sem sale.order vinculada e sem campo x_studio_motorista na fatura.';
+   749→        resultMsg += '<br/><b>Solucao:</b> atualizar a acao do servidor para enviar sale_order_id, ou criar o campo x_studio_motorista no app financeiro (account.move).';
+   750→      } else if (!teDriver) {
+   751→        resultMsg += '<br/><br/><span style="color:#e65100;"><b>Motorista "' + motoristaName.toUpperCase() + '":</b> NAO encontrado no TE.</span>';
+   752→        resultMsg += '<br/>O motorista precisa estar cadastrado como motorista na conta TudoEntregue.';
+   753→      }
+   754→      await odooTe.postChatter('account.move', invId, resultMsg);
+   755→      if (picking) await odooTe.postChatter('stock.picking', picking.id, resultMsg);
+   756→      if (saleOrder) await odooTe.postChatter('sale.order', saleOrder.id, resultMsg);
+   757→
+   758→      // Grava card HTML na fatura (x_studio_status_de_entrega_te) — prepend, nao sobrescreve
+   759→      var trackUrl = teResp.TrackingUrl || (teResp.TrackingCode ? 'https://app.tudoentregue.com.br/rastreamento/' + teResp.TrackingCode : '');
+   760→      var invoiceCard = '<div style="font-family:Segoe UI,Arial,sans-serif;max-width:480px;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">' +
+   761→        '<div style="background:linear-gradient(135deg,#1565c0,#1e88e5);color:white;padding:14px 16px;display:flex;align-items:center;gap:10px;">' +
+   762→        '<div style="font-size:22px;">&#128666;</div>' +
+   763→        '<div style="flex:1;"><div style="font-size:14px;font-weight:700;">TudoEntregue</div>' +
+   764→        '<div style="font-size:11px;opacity:0.85;">Entrega Criada</div></div>' +
+   765→        '<div style="background:#ff9800;color:white;font-size:10px;font-weight:700;padding:4px 12px;border-radius:20px;text-transform:uppercase;">Enviada</div>' +
+   766→        '</div>' +
+   767→        '<div style="padding:14px 16px;">' +
+   768→        '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Pedido</span><span style="font-size:12px;font-weight:500;">' + (delivery.OrderNumber || '') + '</span></div>' +
+   769→        (trackUrl ?
+   770→          '<a href="' + trackUrl + '" target="_blank" style="display:block;text-align:center;background:#e8f5e9;border:1px solid #a5d6a7;color:#2e7d32;padding:10px;border-radius:8px;text-decoration:none;font-weight:600;font-size:12px;margin-bottom:10px;">&#128666; Acompanhar Entrega</a>' :
+   771→          '') +
+   772→        '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Destinatario</span><span style="font-size:12px;font-weight:500;">' + (delivery.DestinationAddress.Name || '') + '</span></div>' +
+   773→        '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Cidade</span><span style="font-size:12px;font-weight:500;">' + (delivery.DestinationAddress.City || '') + '/' + (delivery.DestinationAddress.State || '') + '</span></div>' +
+   774→        (delivery.Weight ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Peso</span><span style="font-size:12px;font-weight:500;">' + delivery.Weight + ' kg</span></div>' : '') +
+   775→        (delivery.Volume ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Volumes</span><span style="font-size:12px;font-weight:500;">' + delivery.Volume + '</span></div>' : '') +
+   776→        (motoristaName ? '<div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span style="font-size:11px;color:#888;">Motorista</span><span style="font-size:12px;font-weight:500;color:#2e7d32;">' + motoristaName.toUpperCase() + (teDriver ? ' &#10003;' : ' &#9888;') + '</span></div>' : '') +
+   777→        '</div>' +
+   778→        '<div style="background:#f5f5f5;padding:8px 16px;font-size:10px;color:#aaa;text-align:right;">' + new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + '</div>' +
+   779→        '</div>';
+   780→      try { await odooTe.updateInvoiceStatusHtml(invId, invoiceCard); } catch (err) {
+   781→        console.warn('[TE-SEND-INVOICE] Nao conseguiu gravar card HTML na fatura: ' + err.message);
+   782→      }
+   783→      // Grava card HTML tambem na sale.order (se existir)
+   784→      if (saleOrder) {
+   785→        try { await odooTe.updateSaleOrderStatusHtml(saleOrder.id, invoiceCard); } catch (err) {
+   786→          console.warn('[TE-SEND-INVOICE] Nao conseguiu gravar card HTML na sale.order: ' + err.message);
+   787→        }
+   788→      }
+   789→
+   790→      res.json({
+   791→        success: true,
+   792→        invoice_id: invId,
+   793→        sale: saleOrder ? saleOrder.name : null,
+   794→        picking: picking ? picking.name : null,
+   795→        te_order_id: teResp.OrderID,
+   796→        te_received: teResp.Received,
+   797→        te_tracking: teResp.TrackingCode,
+   798→      });
+   799→    } else {
+   800→      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO</b><br/>TE nao retornou dados.');
+   801→      res.status(502).json({ success: false, error: 'TE nao retornou dados' });
+   802→    }
+   803→  } catch (err) {
+   804→    console.error('[TE-SEND-INVOICE] Erro:', err.message);
+   805→    try {
+   806→      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - ERRO</b><br/>' + err.message);
+   807→    } catch {}
+   808→    const status = err.isAxiosError ? (err.response?.status || 502) : 500;
+   809→    res.status(status).json({ success: false, error: err.message });
+   810→  }
+   811→});
+   812→
+   813→// ============================================================
+   814→// POST /api/v1/te/delivery-status — Busca status TE e grava card HTML
+   815→// Body: { saleOrderId: number }
+   816→// ============================================================
+   817→router.post('/delivery-status', async (req, res) => {
+   818→  try {
+   819→    const { saleOrderId } = req.body;
+   820→    if (!saleOrderId) {
+   821→      return res.status(400).json({ success: false, error: 'Informe saleOrderId' });
+   822→    }
+   823→
+   824→    // 1. Busca sale order no Odoo
+   825→    const so = await odooTe.findSaleOrderById(saleOrderId);
+   826→    if (!so) {
+   827→      return res.status(404).json({ success: false, error: `Sale Order ${saleOrderId} nao encontrada` });
+   828→    }
+   829→
+   830→    const f = odooTe.FIELDS['sale.order'];
+   831→    const orderName = so.name;
+   832→    const teOrderId = so[f.teOrderId];
+   833→    const trackingCode = so[f.teTrackingCode];
+   834→
+   835→    if (!teOrderId && !trackingCode) {
+   836→      // Nenhuma entrega enviada ao TE ainda
+   837→      const noCard = buildErrorCard(
+   838→        'Sem Entrega TE',
+   839→        `Pedido ${orderName} ainda nao foi enviado ao TudoEntregue. Envie a entrega primeiro.`
+   840→      );
+   841→      await odooTe.updateSaleOrderStatusHtml(saleOrderId, noCard);
+   842→      return res.json({ success: true, message: 'Pedido ainda nao enviado ao TE', card: noCard });
+   843→    }
+   844→
+   845→    // 2. Busca dados no TE — /api/Entregas (dados completos da entrega)
+   846→    let deliveryData = null;
+   847→    if (teOrderId) {
+   848→      const result = await teClient.getDeliveries({ orderNumber: teOrderId, page: 1 });
+   849→      deliveryData = result?.Result?.[0] || null;
+   850→    }
+   851→
+   852→    // 3. Busca situacao detalhada — /orders/situation
+   853→    let situationData = null;
+   854→    if (teOrderId) {
+   855→      try {
+   856→        situationData = await teClient.getOrderSituation({
+   857→          orderType: 1,
+   858→          orderID: teOrderId,
+   859→        });
+   860→      } catch (err) {
+   861→        console.warn(`[TE-DELIVERY-STATUS] /orders/situation falhou: ${err.message}`);
+   862→      }
+   863→    }
+   864→
+   865→    // 4. Busca tracking detalhado (ocorrencias com fotos)
+   866→    let trackingData = null;
+   867→    if (trackingCode) {
+   868→      try {
+   869→        trackingData = await teClient.getTracking(trackingCode);
+   870→      } catch (err) {
+   871→        console.warn(`[TE-DELIVERY-STATUS] /tracking falhou: ${err.message}`);
+   872→      }
+   873→    }
+   874→
+   875→    // 5. Monta card HTML
+   876→    const cardHtml = buildTeCard(deliveryData || {}, trackingData, situationData);
+   877→
+   878→    // 6. Tambem atualiza campos padrao do TE
+   879→    if (deliveryData) {
+   880→      const mapped = Mapper.teToOdooPicking(deliveryData);
+   881→      const soMapped = Mapper.teToOdooSaleOrder(deliveryData);
+   882→      await odooTe.updateSaleOrderTeData(saleOrderId, soMapped);
+   883→    }
+   884→
+   885→    // 7. Atualiza campo de motorista (selection) a partir do TE
+   886→    let motoristaAtualizado = null;
+   887→    if (deliveryData) {
+   888→      const driverName = deliveryData.DriverName || deliveryData.driverName || '';
+   889→      if (driverName) {
+   890→        motoristaAtualizado = matchMotoristaSelection(driverName);
+   891→        if (motoristaAtualizado) {
+   892→          await odooTe.updateSaleOrderMotorista(saleOrderId, motoristaAtualizado);
+   893→          console.log(`[TE-DELIVERY-STATUS] Motorista: ${driverName} -> ${motoristaAtualizado}`);
+   894→        }
+   895→      }
+   896→    }
+   897→
+   898→    // 8. Grava card no campo HTML
+   899→    await odooTe.updateSaleOrderStatusHtml(saleOrderId, cardHtml);
+   900→
+   901→    console.log(`[TE-DELIVERY-STATUS] Card atualizado: SO ${orderName} (${saleOrderId})`);
+   902→    res.json({
+   903→      success: true,
+   904→      orderName,
+   905→      teOrderId,
+   906→      trackingCode,
+   907→      motorista: motoristaAtualizado || null,
+   908→      hasDeliveryData: !!deliveryData,
+   909→      hasSituationData: !!situationData,
+   910→      hasTrackingData: !!trackingData,
+   911→      card: cardHtml,
+   912→    });
+   913→  } catch (err) {
+   914→    console.error('[TE-DELIVERY-STATUS] Erro:', err.message);
+   915→    // Grava card de erro no campo
+   916→    try {
+   917→      await odooTe.updateSaleOrderStatusHtml(req.body.saleOrderId, buildErrorCard('Erro ao Buscar Status', err.message));
+   918→    } catch {}
+   919→    const status = err.isAxiosError ? (err.response?.status || 502) : 500;
+   920→    res.status(status).json({ success: false, error: err.message });
+   921→  }
+   922→});
+   923→
+   924→// ============================================================
+   925→// MATCH MOTORISTA — Faz match do nome do TE com as opcoes do campo selection
+   926→// O campo x_studio_motorista e um selection com 17 opcoes (key/label)
+   927→// ============================================================
+   928→const MOTORISTA_OPTIONS = [
+   929→  'adelson', 'adriano', 'anderlucio', 'antonio', 'carlos', 'daniel',
+   930→  'diego', 'eduardo', 'fellipe', 'gerson', 'glauber',
+   931→  'henrique', 'italo', 'jeferson', 'joao_pedro', 'lucas',
+   932→  'matheus', 'rafael',
+   933→];
+   934→
+   935→function matchMotoristaSelection(driverNameFromTe) {
+   936→  if (!driverNameFromTe) return null;
+   937→  const name = driverNameFromTe.toUpperCase().trim();
+   938→  // Remove sufixos comuns como "MOTORISTA", "FRETE", etc
+   939→  const cleanName = name
+   940→    .replace(/\b(MOTORISTA|FRETE|ENTREGAS|MOTOBOY)\b/g, '')
+   941→    .replace(/[^A-ZÀ-Ú\s]/g, '')
+   942→    .trim();
+   943→  const parts = cleanName.split(/\s+/).filter(Boolean);
+   944→
+   945→  // Tenta match exato com a key ou com o primeiro/ultimo nome
+   946→  for (const key of MOTORISTA_OPTIONS) {
+   947→    const keyUpper = key.toUpperCase();
+   948→    if (name.includes(keyUpper) || keyUpper.includes(name)) return key;
+   949→  }
+   950→  // Tenta match com qualquer parte do nome
+   951→  for (const part of parts) {
+   952→    if (part.length < 3) continue;
+   953→    for (const key of MOTORISTA_OPTIONS) {
+   954→      if (key.toUpperCase() === part || part.includes(key.toUpperCase())) return key;
+   955→    }
+   956→  }
+   957→  return null;
+   958→}
+   959→
+   960→// ============================================================
+   961→// GET /api/v1/te/drivers — Lista motoristas cadastrados no TE (debug)
+   962→// ============================================================
+   963→router.get('/drivers', async (req, res) => {
+   964→  try {
+   965→    const drivers = await teClient.getDrivers();
+   966→    const list = Object.entries(drivers || {}).map(function([name, d]) {
+   967→      return { name: name, phoneNumber: d.PhoneNumber, phoneCountry: d.PhoneCountry };
+   968→    });
+   969→    res.json({ success: true, count: list.length, drivers: list });
+   970→  } catch (err) {
+   971→    res.status(500).json({ success: false, error: err.message });
+   972→  }
+   973→});
+   974→
+   975→module.exports = router;
