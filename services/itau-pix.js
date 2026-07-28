@@ -47,13 +47,13 @@ async function criarCobrancaPix(pixData) {
     var status = error.response?.status;
     var errData = error.response?.data;
     logger.error('Falha ao criar cobranca PIX: ' + status + ' - ' + JSON.stringify(errData));
-    logger.error('URL usada: ' + config.itauPixUrl + 'v2/cob/' + txid);
+    logger.error('URL usada: ' + config.itau.pixBaseUrl + 'v2/cob/' + txid);
     logger.error('Detalhes completos: ' + JSON.stringify(error, null, 2));
     throw {
       status: status || error.status || 502,
       message: errData?.mensagem || error.message || 'Erro ao criar cobranca PIX',
       detail: errData,
-      debug_url: config.itauPixUrl + 'v2/cob/' + txid,
+      debug_url: config.itau.pixBaseUrl + 'v2/cob/' + txid,
     };
   }
 }
