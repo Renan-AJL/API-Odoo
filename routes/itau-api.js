@@ -12,6 +12,7 @@ const { emitirBoleto, parseFormaPagamento } = require('../services/itau-boleto')
 const { storeBoleto, generatePdf, generatePdfFromFields } = require('../services/pdf-boleto');
 const { pushBoletosToOdoo } = require('../services/odoo-push');
 const { criarLinkPagamento } = require('../services/itau-link-pagamento');
+const { criarCobrancaPix, consultarCobrancaPix } = require('../services/itau-pix');
 const config = require('../config');
 
 // --- Deteccao de cartao por bandeira ---
@@ -148,6 +149,11 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
     if (cartaoInfo) {
       console.log('[API] Pagamento em cartao detectado:', cartaoInfo.bandeira, cartaoInfo.parcelas, 'x');
       return await handleCartao(req, res, d, cartaoInfo);
+    }
+
+    // === DETECTAR PAGAMENTO PIX ===
+    if (formaPag.trim().toUpperCase().indexOf('PIX') === 0) {
+      return await handlePix(req, res, d);
     }
 
     var fat = d.fatura || {};
@@ -298,6 +304,35 @@ router.post('/gerar', async function(req, res) {
     var pagState = req.body.pagador_state || '';
     var pagZip = req.body.pagador_zip || '';
 
+    // === PIX ===
+    if (formaPag.trim().toUpperCase().indexOf('PIX') === 0) {
+      console.log('[API/GERAR] PIX detectado:', formaPag, '| Valor:', fatValor);
+      try {
+        var isCpf = pagCpf.replace(/\D/g, '').length <= 11;
+        var pixResult = await criarCobrancaPix({
+          valor: fatValor,
+          devedor: pagNome ? {
+            nome: pagNome,
+            cpf: isCpf ? pagCpf.replace(/\D/g, '') : null,
+            cnpj: !isCpf ? pagCpf.replace(/\D/g, '') : null,
+          } : undefined,
+          solicitacaoPagador: fatName || '',
+          expiracao: 86400, // 24h
+        });
+        var pixTxid = pixResult.txid || '';
+        var pixCopiaCola = pixResult.pixCopiaECola || '';
+        console.log('[API/GERAR] PIX criado: TXID=' + pixTxid);
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.send('OK|1\nTXID=' + pixTxid + '|PIX=' + pixCopiaCola + '|VD=' + fatValor.toFixed(2));
+      } catch (pixErr) {
+        console.error('[API/GERAR] PIX ERRO:', pixErr.message);
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.send('ERRO|PIX: ' + (pixErr.message || 'Erro desconhecido'));
+      }
+      return;
+    }
+
+    // === BOLETO ===
     var plano = parseFormaPagamento(formaPag);
     if (plano.tipo !== 'boleto' || plano.parcelas.length === 0) {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -409,6 +444,83 @@ router.post('/regen', async function(req, res) {
   } catch(e) {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.send('ERRO|' + e.message);
+  }
+});
+
+// === PIX: handler para /pagar ===
+async function handlePix(req, res, d) {
+  var fat = d.fatura || {};
+  var faturaName = fat.name || fat.seu_numero || d.fatura_name || '';
+  var faturaId = (fat.id || d.fatura_id) ? parseInt(String(fat.id || d.fatura_id)) : 0;
+  var valorTotal = parseFloat(fat.valor_nominal || d.fatura_valor) || 0;
+  var pag = d.pagador || {};
+  var pagNome = pag.nome || d.pagador_nome || '';
+  var pagCpf = pag.cpf_cnpj || d.pagador_cpf || '';
+
+  console.log('[API/PIX] Fatura:', faturaName, '| Valor:', valorTotal);
+
+  if (valorTotal <= 0) {
+    return res.json({ success: false, message: 'Valor invalido para PIX' });
+  }
+
+  try {
+    var isCpf = pagCpf.replace(/\\D/g, '').length <= 11;
+    var pixResult = await criarCobrancaPix({
+      valor: valorTotal,
+      devedor: pagNome ? {
+        nome: pagNome,
+        cpf: isCpf ? pagCpf.replace(/\\D/g, '') : null,
+        cnpj: !isCpf ? pagCpf.replace(/\\D/g, '') : null,
+      } : undefined,
+      solicitacaoPagador: faturaName || '',
+      expiracao: 86400,
+    });
+
+    console.log('[API/PIX] PIX criado: TXID=' + (pixResult.txid || 'N/A'));
+
+    res.json({
+      success: true,
+      data: {
+        forma_pagamento: d.forma_pagamento,
+        total_parcelas: 1,
+        valor_total: valorTotal.toFixed(2),
+        fatura_name: faturaName || '(nao informado)',
+        fatura_id: faturaId || 0,
+        pagamentos: [{
+          tipo: 'pix',
+          parcela: 1,
+          total_parcelas: 1,
+          valor_titulo: valorTotal.toFixed(2),
+          txid: pixResult.txid || '',
+          pix_copia_cola: pixResult.pixCopiaECola || '',
+        }],
+      },
+    });
+  } catch (err) {
+    console.error('[API/PIX] ERRO:', err.message);
+    res.json({ success: false, message: 'Erro ao criar PIX: ' + (err.message || 'Erro desconhecido') });
+  }
+}
+
+// === PIX: consultar status ===
+router.get('/pix/status/:txid', async function(req, res) {
+  try {
+    var txid = req.params.txid;
+    console.log('[API/PIX-STATUS] Consultando:', txid);
+    var resultado = await consultarCobrancaPix(txid);
+    var status = resultado.status || 'ATIVA';
+    var pago = status === 'CONCLUIDA';
+    res.json({
+      success: true,
+      txid: txid,
+      status: status,
+      situacao: pago ? 'pago' : 'pendente',
+      valor: resultado.valor ? resultado.valor.original : null,
+      pixCopiaECola: resultado.pixCopiaECola || '',
+    });
+  } catch (err) {
+    console.error('[API/PIX-STATUS] ERRO:', err.message);
+    res.status(err.status || 500).json({ success: false, error: err.message });
   }
 });
 
