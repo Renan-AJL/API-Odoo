@@ -32,12 +32,17 @@ async function criarCobrancaPix(pixData) {
       cnpj: pixData.devedor.cnpj || null,
       nome: pixData.devedor.nome,
     } : undefined,
-    infoAdicionais: pixData.infoAdicionais || [],
     solicitacaoPagador: pixData.solicitacaoPagador || false,
   };
 
-  // Remove campos undefined
+  // infoAdicionais: so enviar se tiver itens (BACEN rejeita array vazio)
+  if (pixData.infoAdicionais && pixData.infoAdicionais.length > 0) {
+    payload.infoAdicionais = pixData.infoAdicionais;
+  }
+
+  // Remove campos undefined/null (BACEN rejeita)
   if (payload.valor.modalidadeAlteracao === null) delete payload.valor.modalidadeAlteracao;
+  if (payload.devedor === undefined) delete payload.devedor;
 
   try {
     var resultado = await callPix('PUT', 'v2/cob/' + txid, payload);
