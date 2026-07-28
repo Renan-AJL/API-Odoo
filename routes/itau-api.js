@@ -10,7 +10,7 @@ const router = express.Router();
 const { apiKeyAuth } = require('../middleware/auth');
 const { emitirBoleto, parseFormaPagamento } = require('../services/itau-boleto');
 const { storeBoleto, generatePdf, generatePdfFromFields } = require('../services/pdf-boleto');
-const { pushBoletosToOdoo } = require('../services/odoo-push');
+const { pushBoletosToOdoo, pushPixToOdoo } = require('../services/odoo-push');
 const { criarLinkPagamento } = require('../services/itau-link-pagamento');
 const { criarCobrancaPix, consultarCobrancaPix } = require('../services/itau-pix');
 const config = require('../config');
@@ -508,6 +508,24 @@ async function handlePix(req, res, d) {
       (pixCopiaCola ? '<div style="font-size:10px; color:#999; word-break:break-all; max-width:400px; margin:0 auto; line-height:1.4;">' + pixCopiaCola + '</div>' : '') +
       '</div>';
 
+    // Push PIX para Odoo (grava campos x_studio_*)
+    var pushResult = { pushed: false, reason: 'not_called' };
+    try {
+      pushResult = await pushPixToOdoo({
+        faturaId: faturaId,
+        faturaName: faturaName,
+        valor: valorTotal.toFixed(2).replace('.', ','),
+        pix: {
+          txid: pixResult.txid || '',
+          pix_copia_cola: pixCopiaCola,
+          qrcode_base64: qrcodeBase64,
+          html_pix: htmlPix,
+        },
+      });
+    } catch (pushErr) {
+      pushResult = { pushed: false, reason: pushErr.message };
+    }
+
     res.json({
       success: true,
       data: {
@@ -526,6 +544,7 @@ async function handlePix(req, res, d) {
           qrcode_base64: qrcodeBase64,
           html_pix: htmlPix,
         }],
+        odoo_push: pushResult.pushed ? 'OK' : 'falhou_' + (pushResult.reason || 'unknown'),
       },
     });
   } catch (err) {

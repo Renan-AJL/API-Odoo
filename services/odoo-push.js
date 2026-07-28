@@ -262,4 +262,119 @@ async function pushBoletosToOdoo(pushData) {
   }
 }
 
-module.exports = { pushBoletosToOdoo };
+/**
+ * Push PIX para Odoo via XML-RPC
+ * - Grava campos x_studio_* na fatura (tipo_pagamento, pix, html com QR code)
+ * - Posta nota interna no chatter
+ */
+async function pushPixToOdoo(pushData) {
+  var config = require('../config');
+  var odooConfig = config.odoo;
+
+  if (!odooConfig || !odooConfig.enabled) {
+    console.log('[ODOO-PUSH-PIX] Desabilitado');
+    return { pushed: false, reason: 'disabled' };
+  }
+
+  if (!odooConfig.url || !odooConfig.db || !odooConfig.user || !odooConfig.password) {
+    console.warn('[ODOO-PUSH-PIX] Credenciais Odoo incompletas');
+    return { pushed: false, reason: 'missing_credentials' };
+  }
+
+  var faturaId = parseInt(pushData.faturaId) || 0;
+  var faturaName = pushData.faturaName || '';
+  var pix = pushData.pix || {};
+  var txid = pix.txid || '';
+  var pixCopiaCola = pix.pix_copia_cola || '';
+  var qrcodeBase64 = pix.qrcode_base64 || '';
+  var htmlPix = pix.html_pix || '';
+  var valor = pushData.valor || '0,00';
+
+  console.log('[ODOO-PUSH-PIX] === INICIANDO ===');
+  console.log('[ODOO-PUSH-PIX] faturaId:', faturaId, '| faturaName:', faturaName || 'vazio');
+  console.log('[ODOO-PUSH-PIX] TXID:', txid, '| Valor:', valor);
+
+  try {
+    var client = createClient(odooConfig.url);
+    var uid = await authenticate(client, odooConfig.db, odooConfig.user, odooConfig.password);
+
+    // Determinar recordId
+    var recordId;
+    if (faturaId > 0) {
+      recordId = faturaId;
+      console.log('[ODOO-PUSH-PIX] Usando faturaId direto:', recordId);
+    } else if (faturaName) {
+      console.log('[ODOO-PUSH-PIX] Buscando fatura por nome:', faturaName);
+      var ids = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'search', [[['name', '=', faturaName]]]);
+      if (!ids || ids.length === 0) {
+        var recentIds = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'search', [[['move_type', '=', 'out_invoice']]], { order: 'id desc', limit: 1 });
+        if (!recentIds || recentIds.length === 0) {
+          return { pushed: false, reason: 'invoice_not_found' };
+        }
+        recordId = recentIds[0];
+      } else {
+        recordId = ids[0];
+      }
+    } else {
+      var recentIds = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'search', [[['move_type', '=', 'out_invoice']]], { order: 'id desc', limit: 1 });
+      if (!recentIds || recentIds.length === 0) {
+        return { pushed: false, reason: 'no_invoices' };
+      }
+      recordId = recentIds[0];
+    }
+
+    console.log('[ODOO-PUSH-PIX] recordId final:', recordId);
+
+    // Gravar campos x_studio_* na fatura
+    var camposWrite = {
+      'x_studio_itau_tipo_pagamento': 'PIX',
+      'x_studio_itau_situacao': 'EMITIDO',
+    };
+
+    if (pixCopiaCola) {
+      camposWrite['x_studio_itau_pix_copia_cola'] = pixCopiaCola;
+    }
+
+    // HTML com QR code para o campo x_studio_itau_boletos_html
+    if (htmlPix) {
+      camposWrite['x_studio_itau_boletos_html'] = htmlPix;
+    }
+
+    var keysWrite = Object.keys(camposWrite);
+    if (keysWrite.length > 0) {
+      console.log('[ODOO-PUSH-PIX] Gravando campos:', keysWrite.join(', '));
+      await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], camposWrite]);
+      console.log('[ODOO-PUSH-PIX] Campos gravados com sucesso na fatura', recordId);
+    }
+
+    // Nota interna no chatter
+    var htmlBody = '<b>PIX Gerado</b><br/>';
+    htmlBody += 'TXID: ' + txid + '<br/>';
+    htmlBody += 'Valor: R$ ' + valor + '<br/>';
+    if (pixCopiaCola) {
+      htmlBody += 'PIX Copia e Cola: ' + pixCopiaCola;
+    }
+
+    try {
+      await executeKw(client, odooConfig.db, uid, odooConfig.password, 'mail.message', 'create', [{
+        model: 'account.move',
+        res_id: recordId,
+        body: htmlBody,
+        message_type: 'comment',
+        subtype_xmlid: 'mail.mt_note',
+      }]);
+      console.log('[ODOO-PUSH-PIX] Nota interna OK');
+    } catch (noteErr) {
+      console.error('[ODOO-PUSH-PIX] Erro ao criar nota:', noteErr.message);
+    }
+
+    console.log('[ODOO-PUSH-PIX] === PUSH COMPLETO na fatura ' + faturaName + ' (ID: ' + recordId + ') ===');
+    return { pushed: true, record_id: recordId };
+
+  } catch (err) {
+    console.error('[ODOO-PUSH-PIX] ERRO:', err.message);
+    return { pushed: false, reason: err.message };
+  }
+}
+
+module.exports = { pushBoletosToOdoo, pushPixToOdoo };
