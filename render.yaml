@@ -31,6 +31,13 @@ services:
         value: "776400223389"
       - key: ITAU_CARTEIRA
         value: "109"
+      # --- SISPAG (PIX Pagamentos) ---
+      - key: ITAU_SISPAG_CREDENCIAL
+        sync: false
+      - key: ITAU_SISPAG_CLIENT_ID
+        sync: false
+      - key: ITAU_SISPAG_CLIENT_SECRET
+        sync: false
       - key: AMBIENTE
         value: producao
       - key: MOCK_MODE

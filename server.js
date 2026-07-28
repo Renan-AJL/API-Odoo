@@ -73,6 +73,7 @@ const itauWebhookRoutes = require('./routes/itau-webhook');
 const itauTokenRoutes = require('./routes/itau-token');
 const teDeliveryRoutes = require('./routes/delivery');
 const teWebhookRoutes = require('./routes/webhook-te');
+const itauPagamentosRoutes = require('./routes/itau-pagamentos');
 
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/cnpj', cnpjRoutes);
@@ -82,6 +83,7 @@ app.use('/api/v1/itau/webhook', itauWebhookRoutes);
 app.use('/api/v1/itau/token', itauTokenRoutes);
 app.use('/api/v1/te/webhook', teWebhookRoutes);
 app.use('/api/v1/te', teDeliveryRoutes);
+app.use('/api/v1/itau', itauPagamentosRoutes);
 
 // --- Root ---
 app.get('/', (req, res) => {
@@ -118,6 +120,9 @@ app.get('/', (req, res) => {
       te_send_invoice: 'POST /api/v1/te/send-invoice',
       te_webhook: 'POST /api/v1/te/webhook/tudoentregue',
       te_delivery_status: 'POST /api/v1/te/delivery-status',
+      pix_pagar: 'POST /api/v1/itau/pix-pagar',
+      pix_pagar_consultar: 'GET /api/v1/itau/pix-pagar/consultar/:id',
+      pix_pagar_listar: 'GET /api/v1/itau/pix-pagar/consultar',
     },
     auth: 'Envie header X-API-Key para autenticacao.',
   });
@@ -171,6 +176,11 @@ app.listen(PORT, () => {
 
   // --- Auto-sync TudoEntregue: DESATIVADO ---
   // Agora o envio e manual via botao "TudoEntregue" na fatura (POST /api/v1/te/send-invoice)
+  console.log('  ---');
+  console.log('  [SISPAG - PIX PAGAMENTOS]');
+  console.log('  Credencial:', config.sispag.credencial ? '***' + config.sispag.credencial.substring(config.sispag.credencial.length - 4) : 'NAO CONFIGURADA');
+  console.log('  Agencia:', config.sispag.pagadorAgencia, '| Conta:', config.sispag.pagadorConta);
+  console.log('  CNPJ:', config.sispag.pagadorDocumento);
   console.log('  [TE-AUTO-SYNC] DESATIVADO - Envio manual via botao na fatura');
 });
 
