@@ -14,6 +14,7 @@ const { pushBoletosToOdoo } = require('../services/odoo-push');
 const { criarLinkPagamento } = require('../services/itau-link-pagamento');
 const { criarCobrancaPix, consultarCobrancaPix } = require('../services/itau-pix');
 const config = require('../config');
+const bwipjs = require('bwip-js');
 
 // --- Deteccao de cartao por bandeira ---
 var BANDEIRAS = ['VISA', 'MASTER', 'ELO', 'AMEX', 'HIPERCARD', 'HIPER'];
@@ -478,10 +479,39 @@ async function handlePix(req, res, d) {
 
     console.log('[API/PIX] PIX criado: TXID=' + (pixResult.txid || 'N/A'));
 
+    var pixCopiaCola = pixResult.pixCopiaECola || '';
+    var qrcodeBase64 = '';
+    var htmlPix = '';
+
+    // Gerar QR code a partir do pixCopiaECola
+    if (pixCopiaCola) {
+      try {
+        var qrPng = bwipjs.toBuffer({
+          bcid: 'qrcode',
+          text: pixCopiaCola,
+          scale: 5,
+          width: 12,
+          height: 12,
+        });
+        qrcodeBase64 = 'data:image/png;base64,' + qrPng.toString('base64');
+      } catch (qrErr) {
+        console.error('[API/PIX] Erro ao gerar QR code:', qrErr.message);
+      }
+    }
+
+    // Montar HTML para o campo Odoo
+    var valorFmt = 'R$ ' + valorTotal.toFixed(2).replace('.', ',');
+    htmlPix = '<div style="text-align:center; font-family:Arial,sans-serif; padding:10px;">' +
+      '<div style="font-size:18px; font-weight:bold; color:#333; margin-bottom:8px;">PIX</div>' +
+      '<div style="font-size:14px; color:#666; margin-bottom:12px;">' + faturaName + ' - ' + valorFmt + '</div>' +
+      (qrcodeBase64 ? '<img src="' + qrcodeBase64 + '" style="width:200px; height:200px; margin:0 auto 12px auto; display:block;" />' : '') +
+      (pixCopiaCola ? '<div style="font-size:10px; color:#999; word-break:break-all; max-width:400px; margin:0 auto; line-height:1.4;">' + pixCopiaCola + '</div>' : '') +
+      '</div>';
+
     res.json({
       success: true,
       data: {
-        forma_pagamento: d.forma_pagamento,
+        forma_pagamento: 'PIX',
         total_parcelas: 1,
         valor_total: valorTotal.toFixed(2),
         fatura_name: faturaName || '(nao informado)',
@@ -492,7 +522,9 @@ async function handlePix(req, res, d) {
           total_parcelas: 1,
           valor_titulo: valorTotal.toFixed(2),
           txid: pixResult.txid || '',
-          pix_copia_cola: pixResult.pixCopiaECola || '',
+          pix_copia_cola: pixCopiaCola,
+          qrcode_base64: qrcodeBase64,
+          html_pix: htmlPix,
         }],
       },
     });
