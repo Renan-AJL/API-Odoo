@@ -32,7 +32,7 @@ const config = {
     clientSecret: process.env.ITAU_CLIENT_SECRET || '',
     tokenUrl: process.env.ITAU_TOKEN_URL || process.env.ITAU_TOKEN_PRODUCAO_URL || 'https://sts.itau.com.br/api/oauth/token',
     bolecodeBaseUrl: process.env.ITAU_BOLECODE_URL || process.env.ITAU_PRODUCAO_URL || 'https://secure.api.itau/pix_recebimentos_conciliacoes/v2',
-    pixBaseUrl: process.env.ITAU_PIX_URL || process.env.ITAU_PIX_BASE_URL || process.env.ITAU_BOLECODE_URL || process.env.ITAU_PRODUCAO_URL || 'https://secure.api.itau/pix_recebimentos_conciliacoes/v2',
+    pixBaseUrl: process.env.ITAU_PIX_URL || process.env.ITAU_PIX_BASE_URL || 'https://secure.api.itau/pix_recebimentos/',
     pixChave: process.env.ITAU_PIX_CHAVE || process.env.ITAU_PIX_KEY || '',
   },
 
