@@ -16,6 +16,17 @@ const { criarCobrancaPix, consultarCobrancaPix } = require('../services/itau-pix
 const config = require('../config');
 const bwipjs = require('bwip-js');
 
+// === Lock anti-concorrencia PIX ===
+// Impede que o Odoo dispare multiplas requisicoes PIX simultaneas pra mesma fatura
+var _pixLocks = {};     // faturaId -> Promise (in-flight)
+var _pixCache = {};     // faturaId -> { timestamp, response } (resultado recente)
+var PIX_LOCK_TTL = 30000;  // 30s - tempo maximo de lock
+var PIX_CACHE_TTL = 60000; // 60s - reusa resultado se Odoo reenviar
+
+function getPixLockKey(faturaId, faturaName) {
+  return String(faturaId || 'name:' + (faturaName || 'unknown'));
+}
+
 // --- Deteccao de cartao por bandeira ---
 var BANDEIRAS = ['VISA', 'MASTER', 'ELO', 'AMEX', 'HIPERCARD', 'HIPER'];
 
@@ -464,6 +475,44 @@ async function handlePix(req, res, d) {
     return res.json({ success: false, message: 'Valor invalido para PIX' });
   }
 
+  // === DEDUPLICACAO: verificar se ja tem requisicao em curso ou resultado recente ===
+  var lockKey = getPixLockKey(faturaId, faturaName);
+
+  // Se tem resultado cacheado (mesma fatura, menos de 60s atras), reusa
+  if (_pixCache[lockKey]) {
+    var cached = _pixCache[lockKey];
+    var age = Date.now() - cached.timestamp;
+    if (age < PIX_CACHE_TTL) {
+      console.log('[API/PIX] REUSANDO resultado cacheado (' + (age / 1000).toFixed(1) + 's atras) para', lockKey);
+      return res.json(cached.response);
+    }
+    delete _pixCache[lockKey];
+  }
+
+  // Se tem requisicao em curso, espera ela terminar
+  if (_pixLocks[lockKey]) {
+    console.log('[API/PIX] AGUARDANDO lock existente para', lockKey);
+    try {
+      var cachedResult = await _pixLocks[lockKey];
+      console.log('[API/PIX] Lock liberado, retornando resultado da requisicao original');
+      return res.json(cachedResult);
+    } catch (lockErr) {
+      console.log('[API/PIX] Requisicao original falhou, tentando novamente...');
+    }
+  }
+
+  // Criar lock
+  var lockResolve;
+  _pixLocks[lockKey] = new Promise(function(resolve) { lockResolve = resolve; });
+
+  // Auto-limpar lock apos TTL
+  setTimeout(function() {
+    if (_pixLocks[lockKey]) {
+      console.warn('[API/PIX] Lock expirou por TTL para', lockKey);
+      delete _pixLocks[lockKey];
+    }
+  }, PIX_LOCK_TTL);
+
   try {
     var isCpf = pagCpf.replace(/\\D/g, '').length <= 11;
     var pixResult = await criarCobrancaPix({
@@ -527,7 +576,7 @@ async function handlePix(req, res, d) {
       pushResult = { pushed: false, reason: pushErr.message };
     }
 
-    res.json({
+    var responseData = {
       success: true,
       data: {
         forma_pagamento: 'PIX',
@@ -547,10 +596,20 @@ async function handlePix(req, res, d) {
         }],
         odoo_push: pushResult.pushed ? 'OK' : 'falhou_' + (pushResult.reason || 'unknown'),
       },
-    });
+    };
+
+    // Cache resultado e liberar lock
+    _pixCache[lockKey] = { timestamp: Date.now(), response: responseData };
+    delete _pixLocks[lockKey];
+    lockResolve(responseData);
+
+    res.json(responseData);
   } catch (err) {
     console.error('[API/PIX] ERRO:', err.message);
-    res.json({ success: false, message: 'Erro ao criar PIX: ' + (err.message || 'Erro desconhecido') });
+    var errResponse = { success: false, message: 'Erro ao criar PIX: ' + (err.message || 'Erro desconhecido') };
+    delete _pixLocks[lockKey];
+    lockResolve(errResponse);
+    res.json(errResponse);
   }
 }
 
