@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DPS versao="1.01" xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infDPS Id="DPS410690222603750000190010010000000461">
+    <tpAmb>1</tpAmb>
+    <dhEmi>2026-07-30T11:00:00-03:00</dhEmi>
+    <verAplic>1.1.0</verAplic>
+    <serie>1</serie>
+    <nDPS>46</nDPS>
+    <dCompet>2026-07-30</dCompet>
+    <tpEmit>1</tpEmit>
+    <cLocEmi>4106902</cLocEmi>
+    <prest>
+      <CNPJ>22603750000190</CNPJ>
+      <IM>0000000</IM>
+      <fone>4133730076</fone>
+      <email>contato@ajlferro.com.br</email>
+      <regTrib>
+        <opSimpNac>3</opSimpNac>
+        <regApTribSN>1</regApTribSN>
+        <regEspTrib>0</regEspTrib>
+      </regTrib>
+    </prest>
+    <toma>
+      <CNPJ>11615524000103</CNPJ>
+      <xNome>LOZANO &amp; LOZANO LTDA.</xNome>
+      <end>
+        <endNac>
+          <cMun>4100400</cMun>
+          <CEP>83505730</CEP>
+        </endNac>
+        <xLgr>R VEREADOR ADMAR BERTOLLI</xLgr>
+        <nro>2954</nro>
+        <xBairro>LAMENHA GRANDE</xBairro>
+      </end>
+    </toma>
+    <serv>
+      <locPrest>
+        <cLocPrestacao>4100400</cLocPrestacao>
+      </locPrest>
+      <cServ>
+        <cTribNac>140101</cTribNac>
+        <xDescServ>Manutenção preventiva de equipamentos industriais</xDescServ>
+        <cNBS>999999999</cNBS>
+        <cIntContrib>33978</cIntContrib>
+      </cServ>
+    </serv>
+    <valores>
+      <vServPrest>
+        <vServ>2500.00</vServ>
+      </vServPrest>
+      <trib>
+        <tribMun>
+          <tribISSQN>1</tribISSQN>
+          <tpRetISSQN>1</tpRetISSQN>
+        </tribMun>
+        <totTrib>
+          <pTotTrib>
+            <pTotTribFed>13.45</pTotTribFed>
+            <pTotTribEst>0.00</pTotTribEst>
+            <pTotTribMun>3.29</pTotTribMun>
+          </pTotTrib>
+        </totTrib>
+      </trib>
+    </valores>
+  </infDPS>
+</DPS>
