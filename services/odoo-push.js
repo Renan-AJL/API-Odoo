@@ -325,26 +325,37 @@ async function pushPixToOdoo(pushData) {
 
     console.log('[ODOO-PUSH-PIX] recordId final:', recordId);
 
-    // Gravar campos x_studio_* na fatura
-    var camposWrite = {
-      'x_studio_itau_tipo_pagamento': 'PIX',
+    // === Gravar campos em writes separados ===
+    // tipo_pagamento pode falhar se 'PIX' nao esta nas opcoes do campo Selection
+    // Entao fazemos writes separados para nao perder os outros campos
+
+    // 1. Campos seguros (nao dependem de Selection)
+    var safeFields = {
       'x_studio_itau_situacao': 'EMITIDO',
     };
-
     if (pixCopiaCola) {
-      camposWrite['x_studio_itau_pix_copia_cola'] = pixCopiaCola;
+      safeFields['x_studio_itau_pix_copia_cola'] = pixCopiaCola;
     }
-
-    // HTML com QR code para o campo x_studio_itau_boletos_html
     if (htmlPix) {
-      camposWrite['x_studio_itau_boletos_html'] = htmlPix;
+      safeFields['x_studio_itau_boletos_html'] = htmlPix;
     }
 
-    var keysWrite = Object.keys(camposWrite);
-    if (keysWrite.length > 0) {
-      console.log('[ODOO-PUSH-PIX] Gravando campos:', keysWrite.join(', '));
-      await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], camposWrite]);
-      console.log('[ODOO-PUSH-PIX] Campos gravados com sucesso na fatura', recordId);
+    try {
+      console.log('[ODOO-PUSH-PIX] Gravando campos seguros:', Object.keys(safeFields).join(', '));
+      await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], safeFields]);
+      console.log('[ODOO-PUSH-PIX] Campos seguros gravados OK');
+    } catch (safeErr) {
+      console.error('[ODOO-PUSH-PIX] Erro campos seguros:', safeErr.message);
+    }
+
+    // 2. tipo_pagamento (separado - pode falhar se 'PIX' nao esta nas opcoes do campo)
+    try {
+      await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], {
+        'x_studio_itau_tipo_pagamento': 'PIX',
+      }]);
+      console.log('[ODOO-PUSH-PIX] tipo_pagamento=PIX gravado OK');
+    } catch (tipoErr) {
+      console.warn('[ODOO-PUSH-PIX] AVISO: tipo_pagamento=PIX falhou. Adicione "PIX" nas opcoes do campo Selection no Odoo Studio. Erro:', tipoErr.message);
     }
 
     // Nota interna no chatter

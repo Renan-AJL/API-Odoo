@@ -483,10 +483,10 @@ async function handlePix(req, res, d) {
     var qrcodeBase64 = '';
     var htmlPix = '';
 
-    // Gerar QR code a partir do pixCopiaECola
+    // Gerar QR code a partir do pixCopiaECola (bwip-js v4 e async)
     if (pixCopiaCola) {
       try {
-        var qrPng = bwipjs.toBuffer({
+        var qrPng = await bwipjs.toBuffer({
           bcid: 'qrcode',
           text: pixCopiaCola,
           scale: 5,
@@ -494,6 +494,7 @@ async function handlePix(req, res, d) {
           height: 12,
         });
         qrcodeBase64 = 'data:image/png;base64,' + qrPng.toString('base64');
+        console.log('[API/PIX] QR code gerado:', (qrPng.length / 1024).toFixed(1) + 'KB');
       } catch (qrErr) {
         console.error('[API/PIX] Erro ao gerar QR code:', qrErr.message);
       }
