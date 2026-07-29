@@ -326,39 +326,48 @@ async function pushPixToOdoo(pushData) {
     console.log('[ODOO-PUSH-PIX] recordId final:', recordId);
 
     // === Gravar campos em writes separados ===
-    // tipo_pagamento pode falhar se 'PIX' nao esta nas opcoes do campo Selection
-    // Entao fazemos writes separados para nao perder os outros campos
+    // Campos Selection (tipo_pagamento, situacao) podem falhar se as opcoes nao existem
+    // Entao cada campo critico vai em seu proprio write
 
-    // 1. Campos seguros (nao dependem de Selection)
-    var safeFields = {
-      'x_studio_itau_situacao': 'EMITIDO',
-    };
+    // 1. Campos TEXT/HTML (nunca falham por Selection)
+    var textFields = {};
     if (pixCopiaCola) {
-      safeFields['x_studio_itau_pix_copia_cola'] = pixCopiaCola;
+      textFields['x_studio_itau_pix_copia_cola'] = pixCopiaCola;
     }
     if (htmlPix) {
-      safeFields['x_studio_itau_boletos_html'] = htmlPix;
+      textFields['x_studio_itau_boletos_html'] = htmlPix;
     }
 
-    try {
-      console.log('[ODOO-PUSH-PIX] Gravando campos seguros:', Object.keys(safeFields).join(', '));
-      await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], safeFields]);
-      console.log('[ODOO-PUSH-PIX] Campos seguros gravados OK');
-    } catch (safeErr) {
-      console.error('[ODOO-PUSH-PIX] Erro campos seguros:', safeErr.message);
+    if (Object.keys(textFields).length > 0) {
+      try {
+        console.log('[ODOO-PUSH-PIX] Gravando campos texto/HTML:', Object.keys(textFields).join(', '));
+        await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], textFields]);
+        console.log('[ODOO-PUSH-PIX] Campos texto/HTML gravados OK');
+      } catch (textErr) {
+        console.error('[ODOO-PUSH-PIX] Erro campos texto/HTML:', textErr.message);
+      }
     }
 
-    // 2. tipo_pagamento (separado - pode falhar se 'PIX' nao esta nas opcoes do campo)
+    // 2. tipo_pagamento (separado - falha se 'PIX' nao esta nas opcoes)
     try {
       await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], {
         'x_studio_itau_tipo_pagamento': 'PIX',
       }]);
       console.log('[ODOO-PUSH-PIX] tipo_pagamento=PIX gravado OK');
     } catch (tipoErr) {
-      console.warn('[ODOO-PUSH-PIX] AVISO: tipo_pagamento=PIX falhou. Adicione "PIX" nas opcoes do campo Selection no Odoo Studio. Erro:', tipoErr.message);
+      console.warn('[ODOO-PUSH-PIX] AVISO: tipo_pagamento=PIX falhou. Adicione "PIX" nas opcoes do campo Selection no Odoo Studio.');
     }
 
-    // Nota interna no chatter
+    // 3. situacao (separado - falha se 'EMITIDO' nao esta nas opcoes)
+    try {
+      await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], {
+        'x_studio_itau_situacao': 'EMITIDO',
+      }]);
+    } catch (sitErr) {
+      console.warn('[ODOO-PUSH-PIX] AVISO: situacao=EMITIDO falhou (valor nao existe nas opcoes Selection).');
+    }
+
+    // 4. Nota interna no chatter (sem subtype_xmlid - campo invalido neste Odoo)
     var htmlBody = '<b>PIX Gerado</b><br/>';
     htmlBody += 'TXID: ' + txid + '<br/>';
     htmlBody += 'Valor: R$ ' + valor + '<br/>';
@@ -372,11 +381,10 @@ async function pushPixToOdoo(pushData) {
         res_id: recordId,
         body: htmlBody,
         message_type: 'comment',
-        subtype_xmlid: 'mail.mt_note',
       }]);
       console.log('[ODOO-PUSH-PIX] Nota interna OK');
     } catch (noteErr) {
-      console.error('[ODOO-PUSH-PIX] Erro ao criar nota:', noteErr.message);
+      console.warn('[ODOO-PUSH-PIX] Nota interna falhou (nao critico):', noteErr.message.substring(0, 100));
     }
 
     console.log('[ODOO-PUSH-PIX] === PUSH COMPLETO na fatura ' + faturaName + ' (ID: ' + recordId + ') ===');
