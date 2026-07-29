@@ -586,29 +586,8 @@ async function handlePix(req, res, d) {
     delete _pixLocks[lockKey];
     lockResolve(responseData);
 
-    // Responde pro Odoo IMEDIATAMENTE (sem esperar o push)
+    // Responde pro Odoo IMEDIATAMENTE (o modulo Odoo grava os campos)
     res.json(responseData);
-
-    // Push em BACKGROUND com delay de 3s (espera o modulo Odoo terminar de escrever primeiro)
-    setTimeout(async function() {
-      try {
-        console.log('[API/PIX] Push em background (3s delay)...');
-        await pushPixToOdoo({
-          faturaId: faturaId,
-          faturaName: faturaName,
-          valor: valorTotal.toFixed(2).replace('.', ','),
-          pix: {
-            txid: pixResult.txid || '',
-            pix_copia_cola: pixCopiaCola,
-            qrcode_base64: qrcodeBase64,
-            html_pix: htmlPix,
-          },
-        });
-        console.log('[API/PIX] Push em background concluido OK');
-      } catch (bgErr) {
-        console.error('[API/PIX] Push em background falhou:', bgErr.message);
-      }
-    }, 3000);
   } catch (err) {
     console.error('[API/PIX] ERRO:', err.message);
     var errResponse = { success: false, message: 'Erro ao criar PIX: ' + (err.message || 'Erro desconhecido') };
