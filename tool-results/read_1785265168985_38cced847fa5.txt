@@ -1,0 +1,753 @@
+     1→/**
+     2→ * services/pdf-boleto.js - v7.0 Layout Itau AJL
+     3→ * =============================================
+     4→ * Layout IDENTICO ao boleto padrao Itau usado pela AJL
+     5→ * Baseado no PDF de referencia: Bol341-4-109-51773.pdf
+     6→ * - Celulas com fundo branco e borda cinza (0.5pt)
+     7→ * - Logo Itau real (arquivo PNG)
+     8→ * - 341-7 em 18pt bold | Linha digitavel em 12pt bold
+     9→ * - Nosso numero: 109/XXXXXXXX-Y (com DV)
+    10→ * - Instrucoes padrao (juros, multa, Serasa)
+    11→ * - Codigo de barras Code128
+    12→ * - QR Code PIX + Copia e Cola (quando disponivel)
+    13→ * - bwip-js callback-based
+    14→ * =============================================
+    15→ */
+    16→var PDFDocument = require('pdfkit');
+    17→var bwipjs = null;
+    18→try { bwipjs = require('bwip-js'); } catch (e) { console.log('[PDF] bwip-js N/D'); }
+    19→var fs = require('fs');
+    20→var path = require('path');
+    21→
+    22→/* === STORAGE === */
+    23→var store = new Map();
+    24→var nnMap = new Map();
+    25→
+    26→function storeBoleto(txid, dados) {
+    27→  store.set(txid, Object.assign({}, dados, { ts: Date.now() }));
+    28→  if (dados.nosso_numero) {
+    29→    nnMap.set(dados.nosso_numero, txid);
+    30→  }
+    31→}
+    32→
+    33→function getBoleto(txid) {
+    34→  return store.get(txid) || null;
+    35→}
+    36→
+    37→function getTxidByNn(nossoNumero) {
+    38→  return nnMap.get(nossoNumero) || null;
+    39→}
+    40→
+    41→/* === FORMATADORES === */
+    42→
+    43→function formatCnpj(v) {
+    44→  var s = String(v || '').replace(/\D/g, '');
+    45→  if (s.length === 14) return s.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+    46→  if (s.length === 11) return s.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+    47→  return v || '';
+    48→}
+    49→
+    50→function fmtData(d) {
+    51→  if (!d) return '';
+    52→  var p = d.split('-');
+    53→  return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : d;
+    54→}
+    55→
+    56→function fmtValor(v) {
+    57→  var s = String(v || '0').padStart(15, '0');
+    58→  var c = parseInt(s.slice(-2), 10);
+    59→  var r = parseInt(s.slice(0, -2), 10);
+    60→  var val = (r + c / 100).toFixed(2);
+    61→  var parts = val.split('.');
+    62→  return parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + parts[1];
+    63→}
+    64→
+    65→function fmtValorDecimal(v) {
+    66→  // Formata valor decimal (ex: 4882.06 -> "4.882,06")
+    67→  var n = parseFloat(v) || 0;
+    68→  var val = n.toFixed(2);
+    69→  var parts = val.split('.');
+    70→  return parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + parts[1];
+    71→}
+    72→
+    73→// Formata nosso numero com carteira e DV: 109/00051773-0
+    74→function calcDvNN(nn) {
+    75→  var s = String(nn).padStart(8, '0');
+    76→  var weights = [2, 3, 4, 5, 6, 7, 8, 9];
+    77→  var sum = 0;
+    78→  for (var i = 0; i < 8 && i < s.length; i++) {
+    79→    sum += parseInt(s[i]) * weights[i];
+    80→  }
+    81→  var dv = 11 - (sum % 11);
+    82→  if (dv === 10 || dv === 11) dv = 0;
+    83→  return dv;
+    84→}
+    85→
+    86→function formatNN(nn, carteira) {
+    87→  var c = carteira || '109';
+    88→  var s = String(nn).padStart(8, '0');
+    89→  var dv = calcDvNN(s);
+    90→  return c + '/' + s + '-' + dv;
+    91→}
+    92→
+    93→// Formata agencia/codigo: 7764/22338-9
+    94→function formatAgCodigo(ag, idBen) {
+    95→  var a = ag || '7764';
+    96→  var id = idBen || '776400223389';
+    97→  // Remove prefixo da agencia (primeiros 4 digitos)
+    98→  var code = id.substring(4);
+    99→  // Remove zeros a esquerda
+   100→  code = code.replace(/^0+/, '') || '0';
+   101→  // Insere hifen antes do ULTIMO digito: 223389 -> 22338-9
+   102→  if (code.length >= 2) {
+   103→    code = code.substring(0, code.length - 1) + '-' + code.substring(code.length - 1);
+   104→  }
+   105→  return a + '/' + code;
+   106→}
+   107→
+   108→// Formata linha digitavel com pontos e espacos (estilo Itau)
+   109→// Input: 47-digit string ou ja formatada
+   110→function fmtLinhaDigitavel(ld) {
+   111→  if (!ld) return '';
+   112→  var s = String(ld).replace(/\s/g, '').replace(/\./g, '');
+   113→  if (s.length >= 47) {
+   114→    return s.substring(0, 5) + '.' + s.substring(5, 10) + ' ' +
+   115→           s.substring(10, 15) + '.' + s.substring(15, 21) + ' ' +
+   116→           s.substring(21, 26) + '.' + s.substring(26, 32) + ' ' +
+   117→           s.substring(32, 33) + ' ' + s.substring(33);
+   118→  }
+   119→  return ld;
+   120→}
+   121→
+   122→// Gera instrucoes padrao com juros e multa
+   123→function getInstrucoes(valorTitulo) {
+   124→  var vt = String(valorTitulo || '0').padStart(15, '0');
+   125→  var cents = parseInt(vt.slice(-2), 10);
+   126→  var reais = parseInt(vt.slice(0, -2), 10);
+   127→  var val = reais + cents / 100;
+   128→  // Juros: 0.03% ao dia sobre o valor
+   129→  var juros = (val * 0.0003).toFixed(2).replace('.', ',');
+   130→  // Multa: 2% do valor
+   131→  var multa = (val * 0.02).toFixed(2).replace('.', ',');
+   132→  return [
+   133→    'APOS O VENCIMENTO COBRAR JUROS DE..........R$ ' + juros + ' AO DIA',
+   134→    'APOS O VENCIMENTO COBRAR MULTA DE..........R$ ' + multa,
+   135→    'Sujeito a inclusao no Serasa no 8 dias apos o vencimento.'
+   136→  ];
+   137→}
+   138→
+   139→/* === LOGO === */
+   140→var logoBuf = null;
+   141→var LOGO_LOADED = false;
+   142→try {
+   143→  var logoP = path.join(__dirname, '..', 'assets', 'logo-itau.png');
+   144→  if (fs.existsSync(logoP)) {
+   145→    logoBuf = fs.readFileSync(logoP);
+   146→    LOGO_LOADED = true;
+   147→    console.log('[PDF] Logo Itau carregado:', logoP);
+   148→  }
+   149→} catch (e) {
+   150→  console.log('[PDF] Logo N/D:', e.message);
+   151→}
+   152→
+   153→/* === BARCODE / QR CODE === */
+   154→
+   155→function genBarcode(text) {
+   156→  return new Promise(function (resolve) {
+   157→    if (!bwipjs) { resolve(null); return; }
+   158→    bwipjs.toBuffer({ bcid: 'code128', text: text, scale: 3, height: 20, includetext: false }, function (err, buf) {
+   159→      resolve(err ? null : buf);
+   160→    });
+   161→  });
+   162→}
+   163→
+   164→function genQRCode(text) {
+   165→  return new Promise(function (resolve) {
+   166→    if (!bwipjs) { resolve(null); return; }
+   167→    bwipjs.toBuffer({ bcid: 'qrcode', text: text, scale: 5, includetext: false }, function (err, buf) {
+   168→      resolve(err ? null : buf);
+   169→    });
+   170→  });
+   171→}
+   172→
+   173→/* === CONSTANTES DE LAYOUT (pontos, baseado no PDF de referencia) === */
+   174→var LM = 27;          // Left margin
+   175→var PW = 542;         // Page width (27 to 569)
+   176→var RM = LM + PW;     // Right margin (569)
+   177→var RH = 11;          // Cell row height
+   178→var BOX_H = 27;       // Header box height
+   179→var CELL_GAP = 6;     // Gap between cells in same row
+   180→var LABEL_GAP = 1.5;  // Gap between label bottom and cell top (padrao ~7.5pt total com label de 6pt)
+   181→var LC = '#808080';   // Cell border color (cinza)
+   182→var LW = 0.5;         // Cell border width
+   183→var FL = 6;            // Label font size
+   184→var FV = 8;            // Value font size
+   185→
+   186→/* === FUNCOES AUXILIARES DE DESENHO === */
+   187→
+   188→// Desenha celula (retangulo com borda cinza)
+   189→function drawCell(doc, x, y, w, h) {
+   190→  doc.rect(x, y, w, h).lineWidth(LW).stroke(LC);
+   191→}
+   192→
+   193→// Desenha label (texto 6pt)
+   194→function drawLabel(doc, x, y, text, maxW) {
+   195→  doc.fillColor('#333').fontSize(FL).font('Helvetica');
+   196→  doc.text(text, x, y, { width: maxW || 200, lineBreak: false });
+   197→}
+   198→
+   199→// Desenha valor dentro de celula (texto 8pt)
+   200→function drawVal(doc, x, y, w, text, opts) {
+   201→  var sz = (opts && opts.size) || FV;
+   202→  var bold = opts && opts.bold;
+   203→  var color = (opts && opts.color) || '#000';
+   204→  var align = (opts && opts.align) || 'left';
+   205→  doc.fillColor(color).fontSize(sz).font(bold ? 'Helvetica-Bold' : 'Helvetica');
+   206→  doc.text(text || '', x, y, { width: w, align: align, lineBreak: false });
+   207→}
+   208→
+   209→// Desenha faixa de header (3 caixas: logo + banco + linha digitavel)
+   210→function drawHeaderStrip(doc, y, title, linhaDigitavel, barcodeBuf) {
+   211→  // Titulo da secao (canto superior direito)
+   212→  if (title) {
+   213→    doc.fillColor('#333').fontSize(8).font('Helvetica-Bold');
+   214→    doc.text(title, LM, y - 16, { width: PW, align: 'right', lineBreak: false });
+   215→  }
+   216→
+   217→  // Dimensoes das 3 caixas
+   218→  var bw1 = 117;  // Logo
+   219→  var bw2 = 52;   // Banco 341-7
+   220→  var bw3 = PW - bw1 - bw2 - 2 * CELL_GAP;  // Linha digitavel ou barcode
+   221→
+   222→  // Caixa 1: Logo Itau
+   223→  drawCell(doc, LM, y, bw1, BOX_H);
+   224→  if (LOGO_LOADED && logoBuf) {
+   225→    doc.image(logoBuf, LM + 3, y + (BOX_H - 20) / 2, { height: 20 });
+   226→  } else {
+   227→    // Fallback: desenhar logo vetorial
+   228→    drawVectorLogo(doc, LM + 4, y + 2);
+   229→  }
+   230→
+   231→  // Caixa 2: Codigo do banco 341-7
+   232→  var x2 = LM + bw1 + CELL_GAP;
+   233→  drawCell(doc, x2, y, bw2, BOX_H);
+   234→  doc.fillColor('#000').fontSize(18).font('Helvetica-Bold');
+   235→  doc.text('341-7', x2, y + 4, { width: bw2, align: 'center', lineBreak: false });
+   236→
+   237→  // Caixa 3: Linha digitavel OU codigo de barras
+   238→  var x3 = x2 + bw2 + CELL_GAP;
+   239→  drawCell(doc, x3, y, bw3, BOX_H);
+   240→  if (barcodeBuf) {
+   241→    // Barcode image
+   242→    doc.image(barcodeBuf, x3 + 4, y + 4, { width: bw3 - 8, height: BOX_H - 8 });
+   243→  } else {
+   244→    // Linha digitavel formatada
+   245→    var ld = fmtLinhaDigitavel(linhaDigitavel);
+   246→    doc.fillColor('#000').fontSize(12).font('Helvetica-Bold');
+   247→    doc.text(ld, x3 + 4, y + 8, { width: bw3 - 8, align: 'center', lineBreak: false });
+   248→  }
+   249→
+   250→  return y + BOX_H;
+   251→}
+   252→
+   253→// Logo vetorial fallback
+   254→function drawVectorLogo(doc, x, y) {
+   255→  var bw = 8, bh = 23;
+   256→  var faixas = [
+   257→    { c: '#003DA5', h: bh * 0.32 },
+   258→    { c: '#F68B1F', h: bh * 0.22 },
+   259→    { c: '#009B3A', h: bh * 0.22 },
+   260→    { c: '#ED1C24', h: bh * 0.24 }
+   261→  ];
+   262→  var fy = y;
+   263→  for (var i = 0; i < faixas.length; i++) {
+   264→    doc.rect(x, fy, bw, faixas[i].h).fill(faixas[i].c);
+   265→    fy += faixas[i].h;
+   266→  }
+   267→  doc.fillColor('#003DA5').fontSize(12).font('Helvetica-Bold');
+   268→  doc.text('itaú', x + bw + 3, y, { width: 60, lineBreak: false });
+   269→  doc.fillColor('#555').fontSize(5).font('Helvetica');
+   270→  doc.text('Banco Itaú S.A.', x + bw + 3, y + 13, { width: 80, lineBreak: false });
+   271→}
+   272→
+   273→// Desenha linha horizontal (corte)
+   274→function drawCutLine(doc, y) {
+   275→  doc.moveTo(LM, y).lineTo(RM, y).lineWidth(0.5).dash(4, { space: 2 }).stroke('#808080');
+   276→  doc.undash();
+   277→}
+   278→
+   279→// Desenha texto "Corte na linha abaixo" centralizado
+   280→function drawCutText(doc, y) {
+   281→  doc.fillColor('#808080').fontSize(5.5).font('Helvetica');
+   282→  doc.text('Corte na linha abaixo', LM, y, { width: PW, align: 'center', lineBreak: false });
+   283→}
+   284→
+   285→/* === RECIBO DO PAGADOR === */
+   286→
+   287→function drawRecibo(doc, dados, barcodeBuf) {
+   288→  var y = 20; // Inicio do recibo
+   289→  var cx; // cursor X
+   290→
+   291→  // === FAIXA DE HEADER ===
+   292→  y = drawHeaderStrip(doc, y, 'RECIBO DO PAGADOR', dados.linha_digitavel, null) + 6;
+   293→
+   294→  // === LINHA 1: Beneficiario | Agencia/Codigo | Especie | Quantidade | Nosso numero ===
+   295→  var colW1 = [265, 85, 26, 34, PW - 265 - 85 - 26 - 34 - 4 * CELL_GAP];
+   296→  var labelY = y;
+   297→
+   298→  // Labels
+   299→  cx = LM;
+   300→  drawLabel(doc, cx, labelY, 'Beneficiário', colW1[0]); cx += colW1[0] + CELL_GAP;
+   301→  drawLabel(doc, cx, labelY, 'Agência / Código', colW1[1]); cx += colW1[1] + CELL_GAP;
+   302→  drawLabel(doc, cx, labelY, 'Espécie', colW1[2]); cx += colW1[2] + CELL_GAP;
+   303→  drawLabel(doc, cx, labelY, 'Quantidade', colW1[3]); cx += colW1[3] + CELL_GAP;
+   304→  drawLabel(doc, cx, labelY, 'Nosso número', colW1[4]);
+   305→
+   306→  // Cells + Values
+   307→  y = labelY + 7.5;
+   308→  var nnFormatted = formatNN(dados.nosso_numero, dados.carteira);
+   309→  var agCodigo = formatAgCodigo(dados.agencia, dados.id_beneficiario);
+   310→  var nomeBen = dados.nome_beneficiario || 'AJL COMERCIO ATACADISTA DE FERRAGENS E FERRAMENTAS LTDA';
+   311→
+   312→  cx = LM;
+   313→  drawCell(doc, cx, y, colW1[0], RH); drawVal(doc, cx + 1, y + 1, colW1[0] - 2, nomeBen); cx += colW1[0] + CELL_GAP;
+   314→  drawCell(doc, cx, y, colW1[1], RH); drawVal(doc, cx + 1, y + 1, colW1[1] - 2, agCodigo); cx += colW1[1] + CELL_GAP;
+   315→  drawCell(doc, cx, y, colW1[2], RH); drawVal(doc, cx + 1, y + 1, colW1[2] - 2, 'R$'); cx += colW1[2] + CELL_GAP;
+   316→  drawCell(doc, cx, y, colW1[3], RH); // Quantidade vazio cx += colW1[3] + CELL_GAP;
+   317→  drawCell(doc, cx, y, colW1[4], RH); drawVal(doc, cx + 1, y + 1, colW1[4] - 2, nnFormatted, { bold: true });
+   318→
+   319→  y += RH + 4;
+   320→
+   321→  // === ENDEREÇO BENEFICIÁRIO ===
+   322→  drawLabel(doc, LM, y, 'Endereço Beneficiário');
+   323→  y += 7.5;
+   324→  drawCell(doc, LM, y, PW, RH);
+   325→  var endBen = dados.endereco_beneficiario || 'Avenida Juscelino K. Oliveira, 7525 - CIC - 81.350-160 - Curitiba - PR - Brasil';
+   326→  drawVal(doc, LM + 1, y + 1, PW - 2, endBen);
+   327→  y += RH + 4;
+   328→
+   329→  // === LINHA 4 COLUNAS: Numero documento | CPF/CNPJ | Vencimento | Valor ===
+   330→  var colW4 = [161, 104, 108, PW - 161 - 104 - 108 - 3 * CELL_GAP]; // manter
+   331→  var labelY4 = y;
+   332→
+   333→  cx = LM;
+   334→  drawLabel(doc, cx, labelY4, 'Número do documento'); cx += colW4[0] + CELL_GAP;
+   335→  drawLabel(doc, cx, labelY4, 'CPF / CNPJ'); cx += colW4[1] + CELL_GAP;
+   336→  drawLabel(doc, cx, labelY4, 'Data de Vencimento'); cx += colW4[2] + CELL_GAP;
+   337→  drawLabel(doc, cx, labelY4, 'Valor Documento');
+   338→
+   339→  y = labelY4 + 7.5;
+   340→  var cnpjBen = dados.cnpj_beneficiario || '22.603.750/0001-90';
+   341→
+   342→  cx = LM;
+   343→  drawCell(doc, cx, y, colW4[0], RH); drawVal(doc, cx + 1, y + 1, colW4[0] - 2, dados.seu_numero || ''); cx += colW4[0] + CELL_GAP;
+   344→  drawCell(doc, cx, y, colW4[1], RH); drawVal(doc, cx + 1, y + 1, colW4[1] - 2, formatCnpj(cnpjBen)); cx += colW4[1] + CELL_GAP;
+   345→  drawCell(doc, cx, y, colW4[2], RH); drawVal(doc, cx + 1, y + 1, colW4[2] - 2, fmtData(dados.data_vencimento)); cx += colW4[2] + CELL_GAP;
+   346→  drawCell(doc, cx, y, colW4[3], RH); drawVal(doc, cx + 1, y + 1, colW4[3] - 2, 'R$ ' + fmtValor(dados.valor_titulo), { bold: true });
+   347→
+   348→  y += RH + 4;
+   349→
+   350→  // === LINHA 5 COLUNAS: Descontos | Deducoes | Mora/Multa | Acrescimos | Valor Cobrado ===
+   351→  var colW5 = [107, 88, 86, 87, PW - 107 - 88 - 86 - 87 - 4 * CELL_GAP]; // manter
+   352→  var labelY5 = y;
+   353→
+   354→  cx = LM;
+   355→  drawLabel(doc, cx, labelY5, '(-) Descontos / Abatimentos'); cx += colW5[0] + CELL_GAP;
+   356→  drawLabel(doc, cx, labelY5, '(-) Outras deduções'); cx += colW5[1] + CELL_GAP;
+   357→  drawLabel(doc, cx, labelY5, '(+) Mora / Multa'); cx += colW5[2] + CELL_GAP;
+   358→  drawLabel(doc, cx, labelY5, '(+) Outros acréscimos'); cx += colW5[3] + CELL_GAP;
+   359→  drawLabel(doc, cx, labelY5, '(=) Valor Cobrado');
+   360→
+   361→  y = labelY5 + 7.5;
+   362→  cx = LM;
+   363→  for (var i = 0; i < 5; i++) {
+   364→    drawCell(doc, cx, y, colW5[i], RH);
+   365→    cx += colW5[i] + CELL_GAP;
+   366→  }
+   367→
+   368→  y += RH + 4;
+   369→
+   370→  // === INSTRUÇÕES | AUTENTICAÇÃO MECÂNICA ===
+   371→  drawLabel(doc, LM, y, 'Instruções');
+   372→  drawLabel(doc, RM - 62, y, 'Autenticação Mecânica');
+   373→  y += 7.5;
+   374→  drawCell(doc, LM, y, PW, RH);
+   375→
+   376→  y += RH + 4;
+   377→
+   378→  // === PAGADOR ===
+   379→  drawLabel(doc, LM, y, 'Pagador');
+   380→  y += 7.5;
+   381→  drawCell(doc, LM, y, PW, RH);
+   382→  var pagadorText = (dados.nome_pagador || '') + ', CNPJ: ' + formatCnpj(dados.cpf_cnpj_pagador);
+   383→  drawVal(doc, LM + 1, y + 1, PW - 2, pagadorText, { bold: true });
+   384→
+   385→  y += RH + 10;
+   386→
+   387→  // === FAIXA DE CÓDIGO DE BARRAS ===
+   388→  y = drawHeaderStrip(doc, y, null, null, barcodeBuf) + 6;
+   389→
+   390→  // === CORTE ===
+   391→  drawCutText(doc, y);
+   392→  y += 8;
+   393→  drawCutLine(doc, y);
+   394→  y += 10;
+   395→
+   396→  return y;
+   397→}
+   398→
+   399→/* === FICHA DE COMPENSAÇÃO === */
+   400→
+   401→function drawFicha(doc, startY, dados, barcodeBuf, qrBuf) {
+   402→  var y = startY;
+   403→  var cx;
+   404→
+   405→  // === LINHA 1: Local de pagamento | Vencimento ===
+   406→  var colL = PW - 122 - CELL_GAP; // left column
+   407→  var colR = 122; // right column (vencimento)
+   408→
+   409→  drawLabel(doc, LM, y, 'Local de pagamento');
+   410→  drawLabel(doc, LM + colL + CELL_GAP, y, 'Vencimento');
+   411→  y += 7.5;
+   412→  drawCell(doc, LM, y, colL, RH);
+   413→  drawVal(doc, LM + 1, y + 1, colL - 2, 'PAGÁVEL EM QUALQUER AGÊNCIA BANCÁRIA ATÉ A DATA DO VENCIMENTO');
+   414→  drawCell(doc, LM + colL + CELL_GAP, y, colR, RH);
+   415→  drawVal(doc, LM + colL + CELL_GAP + 1, y + 1, colR - 2, fmtData(dados.data_vencimento), { bold: true });
+   416→  y += RH + 4;
+   417→
+   418→  // === LINHA 2: Beneficiário | Agência/Código ===
+   419→  var nomeBen = dados.nome_beneficiario || 'AJL COMERCIO ATACADISTA DE FERRAGENS E FERRAMENTAS LTDA';
+   420→  var cnpjBen = dados.cnpj_beneficiario || '22.603.750/0001-90';
+   421→  var agCodigo = formatAgCodigo(dados.agencia, dados.id_beneficiario);
+   422→
+   423→  drawLabel(doc, LM, y, 'Beneficiário');
+   424→  drawLabel(doc, LM + colL + CELL_GAP, y, 'Agência / Código do Beneficiário');
+   425→  y += 7.5;
+   426→  drawCell(doc, LM, y, colL, RH);
+   427→  drawVal(doc, LM + 1, y + 1, colL - 2, nomeBen + ', CNPJ :' + cnpjBen);
+   428→  drawCell(doc, LM + colL + CELL_GAP, y, colR, RH);
+   429→  drawVal(doc, LM + colL + CELL_GAP + 1, y + 1, colR - 2, agCodigo);
+   430→  y += RH + 4;
+   431→
+   432→  // === LINHA 6 COLUNAS: Data Doc | No Doc | Especie | Aceite | Data Proc | Nosso Numero ===
+   433→  var col6 = [64, 77, 79, 53, 107, PW - 64 - 77 - 79 - 53 - 107 - 5 * CELL_GAP];
+   434→  var labelY6 = y;
+   435→
+   436→  cx = LM;
+   437→  drawLabel(doc, cx, labelY6, 'Data do Documento'); cx += col6[0] + CELL_GAP;
+   438→  drawLabel(doc, cx, labelY6, 'Nº do Documento'); cx += col6[1] + CELL_GAP;
+   439→  drawLabel(doc, cx, labelY6, 'Espécie Doc.'); cx += col6[2] + CELL_GAP;
+   440→  drawLabel(doc, cx, labelY6, 'Aceite'); cx += col6[3] + CELL_GAP;
+   441→  drawLabel(doc, cx, labelY6, 'Data Processamento'); cx += col6[4] + CELL_GAP;
+   442→  drawLabel(doc, cx, labelY6, 'Nosso Número');
+   443→
+   444→  y = labelY6 + 7.5;
+   445→  var nnFormatted = formatNN(dados.nosso_numero, dados.carteira);
+   446→  var dataEmissao = fmtData(dados.data_emissao || dados.data_vencimento);
+   447→
+   448→  cx = LM;
+   449→  drawCell(doc, cx, y, col6[0], RH); drawVal(doc, cx + 1, y + 1, col6[0] - 2, dataEmissao); cx += col6[0] + CELL_GAP;
+   450→  drawCell(doc, cx, y, col6[1], RH); drawVal(doc, cx + 1, y + 1, col6[1] - 2, dados.seu_numero || ''); cx += col6[1] + CELL_GAP;
+   451→  drawCell(doc, cx, y, col6[2], RH); drawVal(doc, cx + 1, y + 1, col6[2] - 2, 'DM'); cx += col6[2] + CELL_GAP;
+   452→  drawCell(doc, cx, y, col6[3], RH); drawVal(doc, cx + 1, y + 1, col6[3] - 2, 'N'); cx += col6[3] + CELL_GAP;
+   453→  drawCell(doc, cx, y, col6[4], RH); drawVal(doc, cx + 1, y + 1, col6[4] - 2, dataEmissao); cx += col6[4] + CELL_GAP;
+   454→  drawCell(doc, cx, y, col6[5], RH); drawVal(doc, cx + 1, y + 1, col6[5] - 2, nnFormatted, { bold: true });
+   455→
+   456→  y += RH + 4;
+   457→
+   458→  // === LINHA 6 COLUNAS: Uso Banco | Carteira | Especie | Quantidade | Valor | Valor Documento ===
+   459→  var labelY6b = y;
+   460→  cx = LM;
+   461→  drawLabel(doc, cx, labelY6b, 'Uso do Banco'); cx += col6[0] + CELL_GAP;
+   462→  drawLabel(doc, cx, labelY6b, 'Carteira'); cx += col6[1] + CELL_GAP;
+   463→  drawLabel(doc, cx, labelY6b, 'Espécie'); cx += col6[2] + CELL_GAP;
+   464→  drawLabel(doc, cx, labelY6b, 'Quantidade'); cx += col6[3] + CELL_GAP;
+   465→  drawLabel(doc, cx, labelY6b, 'Valor'); cx += col6[4] + CELL_GAP;
+   466→  drawLabel(doc, cx, labelY6b, 'Valor Documento');
+   467→
+   468→  y = labelY6b + 7.5;
+   469→  cx = LM;
+   470→  drawCell(doc, cx, y, col6[0], RH); // Uso do banco vazio cx += col6[0] + CELL_GAP;
+   471→  drawCell(doc, cx, y, col6[1], RH); drawVal(doc, cx + 1, y + 1, col6[1] - 2, dados.carteira || '109'); cx += col6[1] + CELL_GAP;
+   472→  drawCell(doc, cx, y, col6[2], RH); drawVal(doc, cx + 1, y + 1, col6[2] - 2, 'R$'); cx += col6[2] + CELL_GAP;
+   473→  drawCell(doc, cx, y, col6[3], RH); // Quantidade vazio cx += col6[3] + CELL_GAP;
+   474→  drawCell(doc, cx, y, col6[4], RH); // Valor vazio cx += col6[4] + CELL_GAP;
+   475→  drawCell(doc, cx, y, col6[5], RH); drawVal(doc, cx + 1, y + 1, col6[5] - 2, 'R$ ' + fmtValor(dados.valor_titulo), { bold: true });
+   476→
+   477→  y += RH + 4;
+   478→
+   479→  // === INSTRUÇÕES (lado esquerdo) | DEDUÇÕES (lado direito, 5 celulas empilhadas) ===
+   480→  // Lado esquerdo: instruções
+   481→  var leftW = PW - 122 - CELL_GAP;
+   482→  var rightX = LM + leftW + CELL_GAP;
+   483→  var rightW = 122;
+   484→  var dedRowH = RH;
+   485→
+   486→  // Labels das deduções (lado direito)
+   487→  var dedLabels = [
+   488→    '(-) Descontos / Abatimentos',
+   489→    '(-) Outras deduções',
+   490→    '(+) Mora / Multa',
+   491→    '(+) Outros acréscimos',
+   492→    '(=) Valor Cobrado'
+   493→  ];
+   494→
+   495→  // Label "Instruções" (esquerda) + primeira label dedução (direita)
+   496→  drawLabel(doc, LM, y, 'Instruções (Instruções de responsabilidade do beneficiário.', leftW);
+   497→  drawLabel(doc, rightX, y, dedLabels[0], rightW);
+   498→
+   499→  y += 7.5;
+   500→
+   501→  // Texto das instruções (lado esquerdo)
+   502→  var instrucoes = getInstrucoes(dados.valor_titulo);
+   503→  var instY = y;
+   504→  for (var i = 0; i < instrucoes.length; i++) {
+   505→    doc.fillColor('#000').fontSize(FV).font('Helvetica');
+   506→    doc.text(instrucoes[i], LM + 2, instY, { width: leftW - 4, lineBreak: false });
+   507→    instY += 12;
+   508→  }
+   509→
+   510→  // Celulas de dedução (lado direito, empilhadas)
+   511→  drawCell(doc, rightX, y, rightW, dedRowH);
+   512→  y += dedRowH + 7.5;
+   513→
+   514→  for (var i = 1; i < dedLabels.length; i++) {
+   515→    drawLabel(doc, rightX, y, dedLabels[i]);
+   516→    y += 7.5;
+   517→    drawCell(doc, rightX, y, rightW, dedRowH);
+   518→    y += dedRowH + (i < dedLabels.length - 1 ? 7.5 : 0);
+   519→  }
+   520→
+   521→  y += 4;
+   522→
+   523→  // === PAGADOR (3 linhas) ===
+   524→  drawLabel(doc, LM, y, 'Pagador');
+   525→  y += 7.5;
+   526→
+   527→  // Linha 1: Nome + CNPJ
+   528→  drawCell(doc, LM, y, PW, RH);
+   529→  drawVal(doc, LM + 1, y + 1, PW - 2, (dados.nome_pagador || '') + ', CNPJ: ' + formatCnpj(dados.cpf_cnpj_pagador), { bold: true });
+   530→  y += RH + 1;
+   531→
+   532→  // Linha 2: Cidade/UF
+   533→  var endereco1 = [dados.cidade, dados.estado].filter(Boolean).join(' - ');
+   534→  if (dados.logradouro) endereco1 = dados.logradouro + ' - ' + (endereco1 || dados.cidade || '');
+   535→  drawCell(doc, LM, y, PW, RH);
+   536→  drawVal(doc, LM + 1, y + 1, PW - 2, endereco1 || '');
+   537→  y += RH + 1;
+   538→
+   539→  // Linha 3: CEP
+   540→  drawCell(doc, LM, y, PW, RH);
+   541→  var endereco2 = dados.cep ? 'CEP: ' + dados.cep : '';
+   542→  drawVal(doc, LM + 1, y + 1, PW - 2, endereco2);
+   543→  y += RH + 4;
+   544→
+   545→  // === BENEFICIÁRIO FINAL ===
+   546→  drawLabel(doc, LM, y, 'Beneficiário Final');
+   547→  y += 7.5;
+   548→  drawCell(doc, LM, y, PW, RH);
+   549→
+   550→  y += RH + 6;
+   551→
+   552→  // === FAIXA DE RODAPÉ (logo largo + autenticação + titulo) ===
+   553→  var rodapeH = 37;
+   554→  var logoW = 309;
+   555→
+   556→  // Logo box (largo)
+   557→  drawCell(doc, LM, y, logoW, rodapeH);
+   558→  if (LOGO_LOADED && logoBuf) {
+   559→    doc.image(logoBuf, LM + 4, y + (rodapeH - 22) / 2, { height: 22 });
+   560→  } else {
+   561→    drawVectorLogo(doc, LM + 5, y + 6);
+   562→  }
+   563→
+   564→  // Autenticação Mecânica (texto)
+   565→  doc.fillColor('#333').fontSize(FL).font('Helvetica');
+   566→  doc.text('Autenticação Mecânica', LM + logoW + 20, y + 12, { width: 80, lineBreak: false });
+   567→
+   568→  // FICHA DE COMPENSAÇÃO (titulo)
+   569→  doc.fillColor('#333').fontSize(8).font('Helvetica-Bold');
+   570→  doc.text('FICHA DE COMPENSAÇÃO', RM - 103, y + 14, { width: 100, align: 'right', lineBreak: false });
+   571→
+   572→  y += rodapeH + 6;
+   573→
+   574→  // === SEÇÃO PIX (opcional, abaixo da ficha) ===
+   575→  var pix = dados.pix_copia_cola || '';
+   576→  if (pix || qrBuf) {
+   577→    y = drawPixSection(doc, y, dados, qrBuf);
+   578→  }
+   579→
+   580→  return y;
+   581→}
+   582→
+   583→/* === SEÇÃO PIX === */
+   584→
+   585→function drawPixSection(doc, y, dados, qrBuf) {
+   586→  var pix = dados.pix_copia_cola || '';
+   587→
+   588→  // Linha separadora
+   589→  doc.moveTo(LM, y).lineTo(RM, y).lineWidth(0.5).stroke(LC);
+   590→  y += 6;
+   591→
+   592→  // QR Code (lado esquerdo)
+   593→  if (qrBuf) {
+   594→    try {
+   595→      doc.image(qrBuf, LM + 10, y, { width: 75, height: 75 });
+   596→    } catch (e) {}
+   597→  }
+   598→
+   599→  // Textos PIX
+   600→  doc.fillColor('#333').fontSize(7).font('Helvetica-Bold');
+   601→  doc.text('Pagamento via PIX', LM + 95, y + 2, { width: 200 });
+   602→  doc.font('Helvetica').fontSize(5.5);
+   603→  doc.text('Escaneie o QR Code ou copie o código abaixo', LM + 95, y + 12, { width: 300 });
+   604→  doc.text('para pagar instantaneamente com PIX.', LM + 95, y + 21, { width: 300 });
+   605→
+   606→  // Caixa do Copia e Cola
+   607→  var ccY = y + 30;
+   608→  var ccW = PW - 100;
+   609→  var ccH = 30;
+   610→  doc.rect(LM + 95, ccY, ccW, ccH).fill('#f8f8ff').lineWidth(0.3).stroke('#666');
+   611→  doc.fillColor('#333').fontSize(5).font('Helvetica-Bold');
+   612→  doc.text('PIX Copia e Cola:', LM + 100, ccY + 2, { width: ccW - 10 });
+   613→  doc.fillColor('#000').fontSize(4.5).font('Courier');
+   614→  doc.text(pix, LM + 100, ccY + 10, { width: ccW - 15 });
+   615→  doc.font('Helvetica');
+   616→
+   617→  // TXID
+   618→  doc.fillColor('#999').fontSize(4.5);
+   619→  doc.text('TXID: ' + (dados.txid || ''), LM + 95, y + 68, { width: 300 });
+   620→
+   621→  y += 82;
+   622→
+   623→  // Linha final
+   624→  doc.moveTo(LM, y).lineTo(RM, y).lineWidth(0.5).stroke(LC);
+   625→
+   626→  return y;
+   627→}
+   628→
+   629→/* === MONTAGEM PRINCIPAL === */
+   630→
+   631→async function drawBoleto(doc, dados) {
+   632→  var barcodeText = dados.codigo_barras || '';
+   633→  var barcodeBuf = await genBarcode(barcodeText);
+   634→
+   635→  var qrBuf = dados.qrcode_base64 ? Buffer.from(dados.qrcode_base64, 'base64') : null;
+   636→  if (!qrBuf && (dados.pix_copia_cola || '')) {
+   637→    qrBuf = await genQRCode(dados.pix_copia_cola);
+   638→  }
+   639→
+   640→  // ===== RECIBO DO PAGADOR =====
+   641→  var y = drawRecibo(doc, dados, barcodeBuf);
+   642→
+   643→  // ===== FICHA DE COMPENSAÇÃO =====
+   644→  y = drawFicha(doc, y, dados, barcodeBuf, qrBuf);
+   645→
+   646→  return y;
+   647→}
+   648→
+   649→/* === GERACAO DO PDF === */
+   650→
+   651→async function buildPdfBuffer(dados) {
+   652→  return new Promise(function (resolve, reject) {
+   653→    try {
+   654→      var doc = new PDFDocument({
+   655→        size: 'A4',
+   656→        margins: { top: 5, bottom: 5, left: LM, right: 27 },
+   657→        info: { Title: 'Boleto ' + (dados.nosso_numero || ''), Author: 'AJL Ferro e Aco' }
+   658→      });
+   659→      var chunks = [];
+   660→      doc.on('data', function (chunk) { chunks.push(chunk); });
+   661→
+   662→      drawBoleto(doc, dados).then(function (finalY) {
+   663→        doc.fillColor('#999').fontSize(4);
+   664→        doc.text('Emitido por AJL Ferro e Aco | Boleto gerado via API BoleCode Itau', LM, finalY + 4, { width: PW, align: 'center' });
+   665→        doc.end();
+   666→        doc.on('end', function () { resolve(Buffer.concat(chunks)); });
+   667→      }).catch(reject);
+   668→    } catch (err) { reject(err); }
+   669→  });
+   670→}
+   671→
+   672→async function generatePdf(txid) {
+   673→  var dados = getBoleto(txid);
+   674→  if (!dados) throw new Error('Boleto expirado. Use POST /boletos/pdf');
+   675→  return buildPdfBuffer(dados);
+   676→}
+   677→
+   678→async function generatePdfFromData(data) {
+   679→  var ind = (data.dado_boleto && data.dado_boleto.dados_individuais_boleto && data.dado_boleto.dados_individuais_boleto[0]) || {};
+   680→  var qr = data.dados_qrcode || {};
+   681→  var d = {
+   682→    txid: qr.txid || '',
+   683→    nosso_numero: ind.numero_nosso_numero || '',
+   684→    linha_digitavel: ind.numero_linha_digitavel || '',
+   685→    codigo_barras: ind.codigo_barras || '',
+   686→    data_vencimento: ind.data_vencimento || '',
+   687→    data_emissao: data.data_emissao || '',
+   688→    valor_titulo: ind.valor_titulo || '',
+   689→    pix_copia_cola: qr.emv || '',
+   690→    qrcode_base64: qr.base64 || '',
+   691→    nome_pagador: data.nome_pagador || '',
+   692→    cpf_cnpj_pagador: data.cpf_cnpj_pagador || '',
+   693→    tipo_pessoa: data.tipo_pessoa || '',
+   694→    logradouro: data.logradouro || '',
+   695→    cidade: data.cidade || '',
+   696→    estado: data.estado || '',
+   697→    cep: data.cep || '',
+   698→    seu_numero: data.seu_numero || '',
+   699→    agencia: data.agencia || '7764',
+   700→    conta: data.conta || '22338-9',
+   701→    carteira: data.carteira || '109',
+   702→    id_beneficiario: data.id_beneficiario || '776400223389',
+   703→    nome_beneficiario: data.nome_beneficiario || 'AJL COMERCIO ATACADISTA DE FERRAGENS E FERRAMENTAS LTDA',
+   704→    cnpj_beneficiario: data.cnpj_beneficiario || '22.603.750/0001-90',
+   705→    endereco_beneficiario: data.endereco_beneficiario || 'Avenida Juscelino K. Oliveira, 7525 - CIC - 81.350-160 - Curitiba - PR - Brasil',
+   706→    parcela: data.parcela || 0,
+   707→    total_parcelas: data.total_parcelas || 0,
+   708→  };
+   709→  return buildPdfBuffer(d);
+   710→}
+   711→
+   712→module.exports = { storeBoleto, getBoleto, getTxidByNn, generatePdf, generatePdfFromData, generatePdfFromFields };
+   713→
+   714→/**
+   715→ * Gera PDF a partir de campos flat (dados vindos do Odoo)
+   716→ */
+   717→async function generatePdfFromFields(data) {
+   718→  var vt = data.valor_titulo || '0';
+   719→  var vtStr = String(vt).replace(/\D/g, '');
+   720→  if (vtStr.length < 15) {
+   721→    vtStr = String(Math.round(parseFloat(vt) * 100)).padStart(15, '0');
+   722→  }
+   723→
+   724→  var d = {
+   725→    txid: data.txid || '',
+   726→    nosso_numero: data.nosso_numero || '',
+   727→    linha_digitavel: data.linha_digitavel || '',
+   728→    codigo_barras: data.codigo_barras || '',
+   729→    data_vencimento: data.data_vencimento || '',
+   730→    data_emissao: data.data_emissao || '',
+   731→    valor_titulo: vtStr,
+   732→    pix_copia_cola: data.pix_copia_cola || '',
+   733→    qrcode_base64: data.qrcode_base64 || '',
+   734→    nome_pagador: data.nome_pagador || '',
+   735→    cpf_cnpj_pagador: data.cpf_cnpj_pagador || '',
+   736→    logradouro: data.logradouro || '',
+   737→    cidade: data.cidade || '',
+   738→    estado: data.estado || '',
+   739→    cep: data.cep || '',
+   740→    seu_numero: data.seu_numero || data.nosso_numero || '',
+   741→    parcela: data.parcela || 0,
+   742→    total_parcelas: data.total_parcelas || 0,
+   743→    agencia: data.agencia || '7764',
+   744→    conta: data.conta || '22338-9',
+   745→    carteira: data.carteira || '109',
+   746→    id_beneficiario: data.id_beneficiario || '776400223389',
+   747→    nome_beneficiario: data.nome_beneficiario || 'AJL COMERCIO ATACADISTA DE FERRAGENS E FERRAMENTAS LTDA',
+   748→    cnpj_beneficiario: data.cnpj_beneficiario || '22.603.750/0001-90',
+   749→    endereco_beneficiario: data.endereco_beneficiario || 'Avenida Juscelino K. Oliveira, 7525 - CIC - 81.350-160 - Curitiba - PR - Brasil',
+   750→  };
+   751→  return buildPdfBuffer(d);
+   752→}
+   753→

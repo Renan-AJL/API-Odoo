@@ -1,204 +1,403 @@
-/**
- * services/tudoentregue.js - TudoEntregue API Client v2
- * Baseado na spec oficial Swagger v1.0.20
- * Host: api.tudoentregue.com.br  basePath: /v1
- * Auth: headers AppKey + RequesterKey
- *
- * Endpoints:
- *   POST   /v1/orders              - Inclusao/Edicao de Entrega
- *   POST   /v1/orders/delete      - Exclusao
- *   PUT    /v1/orders/cancel      - Cancelamento
- *   GET    /v1/orders/situation   - Consulta situacao
- *   GET    /v1/orders/finish      - Consulta com ocorrencias
- *   GET    /v1/tracking           - Acompanhamento
- *   POST   /v1/occurrences        - Criar/editar tipo ocorrencia
- *   GET    /v1/occurrences        - Listar ocorrencias
- */
-var axios = require('axios');
-var config = require('../config');
-var logger = require('../utils/logger');
-var retry = require('../utils/retry').retry;
+// ============================================================
+// services/tudoentregue.js — Client completo da API TudoEntregue
+// Adaptado para usar config/ centralizado do projeto unificado
+// ============================================================
+const axios = require('axios');
+const config = require('../config');
+const { retryWithBackoff } = require('../utils/retry');
 
-// --- Situacoes da Entrega (conforme doc) ---
-var SITUATION = {
-  RECEBIDA_TORRE: 0,
-  ENVIADA_MOTORISTA: 1,
-  AGUARDANDO_CONFIRMACAO: 2,       // descontinuado
-  RECEBIDA_MOTORISTA: 3,
-  RECUSADA_MOTORISTA: 4,           // descontinuado
-  FINALIZADA_MOTORISTA: 5,
-  FINALIZADA_TORRE: 6,
-  OPERACAO_FINALIZADA: 7,          // descontinuado
-  CANCELADA: 8,
-  NOTIFICACAO_CANCELAMENTO: 9,
-  TRANSFERIDA: 11,
+// Constantes
+const API_LIMITS = {
+  MAX_PAYLOAD_BYTES: 1 * 1024 * 1024,
+  MAX_ORDERS_PER_REQUEST: 50,
 };
 
-var SITUATION_LABELS = {};
-SITUATION_LABELS[0] = 'Recebida pela Torre de Controle';
-SITUATION_LABELS[1] = 'Enviada ao Motorista';
-SITUATION_LABELS[2] = 'Aguardando Confirmacao';
-SITUATION_LABELS[3] = 'Recebida pelo Motorista';
-SITUATION_LABELS[4] = 'Recusada pelo Motorista';
-SITUATION_LABELS[5] = 'Finalizada pelo Motorista';
-SITUATION_LABELS[6] = 'Finalizada pela Torre de Controle';
-SITUATION_LABELS[7] = 'Operacao Finalizada';
-SITUATION_LABELS[8] = 'Operacao Cancelada';
-SITUATION_LABELS[9] = 'Notificacao de Cancelamento Enviada';
-SITUATION_LABELS[11] = 'Transferida';
+const SITUATION = {
+  AGUARDANDO: 0,
+  EM_ROTA: 1,
+  ENTREGUE: 3,
+  NAO_ENTREGUE: 5,
+  PARCIAL: 6,
+  CANCELADA: 8,
+  ATRASADA: 9,
+  EM_SEPARACAO: 10,
+  TRANSFERIDA: 11,
+  BAIXADA: 12,
+};
 
-var ORDER_TYPE = {
+const SITUATION_LABELS = {
+  [SITUATION.AGUARDANDO]: 'Aguardando',
+  [SITUATION.EM_ROTA]: 'Em Rota',
+  [SITUATION.ENTREGUE]: 'Entregue',
+  [SITUATION.NAO_ENTREGUE]: 'Nao Entregue',
+  [SITUATION.PARCIAL]: 'Entrega Parcial',
+  [SITUATION.CANCELADA]: 'Cancelada',
+  [SITUATION.ATRASADA]: 'Atrasada',
+  [SITUATION.EM_SEPARACAO]: 'Em Separacao',
+  [SITUATION.TRANSFERIDA]: 'Transferida',
+  [SITUATION.BAIXADA]: 'Baixada',
+};
+
+const SITUATION_TO_ODOO_STATE = {
+  [SITUATION.AGUARDANDO]: 'assigned',
+  [SITUATION.EM_SEPARACAO]: 'assigned',
+  [SITUATION.EM_ROTA]: 'confirmed',
+  [SITUATION.ENTREGUE]: 'done',
+  [SITUATION.NAO_ENTREGUE]: 'done',
+  [SITUATION.PARCIAL]: 'done',
+  [SITUATION.CANCELADA]: 'cancel',
+  [SITUATION.TRANSFERIDA]: 'assigned',
+  [SITUATION.BAIXADA]: 'done',
+  [SITUATION.ATRASADA]: 'confirmed',
+};
+
+const ORDER_TYPES = {
   ENTREGA: 1,
   COLETA: 2,
+  DEVOLUCAO: 3,
+  TROCA: 4,
+  OUTROS: 5,
 };
 
-function getBaseUrl() {
-  return config.tudoentregue.baseUrl.replace(/\/+$/, '') + '/v1';
-}
+class TudoEntregueClient {
+  constructor() {
+    this.baseUrl = config.tudoentregue.baseUrl;
+    this.appKey = config.tudoentregue.appKey;
+    this.requesterKey = config.tudoentregue.requesterKey;
+    this.pageIntervalMs = config.tudoentregue.pageIntervalMs || 5000;
+    this.maxEmptyPages = config.tudoentregue.maxEmptyPages || 10;
+    this._driverCache = null;  // Cache de motoristas: { nome_normalizado: { PhoneCountry, PhoneNumber } }
 
-function getHeaders() {
-  return {
-    'Content-Type': 'application/json',
-    'AppKey': config.tudoentregue.appKey,
-    'RequesterKey': config.tudoentregue.requesterKey,
-  };
-}
-
-/**
- * POST /v1/orders - Inclusao/Edicao de Entrega
- * Body: array de OrderViewModel
- * Returns: array de OrderInsertUpdateReturn
- */
-function createOrders(orders) {
-  logger.info('[TE] Criando ' + orders.length + ' entrega(s) via /v1/orders');
-  return retry(function() {
-    return axios.post(getBaseUrl() + '/orders', orders, {
-      headers: getHeaders(),
+    this.httpClient = axios.create({
+      baseURL: this.baseUrl,
       timeout: 30000,
+      headers: {
+        'Content-Type': 'application/json',
+        'AppKey': this.appKey,
+        'RequesterKey': this.requesterKey,
+      },
     });
-  }, { label: 'TE createOrders', maxRetries: 2 }).then(function(resp) {
-    logger.info('[TE] createOrders status: ' + resp.status);
-    return resp.data;
-  });
+
+    this.httpClient.interceptors.request.use((cfg) => {
+      console.log(`[TE] ${cfg.method?.toUpperCase()} ${cfg.url}`);
+      return cfg;
+    });
+
+    this.httpClient.interceptors.response.use(
+      (res) => res,
+      (err) => {
+        const msg = err.response?.data?.Message || err.message;
+        console.error(`[TE] Error: ${err.config?.url} — ${msg}`);
+        return Promise.reject(err);
+      }
+    );
+  }
+
+  _validatePayload(data) {
+    const bytes = Buffer.byteLength(JSON.stringify(data), 'utf-8');
+    if (bytes > API_LIMITS.MAX_PAYLOAD_BYTES) {
+      throw new Error(`Payload excede 1MB (${(bytes / 1024).toFixed(0)}KB). Divida em lotes menores.`);
+    }
+  }
+
+  async _request(method, url, data = null, params = null) {
+    return retryWithBackoff(
+      () => this.httpClient.request({ method, url, data, params }),
+      {
+        maxRetries: 3,
+        shouldRetry: (err) => {
+          const status = err.response?.status;
+          return !status || status >= 500 || status === 429;
+        },
+      }
+    );
+  }
+
+  // -------------------------------------------------------
+  // POST /v1/orders — Inclusao/Edicao de Entrega (Swagger v1.0.20)
+  // -------------------------------------------------------
+  async createDeliveries(deliveries) {
+    if (!Array.isArray(deliveries)) deliveries = [deliveries];
+    if (deliveries.length > API_LIMITS.MAX_ORDERS_PER_REQUEST) {
+      throw new Error(`Maximo ${API_LIMITS.MAX_ORDERS_PER_REQUEST} entregas por request. Enviado: ${deliveries.length}`);
+    }
+    this._validatePayload(deliveries);
+
+    const { data } = await this._request('POST', '/v1/orders', deliveries);
+    console.log(`[TE] Cadastro: ${deliveries.length} entregas enviadas via /v1/orders`);
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // POST /v1/orders — Edicao (mesmo endpoint, mesma estrutura do create)
+  // -------------------------------------------------------
+  async editDeliveries(deliveries) {
+    if (!Array.isArray(deliveries)) deliveries = [deliveries];
+    if (deliveries.length > API_LIMITS.MAX_ORDERS_PER_REQUEST) {
+      throw new Error(`Maximo ${API_LIMITS.MAX_ORDERS_PER_REQUEST} entregas por edicao.`);
+    }
+    this._validatePayload(deliveries);
+
+    const { data } = await this._request('POST', '/v1/orders', deliveries);
+    console.log(`[TE] Edicao: ${deliveries.length} entregas editadas via /v1/orders`);
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // PUT /v1/orders/cancel — Cancelamento
+  // -------------------------------------------------------
+  async cancelDeliveries(orders) {
+    if (!Array.isArray(orders)) orders = [orders];
+    const { data } = await this._request('PUT', '/v1/orders/cancel', orders);
+    console.log(`[TE] Cancelamento: ${orders.length} entregas canceladas`);
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // GET /v1/orders/finish — Consulta entregas com ocorrencia
+  // -------------------------------------------------------
+  async getDeliveries(params = {}) {
+    const { data } = await this._request('GET', '/v1/orders/finish', null, params);
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // GET /v1/orders/situation — Consulta situacao detalhada
+  // -------------------------------------------------------
+  async getDeliveriesWithOccurrence(params = {}) {
+    const { data } = await this._request('GET', '/v1/orders/situation', null, params);
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // GET /v1/orders/situation — Situacao detalhada da entrega
+  // -------------------------------------------------------
+  async getOrderSituation(params = {}) {
+    const { data } = await this._request('GET', '/v1/orders/situation', null, params);
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // GET /v1/tracking — Acompanhamento de entrega por tracking code
+  // -------------------------------------------------------
+  async getTracking(trackingCode) {
+    const { data } = await this._request('GET', '/v1/tracking', null, { trackingCode });
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // GET /v1/occurrences — Listar tipos de ocorrencia
+  // -------------------------------------------------------
+  async getSituations() {
+    const { data } = await this._request('GET', '/v1/occurrences');
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // GET /customers?DriverDetail=true — Lista motoristas (com cache 1h)
+  // Tenta tambem /v1/customers como fallback
+  // -------------------------------------------------------
+  async getDrivers() {
+    // Cache por 1 hora
+    if (this._driverCache && (Date.now() - this._driverCache._ts) < 3600000) {
+      return this._driverCache.list;
+    }
+
+    var raw = null;
+    var endpoints = ['/customers', '/v1/customers'];
+    for (var i = 0; i < endpoints.length; i++) {
+      try {
+        console.log('[TE] Tentando buscar motoristas via ' + endpoints[i] + '...');
+        var resp = await this._request('GET', endpoints[i], null, { DriverDetail: true });
+        raw = resp.data;
+        console.log('[TE] Motoristas recebidos de ' + endpoints[i] + ': ' + JSON.stringify(raw).substring(0, 500));
+        break;
+      } catch (err) {
+        console.warn('[TE] Endpoint ' + endpoints[i] + ' falhou: ' + err.message);
+      }
+    }
+
+    if (!raw) {
+      console.error('[TE] Nenhum endpoint de motoristas funcionou!');
+      return this._driverCache ? this._driverCache.list : {};
+    }
+
+    // Tenta varios formatos de resposta
+    var customers = [];
+    if (Array.isArray(raw)) {
+      customers = raw;
+    } else if (raw && Array.isArray(raw.Result)) {
+      customers = raw.Result;
+    } else if (raw && Array.isArray(raw.Customers)) {
+      customers = raw.Customers;
+    } else if (raw && Array.isArray(raw.Drivers)) {
+      // Se vier direto um array de Drivers
+      customers = raw.Drivers.map(function(d) { return { Drivers: [d] }; });
+    } else if (raw && typeof raw === 'object') {
+      // Tenta qualquer chave que seja array
+      for (var k of Object.keys(raw)) {
+        if (Array.isArray(raw[k]) && raw[k].length > 0) {
+          console.log('[TE] Usando chave "' + k + '" para motoristas (' + raw[k].length + ' itens)');
+          customers = raw[k];
+          break;
+        }
+      }
+    }
+
+    console.log('[TE] Processando ' + customers.length + ' customers para extrair motoristas...');
+    const driverMap = {};
+    customers.forEach(function(cust) {
+      // O item pode ser o proprio driver ou um customer com Drivers dentro
+      var drivers = [];
+      if (cust.Drivers && Array.isArray(cust.Drivers)) {
+        drivers = cust.Drivers;
+      } else if (cust.drivers && Array.isArray(cust.drivers)) {
+        drivers = cust.drivers;
+      } else if (cust.Name || cust.PhoneNumber) {
+        // O proprio item e um driver
+        drivers = [cust];
+      }
+      drivers.forEach(function(d) {
+        if (d.Name) {
+          const key = d.Name.toUpperCase().trim();
+          driverMap[key] = {
+            Name: d.Name,
+            PhoneCountry: d.PhoneCountry || '55',
+            PhoneNumber: d.PhoneNumber || '',
+          };
+        }
+      });
+    });
+
+    console.log('[TE] ' + Object.keys(driverMap).length + ' motoristas cacheados: ' + Object.keys(driverMap).join(', '));
+    this._driverCache = { _ts: Date.now(), list: driverMap };
+    return driverMap;
+  }
+
+  /**
+   * Busca motorista por nome (fuzzy match). Retorna { PhoneCountry, PhoneNumber } ou null.
+   * @param {string} motoristaName - Nome vindo do Odoo (ex: 'ADRIANO' ou key 'adriano')
+   */
+  async findDriverByName(motoristaName) {
+    if (!motoristaName) return null;
+    const drivers = await this.getDrivers();
+    const driverKeys = Object.keys(drivers);
+    if (!drivers || !driverKeys.length) {
+      console.warn('[TE-DRIVER] Cache de motoristas vazio ou nao carregado!');
+      return null;
+    }
+
+    const search = motoristaName.toUpperCase().trim();
+    console.log('[TE-DRIVER] Buscando motorista: "' + search + '" entre ' + driverKeys.length + ' drivers: [' + driverKeys.join(', ') + ']');
+
+    // Match exato
+    if (drivers[search]) {
+      console.log('[TE-DRIVER] Match EXATO: "' + search + '" -> Phone=' + drivers[search].PhoneNumber);
+      return drivers[search];
+    }
+    // Match parcial (nome contem ou e contido)
+    for (const key of driverKeys) {
+      if (key.indexOf(search) !== -1 || search.indexOf(key) !== -1) {
+        console.log('[TE-DRIVER] Match PARCIAL: "' + search + '" ~= "' + key + '" -> Phone=' + drivers[key].PhoneNumber);
+        return drivers[key];
+      }
+    }
+    // Match pela primeira palavra
+    const firstWord = search.split(/\s+/)[0];
+    if (firstWord.length >= 3) {
+      for (const key of driverKeys) {
+        if (key.indexOf(firstWord) !== -1 || firstWord.indexOf(key) !== -1) {
+          console.log('[TE-DRIVER] Match PRIMEIRA PALAVRA: "' + search + '" ~= "' + key + '" -> Phone=' + drivers[key].PhoneNumber);
+          return drivers[key];
+        }
+      }
+    }
+    console.warn('[TE-DRIVER] NENHUM match para "' + search + '". Drivers disponiveis: [' + driverKeys.join(', ') + ']');
+    return null;
+  }
+
+  // -------------------------------------------------------
+  // POST /customers/addDriver — Cadastrar / editar motorista
+  // -------------------------------------------------------
+  async addDriver(customerDoc, driverName, driverPhoneCountry, driverPhoneNumber) {
+    const payload = {
+      Customer: {
+        DocumentType: 'CNPJ',
+        DocumentNumber: customerDoc.replace(/\D/g, ''),
+      },
+      Driver: {
+        Name: driverName,
+        PhoneCountry: driverPhoneCountry,
+        PhoneNumber: driverPhoneNumber,
+      },
+    };
+    const { data, status } = await this.httpClient.post('/customers/addDriver', payload);
+    console.log(`[TE] addDriver: ${driverName} -> status ${status}`);
+    return { data, status };
+  }
+
+  // -------------------------------------------------------
+  // PUT /drivers/customer/changeSituation — Ativar/Desativar
+  // -------------------------------------------------------
+  async changeDriverSituation(customerDoc, driverPhoneCountry, driverPhoneNumber, enable) {
+    const payload = {
+      Customer: {
+        DocumentType: 'CNPJ',
+        DocumentNumber: customerDoc.replace(/\D/g, ''),
+        Enable: enable,
+      },
+      Driver: {
+        PhoneCountry: driverPhoneCountry,
+        PhoneNumber: driverPhoneNumber,
+      },
+    };
+    const { data } = await this.httpClient.put('/drivers/customer/changeSituation', payload);
+    console.log(`[TE] changeDriverSituation: phone=${driverPhoneNumber} -> ${enable ? 'Ativo' : 'Inativo'}`);
+    return data;
+  }
+
+  // -------------------------------------------------------
+  // Paginacao automatica
+  // -------------------------------------------------------
+  async fetchAllPages(endpoint, params = {}) {
+    const allResults = [];
+    let page = 1;
+    let emptyCount = 0;
+
+    while (true) {
+      const response = await this._request('GET', endpoint, null, { ...params, page });
+      const items = response.data?.Result || [];
+
+      if (items.length === 0) {
+        emptyCount++;
+        if (emptyCount >= this.maxEmptyPages || !response.data?.HasNextPage) break;
+      } else {
+        emptyCount = 0;
+        allResults.push(...items);
+      }
+
+      if (!response.data?.HasNextPage) break;
+      page++;
+
+      if (page > 1) {
+        console.log(`[TE] Paginacao: esperando ${this.pageIntervalMs}ms antes da pagina ${page}`);
+        await new Promise((r) => setTimeout(r, this.pageIntervalMs));
+      }
+    }
+
+    console.log(`[TE] Paginacao finalizada: ${allResults.length} itens em ${page} paginas`);
+    return allResults;
+  }
 }
 
-/**
- * POST /v1/orders - Edicao (mesmo endpoint, mesma estrutura)
- */
-function editOrders(orders) {
-  logger.info('[TE] Editando ' + orders.length + ' entrega(s) via /v1/orders');
-  return retry(function() {
-    return axios.post(getBaseUrl() + '/orders', orders, {
-      headers: getHeaders(),
-      timeout: 30000,
-    });
-  }, { label: 'TE editOrders', maxRetries: 2 }).then(function(resp) {
-    logger.info('[TE] editOrders status: ' + resp.status);
-    return resp.data;
-  });
-}
-
-/**
- * PUT /v1/orders/cancel - Cancelamento
- */
-function cancelOrders(orders) {
-  logger.info('[TE] Cancelando ' + orders.length + ' entrega(s)');
-  return retry(function() {
-    return axios.put(getBaseUrl() + '/orders/cancel', orders, {
-      headers: getHeaders(),
-      timeout: 30000,
-    });
-  }, { label: 'TE cancelOrders', maxRetries: 2 }).then(function(resp) {
-    return resp.data;
-  });
-}
-
-/**
- * POST /v1/orders/delete - Exclusao permanente
- */
-function deleteOrders(orders) {
-  logger.info('[TE] Excluindo ' + orders.length + ' entrega(s)');
-  return retry(function() {
-    return axios.post(getBaseUrl() + '/orders/delete', orders, {
-      headers: getHeaders(),
-      timeout: 30000,
-    });
-  }, { label: 'TE deleteOrders', maxRetries: 2 }).then(function(resp) {
-    return resp.data;
-  });
-}
-
-/**
- * GET /v1/orders/situation - Consulta situacao
- * Query: phoneCountry, phoneNumber, orderType, orderID
- */
-function getSituation(params) {
-  return retry(function() {
-    return axios.get(getBaseUrl() + '/orders/situation', {
-      headers: getHeaders(),
-      params: params,
-      timeout: 15000,
-    });
-  }, { label: 'TE getSituation', maxRetries: 1 }).then(function(resp) {
-    return resp.data;
-  });
-}
-
-/**
- * GET /v1/orders/finish - Consulta entregas com ocorrencia
- * Query: phoneCountry, phoneNumber, orderType, orderID, partial
- */
-function getFinished(params) {
-  return retry(function() {
-    return axios.get(getBaseUrl() + '/orders/finish', {
-      headers: getHeaders(),
-      params: params,
-      timeout: 15000,
-    });
-  }, { label: 'TE getFinished', maxRetries: 1 }).then(function(resp) {
-    return resp.data;
-  });
-}
-
-/**
- * GET /v1/tracking?trackingCode=XXX - Acompanhamento
- */
-function getTracking(trackingCode) {
-  return retry(function() {
-    return axios.get(getBaseUrl() + '/tracking', {
-      headers: getHeaders(),
-      params: { trackingCode: trackingCode },
-      timeout: 15000,
-    });
-  }, { label: 'TE getTracking', maxRetries: 1 }).then(function(resp) {
-    return resp.data;
-  });
-}
-
-/**
- * GET /v1/occurrences - Listar tipos de ocorrencia
- */
-function getOccurrences() {
-  return retry(function() {
-    return axios.get(getBaseUrl() + '/occurrences', {
-      headers: getHeaders(),
-      timeout: 15000,
-    });
-  }, { label: 'TE getOccurrences', maxRetries: 1 }).then(function(resp) {
-    return resp.data;
-  });
-}
+// Exporta singleton + constantes
+const client = new TudoEntregueClient();
 
 module.exports = {
-  createOrders: createOrders,
-  editOrders: editOrders,
-  cancelOrders: cancelOrders,
-  deleteOrders: deleteOrders,
-  getSituation: getSituation,
-  getFinished: getFinished,
-  getTracking: getTracking,
-  getOccurrences: getOccurrences,
-  SITUATION: SITUATION,
-  SITUATION_LABELS: SITUATION_LABELS,
-  ORDER_TYPE: ORDER_TYPE,
+  client,
+  SITUATION,
+  SITUATION_LABELS,
+  SITUATION_TO_ODOO_STATE,
+  ORDER_TYPES,
+  API_LIMITS,
 };

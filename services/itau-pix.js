@@ -32,12 +32,17 @@ async function criarCobrancaPix(pixData) {
       cnpj: pixData.devedor.cnpj || null,
       nome: pixData.devedor.nome,
     } : undefined,
-    infoAdicionais: pixData.infoAdicionais || [],
     solicitacaoPagador: pixData.solicitacaoPagador || false,
   };
 
-  // Remove campos undefined
+  // infoAdicionais: so enviar se tiver itens (BACEN rejeita array vazio)
+  if (pixData.infoAdicionais && pixData.infoAdicionais.length > 0) {
+    payload.infoAdicionais = pixData.infoAdicionais;
+  }
+
+  // Remove campos undefined/null (BACEN rejeita)
   if (payload.valor.modalidadeAlteracao === null) delete payload.valor.modalidadeAlteracao;
+  if (payload.devedor === undefined) delete payload.devedor;
 
   try {
     var resultado = await callPix('PUT', 'v2/cob/' + txid, payload);
@@ -47,13 +52,13 @@ async function criarCobrancaPix(pixData) {
     var status = error.response?.status;
     var errData = error.response?.data;
     logger.error('Falha ao criar cobranca PIX: ' + status + ' - ' + JSON.stringify(errData));
-    logger.error('URL usada: ' + config.itauPixUrl + 'v2/cob/' + txid);
+    logger.error('URL usada: ' + config.itau.pixBaseUrl + 'v2/cob/' + txid);
     logger.error('Detalhes completos: ' + JSON.stringify(error, null, 2));
     throw {
       status: status || error.status || 502,
       message: errData?.mensagem || error.message || 'Erro ao criar cobranca PIX',
       detail: errData,
-      debug_url: config.itauPixUrl + 'v2/cob/' + txid,
+      debug_url: config.itau.pixBaseUrl + 'v2/cob/' + txid,
     };
   }
 }

@@ -1,0 +1,1149 @@
+{
+	"info": {
+		"_postman_id": "12197b90-cd71-43b7-a1e6-fdd743b80d35",
+		"name": "Pagamentos PIX",
+		"schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json",
+		"_exporter_id": "15739169"
+	},
+	"item": [
+		{
+			"name": "Envio de CSR e atualização de CRT",
+			"item": [
+				{
+					"name": "Envio de arquivo CSR",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {}
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "text/plain",
+								"type": "text"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI5ZjgwNTliMS0xZWJmLTQzNzUtODIxNC1iNDFhYjVmN2Y1MDEiLCJhdXQiOiIiLCJ2ZXIiOiJ2MS4wIiwiaXNzIjoiaHR0cHM6XC9cL29wZW5pZC5pdGF1LmNvbS5iclwvYXBpXC9vYXV0aFwvdG9rZW4iLCJBY2Nlc3NfVG9rZW4iOiJzTG93NG9PN2l5bUs3amI2bk1FTU5XR3JLcjVuWkZaUnMyck5mTkNjaWtwRTFEbGdycWFqMzgiLCJzb3VyY2UiOiJFWFQiLCJlbnYiOiJQIiwic2l0ZSI6ImN0bW0xIiwidXNyIjoibnVsbCIsIm1iaSI6InRydWUiLCJzY29wZSI6InJlc291cmNlLlJFQUQiLCJleHAiOjE1NzY2OTk2ODQsImlhdCI6MTU3NjYxMzI4NCwiZmxvdyI6IkNDIn0.qRRjzfeImc6Us0KrFCsn2aKIqgZH0eJhkAj6C8eKBX8",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "-----BEGIN CERTIFICATE REQUEST-----\nMIICrTCCAZUCAQAwaDEtMCsGA1UEAwwkOWY4MDU5YjEtMWViZi00Mzc1LTgyMTQt\nYjQxYWI1ZjdmNTAxMQ0wCwYDVQQLDARET1VHMQ4wDAYDVQQHDAVTQU1QQTELMAkG\nA1UECAwCU1AxCzAJBgNVBAYTAkJSMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIB\nCgKCAQEAuwFf/MQM2q7oPTiW4anhsnpPfc+2VnHF9/eQxyn492w35l4s0RpKGu3l\nD1smR8aXQAtRPptTg02/gQbHPRHXJXVYcCAgOTO4RN0zmTG14javzOoUtU4lzMM8\n7FbLmrXjgv37n+GCO8JaQwFW2ZzVDdBxKwOxa21FiJUxgWap2MM4Mw2qQnvo/OiB\nSCb9DfacKwATp4uNeKTpykvuko6BXDsUdK56hDroZhkEiZll2t6gYxi3mnPsXskl\nb5uZHgf5H4XwIH5mO1+W8vSwPa+f7MElb4vQLdEUX+fPF+dQsmO3XxnSr+85+fSw\nY961GLOxilV1MxUycxL00GO2o1WLDQIDAQABoAAwDQYJKoZIhvcNAQENBQADggEB\nAGLR/vHHBmgpuF4kxOSxhu2mOZn4N1rLIBdXTvt4EOQ+9MJB0pTJPBpkbqXUR0ih\nC6yYknut1UnMzbmjAO4A4L4pCGd7fP40zQ74MCO7b8SPFMOefvNzWcFqc4HZRnkD\nxWZmLzy3QYT9KEysuIJxRLcffsJckfp1yltiQji17PbYFNuNdWqEwUmoYC6rX66Z\nkZ1V8GPd5ArqCy3Vv0MoItgERWOlRbBC30K9lGTLWb4/ki87h94Xyf77w1SMM2bW\nEotEtqVWHNZoWhikCuI3Vh6wiYZXzEzN8imIZCHBg5Z61+TyIfvFwxSC+9OwpIKI\nvFteQFnhXAZpwvbzLHPRjw8=\n-----END CERTIFICATE REQUEST-----"
+						},
+						"url": "https://sts.itau.com.br/seguranca/v1/certificado/solicitacao"
+					},
+					"response": []
+				},
+				{
+					"name": "Atualização CRT",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {
+								"token": "eyJraWQiOiIxNDZlNTY1Yy02ZjQ4LTRhN2EtOTU3NS1kYjg2MjE5YTc5N2MucHJkLmdlbi4xNTk3NjAwMTI1ODQ4Lmp3dCIsImFsZyI6IlJTMjU2In0.eyJzdWIiOiI5MTYyMWM3OC1jNjFkLTQ1ZGEtOGM2ZC04OWM4NWNhNmE0NGIiLCJpc3MiOiJodHRwczovL29wZW5pZC5pdGF1LmNvbS5ici9hcGkvb2F1dGgvdG9rZW4iLCJpYXQiOjE3Mzg3MTIwNzgsImV4cCI6MTczODcxMjM3OCwiQWNjZXNzX1Rva2VuIjoiMmFhM2ZlOTUuMmRiNWRjNmUtOGI1Yy00NWE4LTlmYjEtOTQyNjMzNDQ4YmM1IiwidXNyIjoibnVsbCIsImZsb3ciOiJDQyIsInNvdXJjZSI6IkVYVCIsInNpdGUiOiJjdHNwIiwiZW52IjoiUCIsIm1iaSI6InRydWUiLCJhdXQiOiJNQVIiLCJ2ZXIiOiJ2MS4wIiwic2NvcGUiOiJwYXltZW50cy9waXgucmVhZCBwYXltZW50c3Byb3ZpZGVyL3JlY2VpcHRzL3FyY29kZSB3ZWJob29rLndyaXRlIGNhc2hfbWFuYWdlbWVudC9pbnN0cnVjYW9jb2JyYW5jYS53cml0ZSBjYXNoLW1hbmFnZW1lbnQvcmVjZWlwdHMvcXJjb2RlLnBvc3QgYXBwaWQtZWU5NGIwMGItMjE5Mi00ZmJiLTliNGMtMTkyZTBlYzc2ZjhiIGNhc2gtbWFuYWdlbWVudC9yZWNlaXB0cy9xcmNvZGUucmVhZCBjYXNoLW1hbmFnZW1lbnQvcmVjZWlwdHMvcmVmdW5kLnJlYWQgY2FzaC1tYW5hZ2VtZW50L3JlY2VpcHRzL3FyY29kZSBjb2J2LnJlYWQgcGF5bWVudHMvcGl4LnBvc3QgYm9sZXRvc2Nhc2gtbm90aWZpY2Fjb2VzYm9sZXRvcy13ZWJob29rLnJlYWQgcGF5bG9hZGxvY2F0aW9uLnJlYWQgY29idi53cml0ZSBjb2Iud3JpdGUgY2FzaC1tYW5hZ2VtZW50L3Npc3BhZy9wYXltZW50IGNhc2gtbWFuYWdlbWVudC9yZWNlaXB0cy9waXgucmVhZCBwYXltZW50c3Byb3ZpZGVyL3BpeC5yZWFkIGxvdGVjb2J2LndyaXRlIGNhc2hfbWFuYWdlbWVudC9lbWlzc2FvY29icmFuY2Eud3JpdGUgcGF5bWVudHMvcGl4IHBheW1lbnRzcHJvdmlkZXIvcGl4IHBpeC53cml0ZSBwYXlsb2FkbG9jYXRpb24ud3JpdGUgbG90ZWNvYnYucmVhZCBjb2IucmVhZCB3ZWJob29rLnJlYWQgY2FzaC1tYW5hZ2VtZW50L3Npc3BhZy9wYXltZW50LnJlYWQgcGl4LnJlYWQgZXNjb3BvX2RlZmF1bHQgYm9sZXRvc2Nhc2gtYm9sZXRvcy1jb25zdWx0YV90aXR1bG8gYm9sZXRvc2Nhc2gtbm90aWZpY2Fjb2VzYm9sZXRvcy13ZWJob29rLndyaXRlIGNhc2gtbWFuYWdlbWVudC9yZWNlaXB0cy9yZWZ1bmQgY2FzaC1tYW5hZ2VtZW50L3BpeC5yZWZ1bmQgcGF5bWVudHMvd2ViaG9vay5yZWFkIiwidXNlcl9pZCI6IjkxNjIxYzc4LWM2MWQtNDVkYS04YzZkLTg5Yzg1Y2E2YTQ0YiIsInNzbF9jbGllbnRfY2VydCI6Ik5VWTZRa1E2UTBVNk9VRTZRakU2UmtNNlJEazZPRVU2TURnNk1VUTZOalk2T1RZNk56RTZRemc2UXpBNlJEWTZNREk2TXpZNk9VUTZSVEk9In0.hwirc8jioHBgeOVeogVVZBE4P2RfXtQ9-WLgHdfIIT8QBcaVyqS8OUzQue1q8iy9E3iPTgjASfg57CBPOdYwoVcHpRQrvT14-aX1Mw0KWsmQau3J9cW3t0zAiv-tJnHqVp_BBOY8Ps7Sy9lVvLZEP_kUrBThXqwodkkMkosjoC19-o90aJiA9SiY0mYy7q9P7mAWX1LoxrKFPzCCQQsflenD5OymRV4Rpy8SyuojlIZ0VumYcSFslof1s4ElmIRC3yPF357EEs6mdV9Y8YJDnujrl-NNoS9zQQszMhbT-jVBl7V02Op_CCQz7OcR0eygBeq95oTUhTS1qsdigHLRew"
+							}
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "text/plain",
+								"type": "text"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI5ZjgwNTliMS0xZWJmLTQzNzUtODIxNC1iNDFhYjVmN2Y1MDEiLCJhdXQiOiIiLCJ2ZXIiOiJ2MS4wIiwiaXNzIjoiaHR0cHM6XC9cL29wZW5pZC5pdGF1LmNvbS5iclwvYXBpXC9vYXV0aFwvdG9rZW4iLCJBY2Nlc3NfVG9rZW4iOiJzTG93NG9PN2l5bUs3amI2bk1FTU5XR3JLcjVuWkZaUnMyck5mTkNjaWtwRTFEbGdycWFqMzgiLCJzb3VyY2UiOiJFWFQiLCJlbnYiOiJQIiwic2l0ZSI6ImN0bW0xIiwidXNyIjoibnVsbCIsIm1iaSI6InRydWUiLCJzY29wZSI6InJlc291cmNlLlJFQUQiLCJleHAiOjE1NzY2OTk2ODQsImlhdCI6MTU3NjYxMzI4NCwiZmxvdyI6IkNDIn0.qRRjzfeImc6Us0KrFCsn2aKIqgZH0eJhkAj6C8eKBX8",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "-----BEGIN CERTIFICATE REQUEST-----\nMIICuTCCAaECAQAwdDEtMCsGA1UEAwwkOTE2MjFjNzgtYzYxZC00NWRhLThjNmQt\nODljODVjYTZhNDRiMRQwEgYDVQQLDAtFRElTT05KTE1PUjETMBEGA1UEBwwKU8OD\nTyBQQVVMTzELMAkGA1UECAwCU1AxCzAJBgNVBAYTAkJSMIIBIjANBgkqhkiG9w0B\nAQEFAAOCAQ8AMIIBCgKCAQEAooOQCFMCxdRE/9uJAET0Tu/zMYPfoGXhjp1189iD\nbPvDFW4Qg1f+w1i6zP8okaCKehX09CytlqYOEnfCZCL28QUj+0X/SOUTYjJyv5cE\ndiC4NT4UDLnouM9evIMzLvLZaO7yURHvAiSzGQJslqX1a/Df+Zg11s9Od4ek7iuq\nCoyOYCWkxv7WZ3feYIS4yUMfTpvofj6Z5GQE9ZYmkLI/pJoyflThzn3TmmqV3g8S\ntoyjiDBalBWsX6I8c1vL8EC/MhHSD5ZdTz9OEX0nkOsLZS5z5rNyXHcXk64E+gRO\nAcd3x9Eale1XboOVDteCYRx764d2VOEayCMZtn2YoF63sQIDAQABoAAwDQYJKoZI\nhvcNAQENBQADggEBAAUXYYr+gILdSG8xDF3sN4nFX87y1W4A1LKYv9yMI52XJBpB\nIoSt0A5vvUcFC9i70Skrj0M/aO8Q2OVP8Zg1FQh5w4m38fZK2qJzEYCgzaLfHFcw\na1+DeKwRfsDe8r+a7/PdctLjw9B2LHJZFThgqHP5xz5XK85NpNQQM4yAttscmqL/\nEkj8nGOnit6HfxofCV09kV8saGOwYsOtmTXI1DhzrumIxRd6YE8l+WQAaVhx0gL/\nzb369j0y7oIUqyF+4oN3NWzq9rbkTe+LYC1IskQ+dis6vhD61ffhajzAoP6X7ct9\n0yOqHT+0JyiShnFLi6LTK4mLH+TBS4E1Hw35cc4=\n-----END CERTIFICATE REQUEST-----"
+						},
+						"url": "https://sts.itau.com.br/seguranca/v1/certificado/renovacao"
+					},
+					"response": []
+				}
+			],
+			"description": "Link do Developers para renovação do CRT\n\n[https://devportal.itau.com.br/certificado-dinamico#renovar%20um%20certificado%20ainda%20válido%20dentro%20do%20prazo%20de%20validade](https://devportal.itau.com.br/certificado-dinamico#renovar%20um%20certificado%20ainda%20v%C3%A1lido%20dentro%20do%20prazo%20de%20validade)",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Obtenção Access Token",
+			"item": [
+				{
+					"name": "Obtenção do access_token",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code == 200) {\r",
+									"    var jsonData = JSON.parse(responseBody);\r",
+									"    pm.environment.set('token', jsonData.access_token);\r",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/x-www-form-urlencoded",
+								"type": "text"
+							},
+							{
+								"key": "x-itau-flowID",
+								"value": "1",
+								"type": "text"
+							},
+							{
+								"key": "x-itau-correlationID",
+								"value": "2",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "grant_type",
+									"value": "client_credentials",
+									"type": "text"
+								},
+								{
+									"key": "client_id",
+									"value": "{{client_id}}",
+									"type": "text"
+								},
+								{
+									"key": "client_secret",
+									"value": "{{secret}}",
+									"type": "text"
+								}
+							]
+						},
+						"url": "https://sts.itau.com.br/api/oauth/token"
+					},
+					"response": []
+				}
+			],
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Pagamento PIX Copy",
+			"item": [
+				{
+					"name": "post/transferencias chave pix",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = JSON.parse(responseBody);\r",
+									"postman.setEnvironmentVariable(\"access_token\", jsonData.access_token);"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {}
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "x-itau-apikey",
+								"value": "Credencial",
+								"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+							},
+							{
+								"key": "x-itau-flowID",
+								"value": "1",
+								"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+							},
+							{
+								"key": "x-itau-correlationID",
+								"value": "2",
+								"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"valor_pagamento\": \"1.00\",\n  \"data_pagamento\": \"2022-03-21T15:03:56.000Z\",\n  \"chave\": \"4004901d-bd85-4769-8e52-cb4c42c506dc\",\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"CC\",\n    \"agencia\": 1500,\n    \"conta\": \"00592660\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": 63237648000104,\n    \"modulo_sispag\": \"Fornecedores\"\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": "https://api.itau.com.br/sispag/v1/transferencias",
+						"description": "API responsável por inserir transferências de Pix e pagamentos de Pix QR Code na plataforma SISPAG do Banco Itaú."
+					},
+					"response": [
+						{
+							"name": "Pagamento incluído com sucesso",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "<token>",
+										"description": "Added as a part of security scheme: oauth2"
+									},
+									{
+										"key": "x-itau-apikey",
+										"value": "labore enim commodo est adipisicing",
+										"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+									},
+									{
+										"key": "x-itau-flowID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+									},
+									{
+										"key": "x-itau-correlationID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"valor_pagamento\": \"1.00\",\n  \"data_pagamento\": \"2022-03-21T15:03:56.000Z\",\n  \"chave\": \"4004901d-bd85-4769-8e52-cb4c42c506dc\",\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"CC\",\n    \"agencia\": 1500,\n    \"conta\": \"00592660\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": 63237648000104,\n    \"modulo_sispag\": \"Fornecedores\"\n  }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": "{{baseUrl}}/transferencias"
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"status_pagamento\": \"Sucesso\",\n  \"cod_pagamento\": \"3ff2df99-704a-496e-a699-8b75dc522d10\",\n  \"numero_lote\": 500001394,\n  \"numero_lancamento\": 22683,\n  \"tipo_pagamento\": \"PIX\",\n  \"data_pagamento\": \"2022-03-21T15:03:56.000Z\",\n  \"valor_pagamento\": 1,\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"Conta Corrente\",\n    \"agencia\": 1500,\n    \"conta\": \"00052012\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": \"00000000000191\",\n    \"modulo_sispag\": \"Fornecedores\"\n  },\n  \"recebedor\": {\n    \"ispb\": 99999008,\n    \"documento\": 11111111000191,\n    \"nome\": \"TESTE DE INTEROPERABILIDADE\",\n    \"tipo_conta\": \"Conta Corrente\",\n    \"tipo_pessoa\": \"J\",\n    \"identificacao_chave\": \"4004901d-bd85-4769-8e52-cb4c42c506dc\"\n  },\n  \"motivo_recusa\": []\n}"
+						},
+						{
+							"name": "Solicitação de inclusão do Pagamento com erro",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "<token>",
+										"description": "Added as a part of security scheme: oauth2"
+									},
+									{
+										"key": "x-itau-apikey",
+										"value": "labore enim commodo est adipisicing",
+										"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+									},
+									{
+										"key": "x-itau-flowID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+									},
+									{
+										"key": "x-itau-correlationID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"valor_pagamento\": \"1.00\",\n  \"data_pagamento\": \"2022-03-21T15:03:56.000Z\",\n  \"chave\": \"4004901d-bd85-4769-8e52-cb4c42c506dc\",\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"CC\",\n    \"agencia\": 1500,\n    \"conta\": \"00592660\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": 63237648000104,\n    \"modulo_sispag\": \"Fornecedores\"\n  }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": "{{baseUrl}}/transferencias"
+							},
+							"status": "Bad Request",
+							"code": 400,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"codigo\": 400,\n  \"mensagem\": \"CNPJ inválido\"\n}"
+						},
+						{
+							"name": "Inclusão do Pagamento rejeitado",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "<token>",
+										"description": "Added as a part of security scheme: oauth2"
+									},
+									{
+										"key": "x-itau-apikey",
+										"value": "labore enim commodo est adipisicing",
+										"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+									},
+									{
+										"key": "x-itau-flowID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+									},
+									{
+										"key": "x-itau-correlationID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"valor_pagamento\": \"1.00\",\n  \"data_pagamento\": \"2022-03-21T15:03:56.000Z\",\n  \"chave\": \"4004901d-bd85-4769-8e52-cb4c42c506dc\",\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"CC\",\n    \"agencia\": 1500,\n    \"conta\": \"00592660\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": 63237648000104,\n    \"modulo_sispag\": \"Fornecedores\"\n  }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": "{{baseUrl}}/transferencias"
+							},
+							"status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+							"code": 422,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"status_pagamento\": \"Rejeitado\",\n  \"tipo_pagamento\": \"QRCODE\",\n  \"data_pagamento\": \"2022-03-22T13:01:02.000Z\",\n  \"valor_pagamento\": 1,\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"Conta Corrente\",\n    \"agencia\": 1500,\n    \"conta\": \"00594138\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": 63237648000104,\n    \"modulo_sispag\": \"CONTAS\"\n  },\n  \"recebedor\": {\n    \"banco\": \"ITAÚ UNIBANCO S.A.\",\n    \"ispb\": 60701190,\n    \"documento\": 60701190000104,\n    \"nome\": \"CASTELO E ASSOCIADOS\",\n    \"tipo_conta\": \"Conta Corrente\",\n    \"tipo_pessoa\": \"J\",\n    \"identificacao_chave\": 60701190000104\n  },\n  \"motivo_recusa\": [\n    {\n      \"codigo\": 908,\n      \"nome\": \"Valor do pagamento divergente do valor do qrcode.\"\n    }\n  ]\n}"
+						}
+					]
+				},
+				{
+					"name": "post/transferencias dados bancário",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = JSON.parse(responseBody);\r",
+									"postman.setEnvironmentVariable(\"access_token\", jsonData.access_token);"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {}
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "x-itau-apikey",
+								"value": "Credencial",
+								"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+							},
+							{
+								"key": "x-itau-flowID",
+								"value": "1",
+								"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+							},
+							{
+								"key": "x-itau-correlationID",
+								"value": "2",
+								"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"valor_pagamento\": \"123.40\",\n  \"data_pagamento\": \"2024-03-13\",\n  \"ispb\": \"60701190\",\n  \"tipo_identificacao_conta\": \"CC\",\n  \"agencia_recebedor\": \"1500\",\n  \"conta_recebedor\": \"00052012\",\n  \"tipo_de_identificacao_do_recebedor\": \"F\",\n  \"identificacao_recebedor\": \"61389299260\",\n  \"informacoes_entre_usuarios\": \"transferencia para o João - referente a manutencao\",\n  \"referencia_empresa\": \"154785966666666\",\n  \"identificacao_comprovante\": \"transferencia para o João - referente a manutencao\",\n  \"txid\": \"bqJJjaVAThmtnUeVLNnSXQ\",\n  \"pagador\": {\n    \"tipo_conta\": \"CC\",\n    \"agencia\": \"1500\",\n    \"conta\": \"00800550\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": \"06830622000123\",\n    \"modulo_sispag\": \"Fornecedores\"\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": "https://api.itau.com.br/sispag/v1/transferencias",
+						"description": "API responsável por inserir transferências de Pix e pagamentos de Pix QR Code na plataforma SISPAG do Banco Itaú."
+					},
+					"response": [
+						{
+							"name": "Pagamento incluído com sucesso",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "<token>",
+										"description": "Added as a part of security scheme: oauth2"
+									},
+									{
+										"key": "x-itau-apikey",
+										"value": "labore enim commodo est adipisicing",
+										"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+									},
+									{
+										"key": "x-itau-flowID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+									},
+									{
+										"key": "x-itau-correlationID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"valor_pagamento\": \"1.00\",\n  \"data_pagamento\": \"2022-03-21T15:03:56.000Z\",\n  \"chave\": \"4004901d-bd85-4769-8e52-cb4c42c506dc\",\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"CC\",\n    \"agencia\": 1500,\n    \"conta\": \"00592660\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": 63237648000104,\n    \"modulo_sispag\": \"Fornecedores\"\n  }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": "{{baseUrl}}/transferencias"
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"status_pagamento\": \"Sucesso\",\n  \"cod_pagamento\": \"3ff2df99-704a-496e-a699-8b75dc522d10\",\n  \"numero_lote\": 500001394,\n  \"numero_lancamento\": 22683,\n  \"tipo_pagamento\": \"PIX\",\n  \"data_pagamento\": \"2022-03-21T15:03:56.000Z\",\n  \"valor_pagamento\": 1,\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"Conta Corrente\",\n    \"agencia\": 1500,\n    \"conta\": \"00052012\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": \"00000000000191\",\n    \"modulo_sispag\": \"Fornecedores\"\n  },\n  \"recebedor\": {\n    \"ispb\": 99999008,\n    \"documento\": 11111111000191,\n    \"nome\": \"TESTE DE INTEROPERABILIDADE\",\n    \"tipo_conta\": \"Conta Corrente\",\n    \"tipo_pessoa\": \"J\",\n    \"identificacao_chave\": \"4004901d-bd85-4769-8e52-cb4c42c506dc\"\n  },\n  \"motivo_recusa\": []\n}"
+						},
+						{
+							"name": "Solicitação de inclusão do Pagamento com erro",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "<token>",
+										"description": "Added as a part of security scheme: oauth2"
+									},
+									{
+										"key": "x-itau-apikey",
+										"value": "labore enim commodo est adipisicing",
+										"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+									},
+									{
+										"key": "x-itau-flowID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+									},
+									{
+										"key": "x-itau-correlationID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"valor_pagamento\": \"1.00\",\n  \"data_pagamento\": \"2022-03-21T15:03:56.000Z\",\n  \"chave\": \"4004901d-bd85-4769-8e52-cb4c42c506dc\",\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"CC\",\n    \"agencia\": 1500,\n    \"conta\": \"00592660\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": 63237648000104,\n    \"modulo_sispag\": \"Fornecedores\"\n  }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": "{{baseUrl}}/transferencias"
+							},
+							"status": "Bad Request",
+							"code": 400,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"codigo\": 400,\n  \"mensagem\": \"CNPJ inválido\"\n}"
+						},
+						{
+							"name": "Inclusão do Pagamento rejeitado",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "<token>",
+										"description": "Added as a part of security scheme: oauth2"
+									},
+									{
+										"key": "x-itau-apikey",
+										"value": "labore enim commodo est adipisicing",
+										"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+									},
+									{
+										"key": "x-itau-flowID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+									},
+									{
+										"key": "x-itau-correlationID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"valor_pagamento\": \"1.00\",\n  \"data_pagamento\": \"2022-03-21T15:03:56.000Z\",\n  \"chave\": \"4004901d-bd85-4769-8e52-cb4c42c506dc\",\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"CC\",\n    \"agencia\": 1500,\n    \"conta\": \"00592660\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": 63237648000104,\n    \"modulo_sispag\": \"Fornecedores\"\n  }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": "{{baseUrl}}/transferencias"
+							},
+							"status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+							"code": 422,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"status_pagamento\": \"Rejeitado\",\n  \"tipo_pagamento\": \"QRCODE\",\n  \"data_pagamento\": \"2022-03-22T13:01:02.000Z\",\n  \"valor_pagamento\": 1,\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"Conta Corrente\",\n    \"agencia\": 1500,\n    \"conta\": \"00594138\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": 63237648000104,\n    \"modulo_sispag\": \"CONTAS\"\n  },\n  \"recebedor\": {\n    \"banco\": \"ITAÚ UNIBANCO S.A.\",\n    \"ispb\": 60701190,\n    \"documento\": 60701190000104,\n    \"nome\": \"CASTELO E ASSOCIADOS\",\n    \"tipo_conta\": \"Conta Corrente\",\n    \"tipo_pessoa\": \"J\",\n    \"identificacao_chave\": 60701190000104\n  },\n  \"motivo_recusa\": [\n    {\n      \"codigo\": 908,\n      \"nome\": \"Valor do pagamento divergente do valor do qrcode.\"\n    }\n  ]\n}"
+						}
+					]
+				},
+				{
+					"name": "Post/QrCode copia e cola",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": {}
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "x-itau-apikey",
+								"value": "credencial",
+								"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+							},
+							{
+								"key": "x-itau-flowID",
+								"value": "1",
+								"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+							},
+							{
+								"key": "x-itau-correlationID",
+								"value": "2",
+								"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"emv\": \"00020101021126950014BR.GOV.BCB.PIX2573spi.dev.cloud.itau.com.br/documentos/eb189f7a-1536-4f16-8951-1056a773685052040000530398654079999.005802BR5925ITAU PORTABILIDADE REIVIN6009SAO PAULO626005221Y4XMrEBhry4ao3no56nrC50300017BR.GOV.BCB.BRCODE01051.0.063046A8D\",\n  \"valor_pagamento\": \"100.00\",\n  \"data_pagamento\": \"2020-09-18\",\n  \"pagador\": {\n    \"tipo_conta\": \"CC\",\n    \"agencia\": \"1500\",\n    \"conta\": \"00052012\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": \"00000000000191\",\n    \"modulo_sispag\": \"Fornecedores\"\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": "https://api.itau.com.br/sispag/v1/transferencias",
+						"description": "API responsável por inserir transferências de Pix e pagamentos de Pix QR Code na plataforma SISPAG do Banco Itaú."
+					},
+					"response": [
+						{
+							"name": "Pagamento incluído com sucesso",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "<token>",
+										"description": "Added as a part of security scheme: oauth2"
+									},
+									{
+										"key": "x-itau-apikey",
+										"value": "labore enim commodo est adipisicing",
+										"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+									},
+									{
+										"key": "x-itau-flowID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+									},
+									{
+										"key": "x-itau-correlationID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"valor_pagamento\": \"1.00\",\n  \"data_pagamento\": \"2022-03-21T15:03:56.000Z\",\n  \"chave\": \"4004901d-bd85-4769-8e52-cb4c42c506dc\",\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"CC\",\n    \"agencia\": 1500,\n    \"conta\": \"00592660\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": 63237648000104,\n    \"modulo_sispag\": \"Fornecedores\"\n  }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": "{{baseUrl}}/transferencias"
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"status_pagamento\": \"Sucesso\",\n  \"cod_pagamento\": \"3ff2df99-704a-496e-a699-8b75dc522d10\",\n  \"numero_lote\": 500001394,\n  \"numero_lancamento\": 22683,\n  \"tipo_pagamento\": \"PIX\",\n  \"data_pagamento\": \"2022-03-21T15:03:56.000Z\",\n  \"valor_pagamento\": 1,\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"Conta Corrente\",\n    \"agencia\": 1500,\n    \"conta\": \"00052012\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": \"00000000000191\",\n    \"modulo_sispag\": \"Fornecedores\"\n  },\n  \"recebedor\": {\n    \"ispb\": 99999008,\n    \"documento\": 11111111000191,\n    \"nome\": \"TESTE DE INTEROPERABILIDADE\",\n    \"tipo_conta\": \"Conta Corrente\",\n    \"tipo_pessoa\": \"J\",\n    \"identificacao_chave\": \"4004901d-bd85-4769-8e52-cb4c42c506dc\"\n  },\n  \"motivo_recusa\": []\n}"
+						},
+						{
+							"name": "Solicitação de inclusão do Pagamento com erro",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "<token>",
+										"description": "Added as a part of security scheme: oauth2"
+									},
+									{
+										"key": "x-itau-apikey",
+										"value": "labore enim commodo est adipisicing",
+										"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+									},
+									{
+										"key": "x-itau-flowID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+									},
+									{
+										"key": "x-itau-correlationID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"valor_pagamento\": \"1.00\",\n  \"data_pagamento\": \"2022-03-21T15:03:56.000Z\",\n  \"chave\": \"4004901d-bd85-4769-8e52-cb4c42c506dc\",\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"CC\",\n    \"agencia\": 1500,\n    \"conta\": \"00592660\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": 63237648000104,\n    \"modulo_sispag\": \"Fornecedores\"\n  }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": "{{baseUrl}}/transferencias"
+							},
+							"status": "Bad Request",
+							"code": 400,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"codigo\": 400,\n  \"mensagem\": \"CNPJ inválido\"\n}"
+						},
+						{
+							"name": "Inclusão do Pagamento rejeitado",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "<token>",
+										"description": "Added as a part of security scheme: oauth2"
+									},
+									{
+										"key": "x-itau-apikey",
+										"value": "labore enim commodo est adipisicing",
+										"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+									},
+									{
+										"key": "x-itau-flowID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+									},
+									{
+										"key": "x-itau-correlationID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"valor_pagamento\": \"1.00\",\n  \"data_pagamento\": \"2022-03-21T15:03:56.000Z\",\n  \"chave\": \"4004901d-bd85-4769-8e52-cb4c42c506dc\",\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"CC\",\n    \"agencia\": 1500,\n    \"conta\": \"00592660\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": 63237648000104,\n    \"modulo_sispag\": \"Fornecedores\"\n  }\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": "{{baseUrl}}/transferencias"
+							},
+							"status": "Unprocessable Entity (WebDAV) (RFC 4918)",
+							"code": 422,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"status_pagamento\": \"Rejeitado\",\n  \"tipo_pagamento\": \"QRCODE\",\n  \"data_pagamento\": \"2022-03-22T13:01:02.000Z\",\n  \"valor_pagamento\": 1,\n  \"referencia_empresa\": \"Prestação 0123456789\",\n  \"identificacao_comprovante\": \"Prestação de serviço - empresa A\",\n  \"informacoes_entre_usuarios\": \"Pagamento para prestação de serviço para empresa A\",\n  \"pagador\": {\n    \"tipo_conta\": \"Conta Corrente\",\n    \"agencia\": 1500,\n    \"conta\": \"00594138\",\n    \"tipo_pessoa\": \"J\",\n    \"documento\": 63237648000104,\n    \"modulo_sispag\": \"CONTAS\"\n  },\n  \"recebedor\": {\n    \"banco\": \"ITAÚ UNIBANCO S.A.\",\n    \"ispb\": 60701190,\n    \"documento\": 60701190000104,\n    \"nome\": \"CASTELO E ASSOCIADOS\",\n    \"tipo_conta\": \"Conta Corrente\",\n    \"tipo_pessoa\": \"J\",\n    \"identificacao_chave\": 60701190000104\n  },\n  \"motivo_recusa\": [\n    {\n      \"codigo\": 908,\n      \"nome\": \"Valor do pagamento divergente do valor do qrcode.\"\n    }\n  ]\n}"
+						}
+					]
+				},
+				{
+					"name": "get/pagamentos sispag",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-itau-apikey",
+								"value": "labore enim commodo est adipisicing",
+								"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+							},
+							{
+								"key": "x-itau-flowID",
+								"value": "labore enim commodo est adipisicing",
+								"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+							},
+							{
+								"key": "x-itau-correlationID",
+								"value": "labore enim commodo est adipisicing",
+								"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "https://api.itau.com.br/sispag/v1/pagamentos_sispag?agencia_operacao=1500&conta_operacao=00005201&cnpj_empresa=53929133&numero_lote=7448046265&valor_minimo=55461956.03618726&valor_maximo=7631891.306239873&referencia_empresa=Prestação 0123456789&nome_beneficiario=José da Silva&data_inicial=2020-06-01&data_final=2020-07-01&tipo_lista=Detalhada&modalidade_fornecedores=false&modalidade_impostos=true&modalidade_salario=true&status=AE&tipo_pagamento=01&order_by=labore enim commodo est adipisicing&order=asc",
+							"protocol": "https",
+							"host": [
+								"api",
+								"itau",
+								"com",
+								"br"
+							],
+							"path": [
+								"sispag",
+								"v1",
+								"pagamentos_sispag"
+							],
+							"query": [
+								{
+									"key": "agencia_operacao",
+									"value": "1500",
+									"description": "(Required) Agência da operação"
+								},
+								{
+									"key": "conta_operacao",
+									"value": "00005201",
+									"description": "(Required) Conta bancária da operação"
+								},
+								{
+									"key": "cnpj_empresa",
+									"value": "53929133",
+									"description": "(Required) Documento do Pagador"
+								},
+								{
+									"key": "numero_lote",
+									"value": "7448046265",
+									"description": "Número de lote SISPAG"
+								},
+								{
+									"key": "valor_minimo",
+									"value": "55461956.03618726",
+									"description": "Valor mínimo do pagamento"
+								},
+								{
+									"key": "valor_maximo",
+									"value": "7631891.306239873",
+									"description": "Valor máximo do pagamento"
+								},
+								{
+									"key": "referencia_empresa",
+									"value": "Prestação 0123456789",
+									"description": "Referência da empresa"
+								},
+								{
+									"key": "nome_beneficiario",
+									"value": "José da Silva",
+									"description": "Nome do Beneficiário"
+								},
+								{
+									"key": "data_inicial",
+									"value": "2020-06-01",
+									"description": "Data de pagamento/transferência inicial para consulta"
+								},
+								{
+									"key": "data_final",
+									"value": "2020-07-01",
+									"description": "Data de pagamento/transferência final para consulta"
+								},
+								{
+									"key": "tipo_lista",
+									"value": "Detalhada",
+									"description": "(Required) Tipo da lista"
+								},
+								{
+									"key": "modalidade_fornecedores",
+									"value": "false",
+									"description": "Filtro do tipo de modalidade de pagamento para fornecedores"
+								},
+								{
+									"key": "modalidade_impostos",
+									"value": "true",
+									"description": "Filtro do tipo de modalidade de pagamento para impostos e tributos"
+								},
+								{
+									"key": "modalidade_salario",
+									"value": "true",
+									"description": "Filtro do tipo de modalidade de pagamento para salário"
+								},
+								{
+									"key": "status",
+									"value": "AE",
+									"description": "Filtro do código do tipo do status<br/>\n  * `AE` - A Efetuar\n  * `EF` - Efetuados\n  * `TD` - Todos\n  * `NE` - Não Efetuados"
+								},
+								{
+									"key": "tipo_pagamento",
+									"value": "01",
+									"description": "Filtro do tipo de transação bancária<br/>\n  * `01` - Conta Corrente\n  * `02` - Cheque pagamento\n  * `03` - DOC\n  * `04` - OP (duas vias)\n  * `05` - Conta Poupança\n  * `06` - Conta Corrente Mesma Titularidade\n  * `07` - DOC D mesma titularidade\n  * `10` - OP (uma via)\n  * `11` - OP (acerto)\n  * `13` - Concessionária\n  * `16` - DARF normal\n  * `17` - GPS\n  * `18` - DARF simples\n  * `19` - IPTU/ISS e outros tributos\n  * `22` - GARE ICMS-SP\n  * `23` - GARE ICMS-SP Importação\n  * `25` - Banco Múltiplo\n  * `27` - DPVAT\n  * `30` - Boleto Itaú\n  * `31` - Boleto outros bancos\n  * `32` - Nota fiscal eletrônica\n  * `35` - FGTS\n  * `38` - Boleto outros bancos online\n  * `41` - TED outro titular\n  * `43` - TED mesmo titular\n  * `51` - Licenciamento\n  * `53` - Multa\n  * `63` - Concessionária com moeda variável\n  * `91` - Tributos com código de barras\n  * `92` - DARF código de barras\n  * `93` - DAS código barras\n  * `94` - GNRE ICMS-SP Importação\n  * `95` - IPVA\n  * `45` - PIX Transferências\n  * `47` - PIX Qr Code\n  * `60` - Cartão Salário           "
+								},
+								{
+									"key": "order_by",
+									"value": "labore enim commodo est adipisicing",
+									"description": "Opção para ordenação."
+								},
+								{
+									"key": "order",
+									"value": "asc",
+									"description": "Opção de ordenação ascendente ou descendente."
+								}
+							]
+						},
+						"description": "Detalhe da consulta de pagamentos e transferências"
+					},
+					"response": [
+						{
+							"name": "OK",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "<token>",
+										"description": "Added as a part of security scheme: oauth2"
+									},
+									{
+										"key": "x-itau-apikey",
+										"value": "labore enim commodo est adipisicing",
+										"description": "(Required) Chave da API utilizado para autorizar o consumo de uma aplicação requisitante"
+									},
+									{
+										"key": "x-itau-flowID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador da funcionalidade de negócio sendo executada na aplicação"
+									},
+									{
+										"key": "x-itau-correlationID",
+										"value": "labore enim commodo est adipisicing",
+										"description": "Identificador de correlação que serve como um agrupar dentro da estrutura de audit trail"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/pagamentos_sispag?agencia_operacao=1500&conta_operacao=00005201&cnpj_empresa=53929133&numero_lote=7448046265&valor_minimo=55461956.03618726&valor_maximo=7631891.306239873&referencia_empresa=Prestação 0123456789&nome_beneficiario=José da Silva&data_inicial=2020-06-01&data_final=2020-07-01&tipo_lista=Detalhada&modalidade_fornecedores=true&modalidade_impostos=true&modalidade_salario=true&status=AE&tipo_pagamento=01&order_by=labore enim commodo est adipisicing&order=asc",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"pagamentos_sispag"
+									],
+									"query": [
+										{
+											"key": "agencia_operacao",
+											"value": "1500"
+										},
+										{
+											"key": "conta_operacao",
+											"value": "00005201"
+										},
+										{
+											"key": "cnpj_empresa",
+											"value": "53929133"
+										},
+										{
+											"key": "numero_lote",
+											"value": "7448046265"
+										},
+										{
+											"key": "valor_minimo",
+											"value": "55461956.03618726"
+										},
+										{
+											"key": "valor_maximo",
+											"value": "7631891.306239873"
+										},
+										{
+											"key": "referencia_empresa",
+											"value": "Prestação 0123456789"
+										},
+										{
+											"key": "nome_beneficiario",
+											"value": "José da Silva"
+										},
+										{
+											"key": "data_inicial",
+											"value": "2020-06-01"
+										},
+										{
+											"key": "data_final",
+											"value": "2020-07-01"
+										},
+										{
+											"key": "tipo_lista",
+											"value": "Detalhada"
+										},
+										{
+											"key": "modalidade_fornecedores",
+											"value": "true"
+										},
+										{
+											"key": "modalidade_impostos",
+											"value": "true"
+										},
+										{
+											"key": "modalidade_salario",
+											"value": "true"
+										},
+										{
+											"key": "status",
+											"value": "AE"
+										},
+										{
+											"key": "tipo_pagamento",
+											"value": "01"
+										},
+										{
+											"key": "order_by",
+											"value": "labore enim commodo est adipisicing"
+										},
+										{
+											"key": "order",
+											"value": "asc"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"value\": {\n    \"data\": {\n      \"itens\": [\n        {\n          \"nome_favorecido\": \"Teste nome favorecido 1\",\n          \"id_pagamento\": \"3a2a32d3-37c3-4bf9-b526-b8e3a17592b9\",\n          \"cpf_cnpj\": \"89057409011\",\n          \"cod_banco\": \"123\",\n          \"numero_agencia\": \"1500\",\n          \"numero_conta\": \"2011500\",\n          \"numero_lancamento\": \"123456789\",\n          \"referencia_empresa\": \" \",\n          \"data_pagamento\": \"2020-07-01\",\n          \"valor_pagamento\": \"100.00\",\n          \"status\": \"Efetuados\",\n          \"comprovante\": \"link\",\n          \"motivo\": \"\",\n          \"tipo_pagamento\": \"TED\"\n        },\n        {\n          \"nome_favorecido\": \"Teste nome favorecido 1\",\n          \"id_pagamento\": \"3a2a32d3-37c3-4bf9-b526-b8e3a17592b8\",\n          \"cpf_cnpj\": \"89057409011\",\n          \"cod_banco\": \"123\",\n          \"numero_agencia\": \"1500\",\n          \"numero_conta\": \"2011500\",\n          \"numero_lancamento\": \"123456789\",\n          \"referencia_empresa\": \" \",\n          \"data_pagamento\": \"2020-07-01\",\n          \"valor_pagamento\": \"100.00\",\n          \"status\": \"Efetuados\",\n          \"comprovante\": \"link\",\n          \"motivo\": \"\",\n          \"tipo_pagamento\": \"TED\"\n        }\n      ],\n      \"total\": \"200.00\"\n    },\n    \"pagination\": {\n      \"links\": {\n        \"first\": \"https://des-apigateway-int.mbi.cloud.ihf/cash_management/v1/lista_detalhada_pagamentos/\",\n        \"last\": \"https://des-apigateway-int.mbi.cloud.ihf/cash_management/v1/lista_detalhada_pagamentos/?page=2\",\n        \"previous\": \"\",\n        \"next\": \"https://des-apigateway-int.mbi.cloud.ihf/cash_management/v1/lista_detalhada_pagamentos/?page=1\"\n      },\n      \"page\": 0,\n      \"total_pages\": 3,\n      \"total_elements\": 6,\n      \"page_size\": 2\n    }\n  },\n  \"description\": \"\"\n}"
+						}
+					]
+				},
+				{
+					"name": "get/pagamentos sispag/{id pagamento sispag}",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = JSON.parse(responseBody);\r",
+									"postman.setEnvironmentVariable(\"access_token\", jsonData.access_token);"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "https://api.itau.com.br/sispag/v1/pagamentos_sispag/:id_pagamento_sispag",
+							"protocol": "https",
+							"host": [
+								"api",
+								"itau",
+								"com",
+								"br"
+							],
+							"path": [
+								"sispag",
+								"v1",
+								"pagamentos_sispag",
+								":id_pagamento_sispag"
+							],
+							"variable": [
+								{
+									"key": "id_pagamento_sispag",
+									"value": "3ff2df99-704a-496e-a699-8b75dc522d10",
+									"description": "(Required) Identificador único do Pagamento"
+								}
+							]
+						},
+						"description": "Operação responsável por recuperar o detalhamento do pagamento"
+					},
+					"response": [
+						{
+							"name": "OK",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Authorization",
+										"value": "<token>",
+										"description": "Added as a part of security scheme: oauth2"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/pagamentos_sispag/:id_pagamento_sispag",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"pagamentos_sispag",
+										":id_pagamento_sispag"
+									],
+									"variable": [
+										{
+											"key": "id_pagamento_sispag",
+											"value": "3ff2df99-704a-496e-a699-8b75dc522d10",
+											"description": "(Required) Identificador único do Pagamento"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Location",
+									"value": "labore enim commodo est adipisicing",
+									"description": "URI correspondente a pesquisa corrente"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"value\": {\n    \"data\": {\n      \"dados_debito\": {\n        \"numero_agencia_debito\": \"1500\",\n        \"numero_conta_debito\": \"052020\",\n        \"nome_empresa_debito\": \"NOME RDZD\",\n        \"cnpj_debito\": \"34727090000139\"\n      },\n      \"dados_pagamento\": {\n        \"id_pagamento\": \"3a2a32d3-37c3-4bf9-b526-b8e3a17592b9\",\n        \"cod_tipo_pessoa\": \"\",\n        \"cpf_cnpj_favorecido\": \"\",\n        \"cod_banco_favorecido\": \"341\",\n        \"nome_banco_favorecido\": \"BANCO ITAU S/A\",\n        \"numero_agencia_favorecido\": \"1500\",\n        \"numero_conta_favorecido\": \"2011500\",\n        \"nome_favorecido\": \"TESTE\",\n        \"valor_pagamento\": \"1000.00\",\n        \"numero_lote\": \"123\",\n        \"numero_lancamento\": \"456\",\n        \"referencia_empresa\": \"0197 256771\",\n        \"data_pagamento\": \"2020-06-15\",\n        \"status\": \"Efetuado\",\n        \"descricao_pagamento\": \"\",\n        \"identificacao_comprovante\": \"Teste Identificação\",\n        \"codigo_isbp\": \"00360305\",\n        \"descricao_finalidade\": \"\",\n        \"modalidade_pagto\": \"\",\n        \"tipo_pagamento\": \"\",\n        \"indicador_motivo\": \"\",\n        \"dados_ted\": {\n          \"complemento_finalidade_ted\": \"\",\n          \"numero_ted\": \"140950\"\n        },\n        \"dados_doc\": null,\n        \"dados_darf\": null,\n        \"dados_cheque\": null,\n        \"dados_op\": null,\n        \"dados_gps\": null,\n        \"dados_iptu_inss\": null,\n        \"dados_gare_icms_sp\": null,\n        \"dados_gare_icms_sp_importacao\": null,\n        \"dados_gnre_icms_sp_importacao\": null,\n        \"dados_ipva\": null,\n        \"dados_fgts\": null,\n        \"dados_dpvat\": null,\n        \"dados_licenciamento\": null,\n        \"dados_multa\": null,\n        \"dados_trib_cod_barras\": null,\n        \"motivo_rejeicao\": [\n          {\n            \"descricao_motivo\": \"Teste Motivo rejeicao 1\"\n          },\n          {\n            \"descricao_motivo\": \"Teste Motivo rejeicao 2\"\n          }\n        ]\n      },\n      \"historico_pagamento\": [\n        {\n          \"status\": \"Efetivação\",\n          \"data\": \"2020-01-01\",\n          \"nome_operador\": \"Oper Ex\",\n          \"cod_operador\": \"999999999\",\n          \"cpf_operador\": \"\"\n        },\n        {\n          \"status\": \"Autorização\",\n          \"data\": \"2020-01-01\",\n          \"nome_operador\": \"Oper Ex\",\n          \"cod_operador\": \"999999999\",\n          \"cpf_operador\": \"\"\n        },\n        {\n          \"status\": \"Inclusão Online\",\n          \"data\": \"2020-01-01\",\n          \"nome_operador\": \"Oper Ex\",\n          \"cod_operador\": \"999999999\",\n          \"cpf_operador\": \"\"\n        }\n      ]\n    }\n  },\n  \"description\": \"\"\n}"
+						}
+					]
+				}
+			]
+		}
+	]
+}

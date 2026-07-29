@@ -199,7 +199,7 @@ function buildDocuments(invoice, orderLines, productsMap) {
   // Se tem linhas do pedido, monta volumes com os itens
   if (orderLines && orderLines.length) {
     orderLines.forEach(function(line) {
-      var qty = line.product_uom_qty || 0;
+      var qty = line.product_uom_qty || line.quantity || 0;
       if (qty <= 0) return;
 
       var productId = line.product_id ? line.product_id[0] : null;
@@ -240,7 +240,7 @@ function buildDocuments(invoice, orderLines, productsMap) {
 /**
  * Mapeia picking Odoo + partner + saleOrder + invoice + company para OrderViewModel do TE
  *
- * @param {Object} ctx - { picking, partner, saleOrder, invoice, company, companyCnpj, orderLines, productsMap }
+ * @param {Object} ctx - { picking, partner, saleOrder, invoice, company, companyCnpj, orderLines, productsMap, motoristaName, teDriver }
  */
 function odooToTeDelivery(ctx) {
   var picking = ctx.picking;
@@ -251,8 +251,26 @@ function odooToTeDelivery(ctx) {
   var companyCnpj = ctx.companyCnpj;
   var orderLines = ctx.orderLines || [];
   var productsMap = ctx.productsMap;
+  var motoristaName = ctx.motoristaName || null;  // Nome do motorista do Odoo
+  var teDriver = ctx.teDriver || null;              // { PhoneCountry, PhoneNumber } do TE
 
-  if (!picking || !partner) return null;
+  if (!partner) return null;
+
+  // Se nao tem picking (fluxo via fatura sem sale.order), cria picking sintetico a partir da invoice
+  if (!picking) {
+    if (invoice) {
+      picking = {
+        id: invoice.id,
+        name: invoice.name || String(invoice.id),
+        origin: invoice.name || '',
+        scheduled_date: invoice.invoice_date || invoice.create_date || '',
+        note: '',
+      };
+      logger.info('[MAPPER] Picking sintetico a partir da fatura ' + (invoice.name || invoice.id));
+    } else {
+      return null;
+    }
+  }
 
   // OrderNumber: prioriza nome do sale.order (ex: S00176), senao picking.origin, senao picking.name
   var orderNumber = '';
@@ -281,7 +299,7 @@ function odooToTeDelivery(ctx) {
   var totalQty = 0;
   if (orderLines && orderLines.length) {
     orderLines.forEach(function(line) {
-      var qty = line.product_uom_qty || 0;
+      var qty = line.product_uom_qty || line.quantity || 0;
       if (qty <= 0) return;
       var productId = line.product_id ? line.product_id[0] : null;
       var product = productId ? (productsMap[productId] || {}) : {};
@@ -318,12 +336,13 @@ function odooToTeDelivery(ctx) {
     observation += (observation ? ' | ' : '') + 'Valor: R$ ' + Number(amountTotal).toFixed(2).replace('.', ',');
   }
 
-  // Driver: TE define o motorista automaticamente
+  // Driver: TE atribui automaticamente (DefineDriverAfter=1)
   var driver = {
     PhoneCountry: '55',
     PhoneNumber: '99999999999',
     DefineDriverAfter: 1,
   };
+  logger.info('[MAPPER] Driver -> AUTO (TE atribui): DefineDriverAfter=1');
 
   var delivery = {
     Customer: {
@@ -331,7 +350,7 @@ function odooToTeDelivery(ctx) {
       DocumentNumber: (companyCnpj || '').replace(/\D/g, ''),
     },
     Driver: driver,
-    OrderType: teApi.ORDER_TYPE.ENTREGA,
+    OrderType: (teApi.ORDER_TYPES || teApi.ORDER_TYPE || {}).ENTREGA || 1,
     OrderID: String(picking.id),
     OrderNumber: orderNumber,
     OrderDescription: 'NF-e',
@@ -342,18 +361,19 @@ function odooToTeDelivery(ctx) {
     Observation: observation,
   };
 
-  // Data de saida
-  if (scheduledDate) {
-    delivery.DepartureDate = formatTeDate(scheduledDate);
-  }
+  // Data de saida (D+1 — sempre dia seguinte ao da criacao)
+  var departureDate = scheduledDate ? new Date(scheduledDate) : new Date();
+  departureDate.setDate(departureDate.getDate() + 1);
+  delivery.DepartureDate = formatTeDate(departureDate.toISOString());
+  logger.info('[MAPPER] DepartureDate (D+1): ' + delivery.DepartureDate);
 
-  // Previsao de entrega + janela de horario
-  if (deliveryDate) {
-    delivery.DeliveryDate = formatDateOnly(deliveryDate);
-    var startTime = extractTime(deliveryDate);
-    delivery.DeliveryStartTime = startTime || '08:00';
-    delivery.DeliveryEndTime = '18:00';
-  }
+  // Previsao de entrega (D+1 — sempre dia seguinte ao da criacao)
+  var dDate = deliveryDate ? new Date(deliveryDate) : departureDate;
+  dDate.setDate(dDate.getDate() + 1);
+  delivery.DeliveryDate = formatDateOnly(dDate.toISOString());
+  delivery.DeliveryStartTime = '08:00';
+  delivery.DeliveryEndTime = '18:00';
+  logger.info('[MAPPER] DeliveryDate (D+1): ' + delivery.DeliveryDate);
 
   // Peso, volume, cubagem
   if (totalWeight > 0) delivery.Weight = Math.round(totalWeight * 100) / 100;

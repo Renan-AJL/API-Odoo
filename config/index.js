@@ -32,7 +32,7 @@ const config = {
     clientSecret: process.env.ITAU_CLIENT_SECRET || '',
     tokenUrl: process.env.ITAU_TOKEN_URL || process.env.ITAU_TOKEN_PRODUCAO_URL || 'https://sts.itau.com.br/api/oauth/token',
     bolecodeBaseUrl: process.env.ITAU_BOLECODE_URL || process.env.ITAU_PRODUCAO_URL || 'https://secure.api.itau/pix_recebimentos_conciliacoes/v2',
-    pixBaseUrl: process.env.ITAU_PIX_URL || process.env.ITAU_PIX_BASE_URL || '',
+    pixBaseUrl: process.env.ITAU_PIX_URL || process.env.ITAU_PIX_BASE_URL || 'https://secure.api.itau/pix_recebimentos/',
     pixChave: process.env.ITAU_PIX_CHAVE || process.env.ITAU_PIX_KEY || '',
   },
 
@@ -52,6 +52,21 @@ const config = {
     cert: process.env.ITAU_CERT_CRT || '',
     key: process.env.ITAU_CERT_KEY || '',
     ca: process.env.ITAU_CERT_CA || '',
+  },
+
+  // --- SISPAG (PIX Pagamentos - pagar fornecedores) ---
+  sispag: {
+    credencial: process.env.ITAU_SISPAG_CREDENCIAL || '',
+    clientId: process.env.ITAU_SISPAG_CLIENT_ID || '',
+    clientSecret: process.env.ITAU_SISPAG_CLIENT_SECRET || '',
+    tokenUrl: process.env.ITAU_SISPAG_TOKEN_URL || 'https://sts.itau.com.br/api/oauth/token',
+    // Dados da conta debitada (pagador)
+    pagadorTipoConta: process.env.ITAU_SISPAG_TIPO_CONTA || 'CC',
+    pagadorAgencia: process.env.ITAU_SISPAG_AGENCIA || process.env.ITAU_AGENCIA || '7764',
+    pagadorConta: (process.env.ITAU_SISPAG_CONTA || process.env.ITAU_CONTA || '22338-9').replace(/-/g, ''),
+    pagadorTipoPessoa: process.env.ITAU_SISPAG_TIPO_PESSOA || 'J',
+    pagadorDocumento: (process.env.ITAU_SISPAG_DOCUMENTO || process.env.EMPRESA_CNPJ || '22603750000190').replace(/\D/g, ''),
+    pagadorModuloSispag: process.env.ITAU_SISPAG_MODULO || 'Fornecedores',
   },
 
   // --- Rede (Cartao de Credito / Checkout) ---
@@ -108,6 +123,7 @@ const config = {
 // Warnings
 if (!config.itau.pixChave) console.warn('[CONFIG] ITAU_PIX_CHAVE nao definida!');
 if (!config.itau.clientId) console.warn('[CONFIG] ITAU_CLIENT_ID nao definida!');
+if (!config.sispag.credencial) console.warn('[CONFIG] ITAU_SISPAG_CREDENCIAL nao definida - PIX pagamentos indisponivel');
 if (!config.rede.pv) console.warn('[CONFIG] REDE_PV nao definida - checkout cartao indisponivel');
 if (!config.rede.chaveIntegracao) console.warn('[CONFIG] REDE_CHAVE_INTEGRACAO nao definida - checkout cartao indisponivel');
 if (!config.cnpjaApiToken && !process.env.CONSULTAR_IO_TOKEN) {
