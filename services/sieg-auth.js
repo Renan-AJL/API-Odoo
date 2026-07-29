@@ -1,0 +1,140 @@
+/**
+ * services/sieg-auth.js — SIEG OAuth2 Token Management
+ * Gerencia access_token e refresh_token para a API SIEG (engine)
+ */
+const axios = require('axios');
+const config = require('../config');
+
+const SIEG_TOKEN_URL = 'https://api.sieg.com/api/v1/oauth/generate-token';
+const SIEG_REFRESH_URL = 'https://api.sieg.com/api/v1/oauth/refresh';
+const SIEG_JWT_URL = 'https://api.sieg.com/api/v1/create-jwt';
+
+// In-memory token store (safe for single-instance Render deploy)
+let _tokenState = {
+  accessToken: null,
+  refreshToken: null,
+  expiresAt: 0, // Date.now() when token expires
+};
+
+/**
+ * Exchange OAuth authorization code for tokens
+ */
+async function exchangeCode(code) {
+  try {
+    const resp = await axios.post(SIEG_TOKEN_URL, {
+      accessToken: code,
+      state: '',
+      redirectUri: `${config.BASE_URL || 'https://odoo-api-tudoentregue.onrender.com'}/callback/sieg`,
+    });
+    const data = resp.data;
+    _tokenState.accessToken = data.access_token || data.accessToken;
+    _tokenState.refreshToken = data.refresh_token || data.refreshToken;
+    _tokenState.expiresAt = Date.now() + ((data.expires_in || data.expiresIn || 3600) * 1000) - 60000; // 1min buffer
+    console.log('[SIEG-AUTH] Token obtido com sucesso, expira em:', new Date(_tokenState.expiresAt).toISOString());
+    return _tokenState;
+  } catch (err) {
+    console.error('[SIEG-AUTH] Erro ao trocar code por token:', err.response?.data || err.message);
+    throw err;
+  }
+}
+
+/**
+ * Refresh the access token
+ */
+async function refreshToken() {
+  if (!_tokenState.refreshToken) {
+    throw new Error('[SIEG-AUTH] Nenhum refresh_token disponivel. Faca autorizacao OAuth primeiro.');
+  }
+  try {
+    const resp = await axios.post(SIEG_REFRESH_URL, {
+      token: _tokenState.refreshToken,
+    });
+    const data = resp.data;
+    _tokenState.accessToken = data.access_token || data.accessToken;
+    _tokenState.refreshToken = data.refresh_token || data.refreshToken || _tokenState.refreshToken;
+    _tokenState.expiresAt = Date.now() + ((data.expires_in || data.expiresIn || 3600) * 1000) - 60000;
+    console.log('[SIEG-AUTH] Token renovado com sucesso');
+    return _tokenState;
+  } catch (err) {
+    console.error('[SIEG-AUTH] Erro ao renovar token:', err.response?.data || err.message);
+    _tokenState.accessToken = null; // force re-auth
+    throw err;
+  }
+}
+
+/**
+ * Get valid access token, refreshing if needed
+ */
+async function getAccessToken() {
+  if (_tokenState.accessToken && Date.now() < _tokenState.expiresAt) {
+    return _tokenState.accessToken;
+  }
+  // Try refresh
+  if (_tokenState.refreshToken) {
+    try {
+      await refreshToken();
+      return _tokenState.accessToken;
+    } catch (e) {
+      console.error('[SIEG-AUTH] Refresh falhou, necessario re-autorizar');
+    }
+  }
+  throw new Error('[SIEG-AUTH] Sem token valido. Configure OAuth SIEG.');
+}
+
+/**
+ * Create JWT for SIEG API (alternative auth method)
+ */
+async function createJwt() {
+  try {
+    const resp = await axios.post(SIEG_JWT_URL, {
+      clientId: config.SIEG_CLIENT_ID,
+      clientSecret: config.SIEG_CLIENT_SECRET,
+    });
+    return resp.data;
+  } catch (err) {
+    console.error('[SIEG-AUTH] Erro ao criar JWT:', err.response?.data || err.message);
+    throw err;
+  }
+}
+
+/**
+ * Get authorization headers for SIEG API calls
+ */
+async function getAuthHeaders() {
+  const token = await getAccessToken();
+  return {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
+}
+
+/**
+ * Manual token setter (for initial setup / testing)
+ */
+function setTokens(accessToken, refreshToken, expiresIn = 3600) {
+  _tokenState.accessToken = accessToken;
+  _tokenState.refreshToken = refreshToken;
+  _tokenState.expiresAt = Date.now() + (expiresIn * 1000) - 60000;
+}
+
+/**
+ * Get current token state (for debugging)
+ */
+function getTokenState() {
+  return {
+    hasAccessToken: !!_tokenState.accessToken,
+    hasRefreshToken: !!_tokenState.refreshToken,
+    expiresAt: _tokenState.expiresAt,
+    isExpired: Date.now() >= _tokenState.expiresAt,
+  };
+}
+
+module.exports = {
+  exchangeCode,
+  refreshToken,
+  getAccessToken,
+  getAuthHeaders,
+  createJwt,
+  setTokens,
+  getTokenState,
+};
