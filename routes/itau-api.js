@@ -10,9 +10,22 @@ const router = express.Router();
 const { apiKeyAuth } = require('../middleware/auth');
 const { emitirBoleto, parseFormaPagamento } = require('../services/itau-boleto');
 const { storeBoleto, generatePdf, generatePdfFromFields } = require('../services/pdf-boleto');
-const { pushBoletosToOdoo } = require('../services/odoo-push');
+const { pushBoletosToOdoo, pushPixToOdoo } = require('../services/odoo-push');
 const { criarLinkPagamento } = require('../services/itau-link-pagamento');
+const { criarCobrancaPix, consultarCobrancaPix } = require('../services/itau-pix');
 const config = require('../config');
+const bwipjs = require('bwip-js');
+
+// === Lock anti-concorrencia PIX ===
+// Impede que o Odoo dispare multiplas requisicoes PIX simultaneas pra mesma fatura
+var _pixLocks = {};     // faturaId -> Promise (in-flight)
+var _pixCache = {};     // faturaId -> { timestamp, response } (resultado recente)
+var PIX_LOCK_TTL = 30000;  // 30s - tempo maximo de lock
+var PIX_CACHE_TTL = 60000; // 60s - reusa resultado se Odoo reenviar
+
+function getPixLockKey(faturaId, faturaName) {
+  return String(faturaId || 'name:' + (faturaName || 'unknown'));
+}
 
 // --- Deteccao de cartao por bandeira ---
 var BANDEIRAS = ['VISA', 'MASTER', 'ELO', 'AMEX', 'HIPERCARD', 'HIPER'];
@@ -148,6 +161,11 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
     if (cartaoInfo) {
       console.log('[API] Pagamento em cartao detectado:', cartaoInfo.bandeira, cartaoInfo.parcelas, 'x');
       return await handleCartao(req, res, d, cartaoInfo);
+    }
+
+    // === DETECTAR PAGAMENTO PIX ===
+    if (formaPag.trim().toUpperCase().indexOf('PIX') === 0) {
+      return await handlePix(req, res, d);
     }
 
     var fat = d.fatura || {};
@@ -298,6 +316,35 @@ router.post('/gerar', async function(req, res) {
     var pagState = req.body.pagador_state || '';
     var pagZip = req.body.pagador_zip || '';
 
+    // === PIX ===
+    if (formaPag.trim().toUpperCase().indexOf('PIX') === 0) {
+      console.log('[API/GERAR] PIX detectado:', formaPag, '| Valor:', fatValor);
+      try {
+        var isCpf = pagCpf.replace(/\D/g, '').length <= 11;
+        var pixResult = await criarCobrancaPix({
+          valor: fatValor,
+          devedor: pagNome ? {
+            nome: pagNome,
+            cpf: isCpf ? pagCpf.replace(/\D/g, '') : null,
+            cnpj: !isCpf ? pagCpf.replace(/\D/g, '') : null,
+          } : undefined,
+          solicitacaoPagador: fatName || '',
+          expiracao: 86400, // 24h
+        });
+        var pixTxid = pixResult.txid || '';
+        var pixCopiaCola = pixResult.pixCopiaECola || '';
+        console.log('[API/GERAR] PIX criado: TXID=' + pixTxid);
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.send('OK|1\nTXID=' + pixTxid + '|PIX=' + pixCopiaCola + '|VD=' + fatValor.toFixed(2));
+      } catch (pixErr) {
+        console.error('[API/GERAR] PIX ERRO:', pixErr.message);
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.send('ERRO|PIX: ' + (pixErr.message || 'Erro desconhecido'));
+      }
+      return;
+    }
+
+    // === BOLETO ===
     var plano = parseFormaPagamento(formaPag);
     if (plano.tipo !== 'boleto' || plano.parcelas.length === 0) {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -409,6 +456,182 @@ router.post('/regen', async function(req, res) {
   } catch(e) {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.send('ERRO|' + e.message);
+  }
+});
+
+// === PIX: handler para /pagar ===
+async function handlePix(req, res, d) {
+  var fat = d.fatura || {};
+  var faturaName = fat.name || fat.seu_numero || d.fatura_name || '';
+  var faturaId = (fat.id || d.fatura_id) ? parseInt(String(fat.id || d.fatura_id)) : 0;
+  var valorTotal = parseFloat(fat.valor_nominal || d.fatura_valor) || 0;
+  var pag = d.pagador || {};
+  var pagNome = pag.nome || d.pagador_nome || '';
+  var pagCpf = pag.cpf_cnpj || d.pagador_cpf || '';
+
+  console.log('[API/PIX] Fatura:', faturaName, '| Valor:', valorTotal);
+
+  if (valorTotal <= 0) {
+    return res.json({ success: false, message: 'Valor invalido para PIX' });
+  }
+
+  // === DEDUPLICACAO: verificar se ja tem requisicao em curso ou resultado recente ===
+  var lockKey = getPixLockKey(faturaId, faturaName);
+
+  // Se tem resultado cacheado (mesma fatura, menos de 60s atras), reusa
+  if (_pixCache[lockKey]) {
+    var cached = _pixCache[lockKey];
+    var age = Date.now() - cached.timestamp;
+    if (age < PIX_CACHE_TTL) {
+      console.log('[API/PIX] REUSANDO resultado cacheado (' + (age / 1000).toFixed(1) + 's atras) para', lockKey);
+      return res.json(cached.response);
+    }
+    delete _pixCache[lockKey];
+  }
+
+  // Se tem requisicao em curso, espera ela terminar
+  if (_pixLocks[lockKey]) {
+    console.log('[API/PIX] AGUARDANDO lock existente para', lockKey);
+    try {
+      var cachedResult = await _pixLocks[lockKey];
+      console.log('[API/PIX] Lock liberado, retornando resultado da requisicao original');
+      return res.json(cachedResult);
+    } catch (lockErr) {
+      console.log('[API/PIX] Requisicao original falhou, tentando novamente...');
+    }
+  }
+
+  // Criar lock
+  var lockResolve;
+  _pixLocks[lockKey] = new Promise(function(resolve) { lockResolve = resolve; });
+
+  // Auto-limpar lock apos TTL
+  setTimeout(function() {
+    if (_pixLocks[lockKey]) {
+      console.warn('[API/PIX] Lock expirou por TTL para', lockKey);
+      delete _pixLocks[lockKey];
+    }
+  }, PIX_LOCK_TTL);
+
+  try {
+    var isCpf = pagCpf.replace(/\\D/g, '').length <= 11;
+    var pixResult = await criarCobrancaPix({
+      valor: valorTotal,
+      devedor: pagNome ? {
+        nome: pagNome,
+        cpf: isCpf ? pagCpf.replace(/\\D/g, '') : null,
+        cnpj: !isCpf ? pagCpf.replace(/\\D/g, '') : null,
+      } : undefined,
+      solicitacaoPagador: faturaName || '',
+      expiracao: 86400,
+    });
+
+    console.log('[API/PIX] PIX criado: TXID=' + (pixResult.txid || 'N/A'));
+
+    var pixCopiaCola = pixResult.pixCopiaECola || '';
+    var qrcodeBase64 = '';
+    var htmlPix = '';
+
+    // Gerar QR code a partir do pixCopiaECola (bwip-js v4 e async)
+    if (pixCopiaCola) {
+      try {
+        var qrPng = await bwipjs.toBuffer({
+          bcid: 'qrcode',
+          text: pixCopiaCola,
+          scale: 5,
+          width: 12,
+          height: 12,
+        });
+        qrcodeBase64 = 'data:image/png;base64,' + qrPng.toString('base64');
+        console.log('[API/PIX] QR code gerado:', (qrPng.length / 1024).toFixed(1) + 'KB');
+      } catch (qrErr) {
+        console.error('[API/PIX] Erro ao gerar QR code:', qrErr.message);
+      }
+    }
+
+    // Montar HTML para o campo Odoo
+    var valorFmt = 'R$ ' + valorTotal.toFixed(2).replace('.', ',');
+    htmlPix = '<div style="text-align:center; font-family:Arial,sans-serif; padding:10px;">' +
+      '<div style="font-size:18px; font-weight:bold; color:#333; margin-bottom:8px;">PIX</div>' +
+      '<div style="font-size:14px; color:#666; margin-bottom:12px;">' + faturaName + ' - ' + valorFmt + '</div>' +
+      (qrcodeBase64 ? '<img src="' + qrcodeBase64 + '" style="width:200px; height:200px; margin:0 auto 12px auto; display:block;" />' : '') +
+      (pixCopiaCola ? '<div style="font-size:10px; color:#999; word-break:break-all; max-width:400px; margin:0 auto; line-height:1.4;">' + pixCopiaCola + '</div>' : '') +
+      '</div>';
+
+    // Push PIX para Odoo (grava campos x_studio_*)
+    var pushResult = { pushed: false, reason: 'not_called' };
+    try {
+      pushResult = await pushPixToOdoo({
+        faturaId: faturaId,
+        faturaName: faturaName,
+        valor: valorTotal.toFixed(2).replace('.', ','),
+        pix: {
+          txid: pixResult.txid || '',
+          pix_copia_cola: pixCopiaCola,
+          qrcode_base64: qrcodeBase64,
+          html_pix: htmlPix,
+        },
+      });
+    } catch (pushErr) {
+      pushResult = { pushed: false, reason: pushErr.message };
+    }
+
+    var responseData = {
+      success: true,
+      data: {
+        forma_pagamento: 'PIX',
+        total_parcelas: 1,
+        valor_total: valorTotal.toFixed(2),
+        fatura_name: faturaName || '(nao informado)',
+        fatura_id: faturaId || 0,
+        pagamentos: [{
+          tipo: 'pix',
+          parcela: 1,
+          total_parcelas: 1,
+          valor_titulo: valorTotal.toFixed(2),
+          txid: pixResult.txid || '',
+          pix_copia_cola: pixCopiaCola,
+          qrcode_base64: qrcodeBase64,
+          html_pix: htmlPix,
+        }],
+        odoo_push: pushResult.pushed ? 'OK' : 'falhou_' + (pushResult.reason || 'unknown'),
+      },
+    };
+
+    // Cache resultado e liberar lock
+    _pixCache[lockKey] = { timestamp: Date.now(), response: responseData };
+    delete _pixLocks[lockKey];
+    lockResolve(responseData);
+
+    res.json(responseData);
+  } catch (err) {
+    console.error('[API/PIX] ERRO:', err.message);
+    var errResponse = { success: false, message: 'Erro ao criar PIX: ' + (err.message || 'Erro desconhecido') };
+    delete _pixLocks[lockKey];
+    lockResolve(errResponse);
+    res.json(errResponse);
+  }
+}
+
+// === PIX: consultar status ===
+router.get('/pix/status/:txid', async function(req, res) {
+  try {
+    var txid = req.params.txid;
+    console.log('[API/PIX-STATUS] Consultando:', txid);
+    var resultado = await consultarCobrancaPix(txid);
+    var status = resultado.status || 'ATIVA';
+    var pago = status === 'CONCLUIDA';
+    res.json({
+      success: true,
+      txid: txid,
+      status: status,
+      situacao: pago ? 'pago' : 'pendente',
+      valor: resultado.valor ? resultado.valor.original : null,
+      pixCopiaECola: resultado.pixCopiaECola || '',
+    });
+  } catch (err) {
+    console.error('[API/PIX-STATUS] ERRO:', err.message);
+    res.status(err.status || 500).json({ success: false, error: err.message });
   }
 });
 
