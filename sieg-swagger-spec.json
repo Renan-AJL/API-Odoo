@@ -1,0 +1,25 @@
+{
+  "code": 200,
+  "data": {
+    "description": "",
+    "external": {},
+    "html": "<html><head><meta name=\"color-scheme\" content=\"light dark\"><meta charset=\"utf-8\"></head><body><pre>{\"Message\":\"An error has occurred.\"}</pre><div class=\"json-formatter-container\"></div></body></html>",
+    "httpStatus": 404,
+    "httpStatusText": "",
+    "metadata": {
+      "color-scheme": "light dark"
+    },
+    "title": "",
+    "url": "https://api.sieg.com/swagger/docs/v1",
+    "usage": {
+      "tokens": 53
+    },
+    "warning": "Target URL returned error 404: Not Found"
+  },
+  "meta": {
+    "usage": {
+      "tokens": 53
+    }
+  },
+  "status": 20000
+}
