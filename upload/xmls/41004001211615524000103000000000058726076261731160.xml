@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<NFSe versao="1.01" xmlns="http://www.sped.fazenda.gov.br/nfse" xmlns:ns2="http://www.w3.org/2000/09/xmldsig#">
+    <infNFSe Id="NFS41004001211615524000103000000000058726076261731160">
+        <xLocEmi>Almirante Tamandaré</xLocEmi>
+        <xLocPrestacao>Almirante Tamandaré</xLocPrestacao>
+        <nNFSe>587</nNFSe>
+        <cLocIncid>4100400</cLocIncid>
+        <xLocIncid>Almirante Tamandaré</xLocIncid>
+        <xTribNac>Lubrificação, limpeza, lustração, revisão, carga e recarga, conserto, restauração, blindagem, manutenção e conservação de máquinas, veículos, aparelhos, equipamentos, motores, elevadores ou de qualquer objeto (exceto peças e partes empregadas, que ficam sujeitas ao ICMS).</xTribNac>
+        <xNBS>NAO INFORMADO</xNBS>
+        <verAplic>1.1.0</verAplic>
+        <ambGer>1</ambGer>
+        <tpEmis>2</tpEmis>
+        <cStat>100</cStat>
+        <dhProc>2026-07-29T10:37:50-03:00</dhProc>
+        <nDFSe>587</nDFSe>
+        <emit>
+            <CNPJ>11615524000103</CNPJ>
+            <IM>8907058</IM>
+            <xNome>LOZANO &amp; LOZANO LTDA.</xNome>
+            <enderNac>
+                <xLgr>R VEREADOR ADMAR BERTOLLI</xLgr>
+                <nro>2954</nro>
+                <xBairro>LAMENHA GRANDE</xBairro>
+                <cMun>4100400</cMun>
+                <UF>PR</UF>
+                <CEP>83505730</CEP>
+           </enderNac>
+            <fone>4132727796</fone>
+            <email>econtec1@yahoo.com.br</email>
+       </emit>
+        <valores>
+            <vBC>16000.00</vBC>
+            <pAliqAplic>2.00</pAliqAplic>
+            <vISSQN>320.00</vISSQN>
+            <vTotalRet>0.00</vTotalRet>
+            <vLiq>16000.00</vLiq>
+       </valores>
+        <DPS versao="1.01">
+            <infDPS Id="DPS410040021161552400010300001000000000000587">
+                <tpAmb>1</tpAmb>
+                <dhEmi>2026-07-29T10:34:35-03:00</dhEmi>
+                <verAplic>1.1.0</verAplic>
+                <serie>1</serie>
+                <nDPS>587</nDPS>
+                <dCompet>2026-07-29</dCompet>
+                <tpEmit>1</tpEmit>
+                <cLocEmi>4100400</cLocEmi>
+                <prest>
+                    <CNPJ>11615524000103</CNPJ>
+                    <IM>8907058</IM>
+                    <fone>4132727796</fone>
+                    <email>econtec1@yahoo.com.br</email>
+                    <regTrib>
+                        <opSimpNac>3</opSimpNac>
+                        <regApTribSN>1</regApTribSN>
+                        <regEspTrib>0</regEspTrib>
+                   </regTrib>
+               </prest>
+                <toma>
+                    <CNPJ>22603750000190</CNPJ>
+                    <xNome>AJL COMERCIO ATACADISTA DE FERRAGENS E FERRAMENTAS LTDA</xNome>
+                    <end>
+                        <endNac>
+                            <cMun>4106902</cMun>
+                            <CEP>81350160</CEP>
+                       </endNac>
+                        <xLgr>Avenida Juscelino Kubitschek de Oliveira</xLgr>
+                        <nro>7525</nro>
+                        <xBairro>Cidade Industrial</xBairro>
+                   </end>
+               </toma>
+                <serv>
+                    <locPrest>
+                        <cLocPrestacao>4100400</cLocPrestacao>
+                   </locPrest>
+                    <cServ>
+                        <cTribNac>140101</cTribNac>
+                        <xDescServ>Reforma geral / Pintura carroceria 8.25 m x 2.20 m</xDescServ>
+                        <cNBS>999999999</cNBS>
+                        <cIntContrib>33978</cIntContrib>
+                   </cServ>
+                    <infoCompl/>
+               </serv>
+                <valores>
+                    <vServPrest>
+                        <vServ>16000.00</vServ>
+                   </vServPrest>
+                    <trib>
+                        <tribMun>
+                            <tribISSQN>1</tribISSQN>
+                            <tpRetISSQN>1</tpRetISSQN>
+                       </tribMun>
+                        <totTrib>
+                            <pTotTrib>
+                                <pTotTribFed>13.45</pTotTribFed>
+                                <pTotTribEst>0.00</pTotTribEst>
+                                <pTotTribMun>3.29</pTotTribMun>
+                           </pTotTrib>
+                       </totTrib>
+                   </trib>
+               </valores>
+           </infDPS>
+       </DPS>
+   </infNFSe>
+<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo><CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/><SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/><Reference URI="#NFS41004001211615524000103000000000058726076261731160"><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/><Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/></Transforms><DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/><DigestValue>Ts5SCzpWc+9nF/4tqFFXaYf4Gm4=</DigestValue></Reference></SignedInfo><SignatureValue>3xh3mWfayupmOim0NTxRssj0EpebjOg8wAAjxBcJatuHqTrTOouy+/JcuBK+HDLZ+lG3n2HCDJpn&#xd;
++jS5Zy23tybhj5hGCya4BaBec6KehAfWShNoiTUXCR1yCJ0kxc9G3ML6JR2PTArAlHxOgPtlQ++3&#xd;
+fl3SkaaLAHSFe2j27MN4xf3pUFCJvLWyAqng6+OEOAGYRv3nmYu3Lgr+MSQQ8Y2TOWIzoa8iZdK6&#xd;
+vtE6QVbSlLif6WwiL4p3OZ7r4dPLyZ4dDdIuNQtmJPBxPZjgXOcuHOCYWy69SRI+o6rwPBrxJO1z&#xd;
++/LFqTgnUky0QQxNJxZWpOYqeerWzxJYH0Lc9A==</SignatureValue><KeyInfo><X509Data><X509Certificate>MIIIGjCCBgKgAwIBAgIQDL1FUGMKlBru7qbtuzSZ3DANBgkqhkiG9w0BAQsFADB4MQswCQYDVQQG&#xd;
+EwJCUjETMBEGA1UEChMKSUNQLUJyYXNpbDE2MDQGA1UECxMtU2VjcmV0YXJpYSBkYSBSZWNlaXRh&#xd;
+IEZlZGVyYWwgZG8gQnJhc2lsIC0gUkZCMRwwGgYDVQQDExNBQyBDZXJ0aXNpZ24gUkZCIEc1MB4X&#xd;
+DTI2MDExNjE2MTIxOFoXDTI3MDExNjE2MTIxOFowggELMQswCQYDVQQGEwJCUjETMBEGA1UECgwK&#xd;
+SUNQLUJyYXNpbDELMAkGA1UECAwCUFIxHDAaBgNVBAcME0FsbWlyYW50ZSBUYW1hbmRhcmUxGTAX&#xd;
+BgNVBAsMEFZpZGVvQ29uZmVyZW5jaWExFzAVBgNVBAsMDjE1NDAwNzgzMDAwMTc4MTYwNAYDVQQL&#xd;
+DC1TZWNyZXRhcmlhIGRhIFJlY2VpdGEgRmVkZXJhbCBkbyBCcmFzaWwgLSBSRkIxFjAUBgNVBAsM&#xd;
+DVJGQiBlLUNOUEogQTExODA2BgNVBAMML01VTklDSVBJTyBERSBBTE1JUkFOVEUgVEFNQU5EQVJF&#xd;
+Ojc2MTA1NjU5MDAwMTc0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA6jq8uXHT2cy2&#xd;
+bmOKgt/5aj3mma71svTO21tP6qVTxjnzsTpk6Qf6A0ex+de+UB+fB1WBtl/7WEG4YVmNoQTU99Cz&#xd;
+0XGNyvmkOv0TzxP5p0SN8pKRJweA+zV55xvgVOxP/ZU4BL21EMUbRayuWqCx8aQI2P2n7lOk8tvH&#xd;
+uFoSHJEzIQtNq4qqUYbUKbzmzE8ULuLHu31SFdDktWqoG8pOU7X4ewVOjm5So8VcBXxeQDmfyNI0&#xd;
+fs4eSA3PFfz2SwldgosvFRTmc39FvNrDsI4HimcKn8Mn3pfctRB0CSxzDLchnejmIpruZMYh81mS&#xd;
+kWBUMD4Lzie4nPxY9nwK88SRyQIDAQABo4IDCTCCAwUwgbgGA1UdEQSBsDCBraA4BgVgTAEDBKAv&#xd;
+BC0yNjExMTk3MzgzMDExMDcyOTQ5MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDCgHwYFYEwBAwKg&#xd;
+FgQUQ0FNSUxPIERBTklFTCBMT1ZBVE+gGQYFYEwBAwOgEAQONzYxMDU2NTkwMDAxNzSgFwYFYEwB&#xd;
+AwegDgQMMDAwMDAwMDAwMDAwgRxnYWJpbmV0ZUB0YW1hbmRhcmUucHIuZ292LmJyMAkGA1UdEwQC&#xd;
+MAAwHwYDVR0jBBgwFoAUU31/nb7RYdAgutqf44mnE3NYzUIwfwYDVR0gBHgwdjB0BgZgTAECAQww&#xd;
+ajBoBggrBgEFBQcCARZcaHR0cDovL2ljcC1icmFzaWwuY2VydGlzaWduLmNvbS5ici9yZXBvc2l0&#xd;
+b3Jpby9kcGMvQUNfQ2VydGlzaWduX1JGQi9EUENfQUNfQ2VydGlzaWduX1JGQi5wZGYwgbwGA1Ud&#xd;
+HwSBtDCBsTBXoFWgU4ZRaHR0cDovL2ljcC1icmFzaWwuY2VydGlzaWduLmNvbS5ici9yZXBvc2l0&#xd;
+b3Jpby9sY3IvQUNDZXJ0aXNpZ25SRkJHNS9MYXRlc3RDUkwuY3JsMFagVKBShlBodHRwOi8vaWNw&#xd;
+LWJyYXNpbC5vdXRyYWxjci5jb20uYnIvcmVwb3NpdG9yaW8vbGNyL0FDQ2VydGlzaWduUkZCRzUv&#xd;
+TGF0ZXN0Q1JMLmNybDAOBgNVHQ8BAf8EBAMCBeAwHQYDVR0lBBYwFAYIKwYBBQUHAwIGCCsGAQUF&#xd;
+BwMEMIGsBggrBgEFBQcBAQSBnzCBnDBfBggrBgEFBQcwAoZTaHR0cDovL2ljcC1icmFzaWwuY2Vy&#xd;
+dGlzaWduLmNvbS5ici9yZXBvc2l0b3Jpby9jZXJ0aWZpY2Fkb3MvQUNfQ2VydGlzaWduX1JGQl9H&#xd;
+NS5wN2MwOQYIKwYBBQUHMAGGLWh0dHA6Ly9vY3NwLWFjLWNlcnRpc2lnbi1yZmIuY2VydGlzaWdu&#xd;
+LmNvbS5icjANBgkqhkiG9w0BAQsFAAOCAgEAtcFxWMl2kmEkjpv4mKWS8+6Ieg9Q3HWpIBo2T/eL&#xd;
+DARhbleAZWjbINRGaDLKvjFJYdriWHqy/X2J2kZMMKea/u0OKEauc0O0UFtuS0n77YkdkOkSi1aT&#xd;
+h7841vTIs4otbCLSFW8qS7OpUCVsQUiYrDif2Ui7BLWihih/4JFJyn2feCipZbvStq1auberKptu&#xd;
+GPHdk4AgxXM5PifJWe2gtEztJd7f3GbTOZeaU2WmrF7qSoVE0Om58fmFEcK7VpY0l6PLepXtsS2A&#xd;
+qJFdI9TVN9VgRyWRg/IfDZTzyU1xSG0rArVIok6tDI3EXXBNrbYlk61GEfC1nSl2kKy0J0Y5z/cp&#xd;
+sIQfxCzHw+iu46wbEAJlq/hoI35hKIdDcTf9Sh4wBBgpTS6pGVzS1uq+nwSxgKTZZesge3KAltqo&#xd;
+KmCyTvCttgmzKiiLNxHIjeGAKQwrCjf+JSVByhtQQtI4i1cPmc/YBbpnM+xQ3ZKSB3IKYyyk4AZr&#xd;
+JwFgl0ih/L35YeRT+50+0+7mYgJA4+jqh/gz98pD0aska7+EqpU02R+pgLN41EOMtNPauVsSKmPg&#xd;
+0yrBoaiX+m92ZK0uBcilr15B9pVN6NyKdmKb2VsJ6P2i65MMvoxCCOTo1qOUmSYaEDbvTP87Qpxn&#xd;
+33/SLI80Z8+wjB8+60LkleFyaIbejoVxH4M=</X509Certificate></X509Data></KeyInfo></Signature></NFSe>
