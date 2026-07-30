@@ -34,10 +34,9 @@ var config = require('../config');
 function createClient(url) {
   var base = url.replace(/\/+$/, '');
   var host = base.replace('https://', '').replace('http://', '');
-  var port = base.startsWith('https') ? 443 : 80;
   return {
-    common: xmlrpc.createClient({ host: host, path: '/xmlrpc/2/common', port: port }),
-    models: xmlrpc.createClient({ host: host, path: '/xmlrpc/2/object', port: port }),
+    common: xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/common', port: 443 }),
+    models: xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/object', port: 443 }),
   };
 }
 
