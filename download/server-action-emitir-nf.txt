@@ -4,28 +4,39 @@
 # Tipo: Execute Python Code
 # Trigger: Action Button
 # ==============================================================
-# Cole TODO o bloco abaixo no campo de codigo da Server Action.
-# NAO inclui esta linha de # === nem comentarios fora do bloco.
+# Cole SOMENTE o codigo Python abaixo (sem esta linha de comentario)
 # ==============================================================
 
-# --- Validacoes ---
+# Validar campos existem
+campos_check = ['x_studio_nfe_status', 'x_studio_nfe_chave', 'x_studio_nfe_protocolo', 'x_studio_nfse_numero', 'x_studio_nfse_status']
+campos_faltando = []
+for c in campos_check:
+    if not hasattr(record, c):
+        campos_faltando.append(c)
+if campos_faltando:
+    raise UserError('Campos faltando em account.move: ' + ', '.join(campos_faltando))
+
+# Validacoes
 
 if record.move_type not in ('out_invoice', 'out_refund'):
-    raise UserError('Selecione uma fatura de saida (venda ou devolucao).')
+    raise UserError('Selecione uma fatura de saida.')
 
-if record.x_studio_status_emissao == 'pendente':
-    raise UserError('Ja existe uma emissao em andamento para esta fatura. Aguarde o processamento.')
+status_nfe = record.x_studio_nfe_status or ''
+status_nfse = record.x_studio_nfse_status or ''
 
-if record.x_studio_status_emissao == 'autorizada':
-    raise UserError('Esta fatura ja possui NF autorizada. Numero: ' + str(record.x_studio_numero_nf or ''))
+if 'pendente' in status_nfe or 'processando' in status_nfe or 'pendente' in status_nfse or 'processando' in status_nfse:
+    raise UserError('Ja existe uma emissao em andamento. Aguarde o processamento.')
+
+if 'autorizada' in status_nfe or 'autorizada' in status_nfse:
+    raise UserError('Esta fatura ja possui NF autorizada.')
 
 if not record.partner_id:
-    raise UserError('A fatura precisa ter um cliente (parceiro) definido.')
+    raise UserError('A fatura precisa ter um cliente definido.')
 
 if not record.invoice_line_ids:
     raise UserError('A fatura nao possui linhas de itens.')
 
-# --- Detectar tipo: NF-e (produto) ou NFS-e (servico) ---
+# Detectar tipo: NF-e (produto) ou NFS-e (servico)
 
 tem_servico = False
 tem_produto = False
@@ -46,16 +57,16 @@ if tem_servico and not tem_produto:
     tipo_nf = 'nfse'
 elif tem_produto and not tem_servico:
     tipo_label = 'NF-e (Produto)'
-    tipo_nf = 'nfe'
 else:
     tipo_label = 'NF-e (Misto)'
     tipo_nf = 'nfe'
 
-# --- Marcar como pendente e postar no chatter ---
+# Marcar como pendente e postar no chatter
 
-record.write({
-    'x_studio_status_emissao': 'pendente',
-})
+if tipo_nf == 'nfe':
+    record.write({'x_studio_nfe_status': 'pendente'})
+else:
+    record.write({'x_studio_nfse_status': 'pendente'})
 
 record.message_post(
     body='<b>Emissao de NF Solicitada</b><br/>'
@@ -63,8 +74,8 @@ record.message_post(
          'Fatura: ' + str(record.name or '') + '<br/>'
          'Valor: R$ ' + str(record.amount_total or 0) + '<br/>'
          '<br/>'
-         'Status: <b>Aguardando processamento pelo middleware...</b><br/>'
-         '<i>O XML e o PDF (DANFE) aparecerao aqui assim que a nota for autorizada pela SEFAZ.</i>',
+         'Status: <b>Aguardando processamento...</b><br/>'
+         '<i>O XML e o PDF (DANFE) aparecerao aqui quando a nota for autorizada.</i>',
     message_type='comment',
     subtype_xmlid='mail.mt_note',
 )
