@@ -16,6 +16,12 @@ let _tokenState = {
   expiresAt: 0, // Date.now() when token expires
 };
 
+// JWT token cache (server-to-server auth via clientId + clientSecret)
+let _jwtCache = {
+  token: null,
+  expiresAt: 0,
+};
+
 /**
  * Exchange OAuth authorization code for tokens
  */
@@ -85,12 +91,25 @@ async function getAccessToken() {
  * Create JWT for SIEG API (alternative auth method)
  */
 async function createJwt() {
+  const clientId = config.sieg && config.sieg.clientId;
+  const clientSecret = config.sieg && config.sieg.clientSecret;
+  if (!clientId || !clientSecret) {
+    throw new Error('[SIEG-AUTH] SIEG_CLIENT_ID e SIEG_CLIENT_SECRET nao configurados');
+  }
   try {
     const resp = await axios.post(SIEG_JWT_URL, {
-      clientId: config.SIEG_CLIENT_ID,
-      clientSecret: config.SIEG_CLIENT_SECRET,
-    });
-    return resp.data;
+      clientId: clientId,
+      clientSecret: clientSecret,
+    }, { timeout: 15000 });
+    const data = resp.data;
+    // Cache JWT token
+    const jwtToken = data.token || data.jwt || data.access_token || data.accessToken;
+    if (jwtToken) {
+      _jwtCache.token = jwtToken;
+      _jwtCache.expiresAt = Date.now() + ((data.expires_in || data.expiresIn || 3600) * 1000) - 60000;
+      console.log('[SIEG-AUTH] JWT obtido com sucesso, expira em:', new Date(_jwtCache.expiresAt).toISOString());
+    }
+    return data;
   } catch (err) {
     console.error('[SIEG-AUTH] Erro ao criar JWT:', err.response?.data || err.message);
     throw err;
@@ -101,9 +120,31 @@ async function createJwt() {
  * Get authorization headers for SIEG API calls
  */
 async function getAuthHeaders() {
+  // Strategy 1: Use cached JWT (server-to-server, no browser needed)
+  if (_jwtCache.token && Date.now() < _jwtCache.expiresAt) {
+    return {
+      'Authorization': 'Bearer ' + _jwtCache.token,
+      'Content-Type': 'application/json',
+    };
+  }
+  // Strategy 2: Try to get new JWT via clientId + clientSecret
+  if (config.sieg && config.sieg.clientId && config.sieg.clientSecret) {
+    try {
+      await createJwt();
+      if (_jwtCache.token) {
+        return {
+          'Authorization': 'Bearer ' + _jwtCache.token,
+          'Content-Type': 'application/json',
+        };
+      }
+    } catch (jwtErr) {
+      console.warn('[SIEG-AUTH] JWT falhou, tentando OAuth:', jwtErr.message);
+    }
+  }
+  // Strategy 3: Fall back to OAuth token
   const token = await getAccessToken();
   return {
-    'Authorization': `Bearer ${token}`,
+    'Authorization': 'Bearer ' + token,
     'Content-Type': 'application/json',
   };
 }
@@ -126,6 +167,9 @@ function getTokenState() {
     hasRefreshToken: !!_tokenState.refreshToken,
     expiresAt: _tokenState.expiresAt,
     isExpired: Date.now() >= _tokenState.expiresAt,
+    hasJwt: !!_jwtCache.token,
+    jwtExpired: Date.now() >= _jwtCache.expiresAt,
+    jwtExpiresAt: _jwtCache.expiresAt,
   };
 }
 

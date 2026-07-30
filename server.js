@@ -74,6 +74,7 @@ const itauTokenRoutes = require('./routes/itau-token');
 const teDeliveryRoutes = require('./routes/delivery');
 const teWebhookRoutes = require('./routes/webhook-te');
 const itauPagamentosRoutes = require('./routes/itau-pagamentos');
+const siegRoutes = require('./routes/sieg');
 
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/cnpj', cnpjRoutes);
@@ -84,6 +85,8 @@ app.use('/api/v1/itau/token', itauTokenRoutes);
 app.use('/api/v1/te/webhook', teWebhookRoutes);
 app.use('/api/v1/te', teDeliveryRoutes);
 app.use('/api/v1/itau', itauPagamentosRoutes);
+app.use('/api/v1/sieg', siegRoutes);
+app.use('/callback/sieg', siegRoutes);
 
 // --- Root ---
 app.get('/', (req, res) => {
@@ -141,6 +144,36 @@ app.use((err, req, res, next) => {
 const PORT = config.port;
 const logger = require('./utils/logger');
 
+// ============================================================
+// SIEG AUTO-POLLING: checa faturas pendentes a cada 30s
+// ============================================================
+const SIEG_POLL_INTERVAL_MS = parseInt(process.env.SIEG_POLL_INTERVAL_MS, 10) || 30000;
+var siegPollTimer = null;
+
+function startSiegPolling() {
+  if (!config.odoo.enabled || !config.sieg.clientId) {
+    console.log('  [SIEG-POLL] DESATIVADO (Odoo ou SIEG nao configurados)');
+    return;
+  }
+  console.log('  [SIEG-POLL] ATIVO - intervalo: ' + (SIEG_POLL_INTERVAL_MS / 1000) + 's');
+  // Rodar primeira vez apos 10s (dar tempo do server subir)
+  setTimeout(function() {
+    runSiegPoll();
+    siegPollTimer = setInterval(runSiegPoll, SIEG_POLL_INTERVAL_MS);
+  }, 10000);
+}
+
+function runSiegPoll() {
+  var processPendingEmissions = require('./services/sieg-odoo-emit').processPendingEmissions;
+  processPendingEmissions().then(function(result) {
+    if (result.processed > 0) {
+      console.log('  [SIEG-POLL] ' + result.processed + ' fatura(s) processada(s), ' + (result.sucesso || 0) + ' autorizada(s)');
+    }
+  }).catch(function(err) {
+    console.error('  [SIEG-POLL] Erro:', err.message);
+  });
+}
+
 app.listen(PORT, () => {
   const mtls = config.createMtlsConfig();
   console.log('');
@@ -182,6 +215,14 @@ app.listen(PORT, () => {
   console.log('  Agencia:', config.sispag.pagadorAgencia, '| Conta:', config.sispag.pagadorConta);
   console.log('  CNPJ:', config.sispag.pagadorDocumento);
   console.log('  [TE-AUTO-SYNC] DESATIVADO - Envio manual via botao na fatura');
+  console.log('  ---');
+  console.log('  [SIEG NF-e/NFS-e]');
+  console.log('  Client ID: ' + (config.sieg.clientId ? '***' + config.sieg.clientId.slice(-4) : 'NAO CONFIGURADO'));
+  console.log('  TP Amb: ' + (config.sieg.tpAmb === '1' ? 'PRODUCAO' : 'HOMOLOGACAO'));
+  console.log('  Polling: ' + (config.odoo.enabled && config.sieg.clientId ? 'ATIVO (' + (SIEG_POLL_INTERVAL_MS / 1000) + 's)' : 'DESATIVADO'));
+
+  // Iniciar polling SIEG
+  startSiegPolling();
 });
 
 module.exports = app;
