@@ -338,24 +338,41 @@ async function postChatterResult(client, db, uid, pwd, moveId, moveName, tipo, i
   } catch (e) { console.error('[SIEG-EMIT] Erro postar chatter:', e.message); }
 }
 
-// Safe Read: tries BR fields, falls back to standard Odoo fields
+// Safe Read: only standard Odoo fields (no l10n_br dependency)
 var PARTNER_SAFE = ['name','street','street2','city','state_id','zip','phone','email','is_company','vat','country_id','city_id'];
-var PARTNER_BR = ['cnpj_cpf','inscr_est','legal_name','number','district','l10n_br_city_id'];
+
+// BR-specific fields to try ONE BY ONE (never in batch to avoid partial rejection)
+var PARTNER_BR_INDIVIDUAL = ['inscr_est','legal_name','number','district','l10n_br_city_id'];
 
 async function safeReadPartner(client, db, uid, pwd, pid) {
+  // Step 1: Read only standard fields (guaranteed to work)
+  var r;
   try {
-    var r = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[pid], PARTNER_SAFE.concat(PARTNER_BR)]);
-    if (r && r.length) return r[0];
+    r = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[pid], PARTNER_SAFE]);
   } catch (e) {
-    if (e.message && e.message.indexOf('Invalid field') >= 0) {
-      console.warn('[SIEG-EMIT] Campo BR invalido, fallback padrao:', e.message.substring(0, 100));
-      try {
-        var r2 = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[pid], PARTNER_SAFE]);
-        if (r2 && r2.length) return r2[0];
-      } catch (e2) {}
+    console.error('[SIEG-EMIT] Erro ao ler parceiro ' + pid + ':', e.message.substring(0, 150));
+    return {};
+  }
+  if (!r || !r.length) return {};
+  var partner = r[0];
+
+  // Map vat -> cnpj_cpf for downstream compatibility
+  partner.cnpj_cpf = partner.vat || '';
+
+  // Step 2: Try each BR field individually (silent fail per field)
+  for (var i = 0; i < PARTNER_BR_INDIVIDUAL.length; i++) {
+    var field = PARTNER_BR_INDIVIDUAL[i];
+    try {
+      var br = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[pid], [field]]);
+      if (br && br[0] && br[0][field] !== undefined && br[0][field] !== false) {
+        partner[field] = br[0][field];
+      }
+    } catch (e) {
+      // Field does not exist in this Odoo instance — skip silently
     }
   }
-  return {};
+
+  return partner;
 }
 
 // ============================================================
@@ -379,9 +396,15 @@ async function readCompany(client, db, uid, pwd, companyId) {
   var stateCode = '', stateIbge = '';
   var stateId = tupId(c.state_id || p.state_id);
   if (stateId) {
+    // Read code first (standard field)
     try {
-      var sts = await executeKw(client, db, uid, pwd, 'res.country.state', 'read', [[stateId], ['code', 'ibge_code']]);
-      if (sts && sts[0]) { stateCode = sts[0].code || ''; stateIbge = sts[0].ibge_code || ''; }
+      var sts = await executeKw(client, db, uid, pwd, 'res.country.state', 'read', [[stateId], ['code']]);
+      if (sts && sts[0]) stateCode = sts[0].code || '';
+    } catch (e) {}
+    // Try ibge_code separately (l10n_br field, may not exist)
+    try {
+      var sts2 = await executeKw(client, db, uid, pwd, 'res.country.state', 'read', [[stateId], ['ibge_code']]);
+      if (sts2 && sts2[0]) stateIbge = sts2[0].ibge_code || '';
     } catch (e) {}
   }
 
@@ -473,12 +496,15 @@ async function buildLineData(client, db, uid, pwd, line) {
         detailedType = pr.detailed_type || 'product';
         productName = pr.name || productName;
 
-        // NCM
+        // NCM (l10n_br_fiscal.ncm may not exist in SaaS)
         if (pr.ncm_id && Array.isArray(pr.ncm_id)) {
           try {
             var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[pr.ncm_id[0]], ['code']]);
             if (ncmRec && ncmRec[0]) ncm = ncmRec[0].code || '';
-          } catch (e) {}
+          } catch (e) {
+            // l10n_br_fiscal not installed — try product.default_code as NCM fallback
+            console.log('[SIEG-EMIT] l10n_br_fiscal.ncm nao disponivel, usando default_code como NCM');
+          }
         }
 
         // UoM
