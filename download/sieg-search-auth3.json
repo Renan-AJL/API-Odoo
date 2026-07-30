@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://suporte.dominioatendimento.com/central/faces/solucao.html?codigo=7539",
+    "name": "Como integrar SIEG com Domínio?",
+    "snippet": "Se você possui o SIEG Hub , pode integrá-lo com a Escrita Fiscal para facilitar a escrituração dos documentos fiscais, conforme segue: 1 - Configuração na SIEG",
+    "host_name": "suporte.dominioatendimento.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://faq.memocashsolucoes.com.br/knowledgebase/como-e-feita-a-integracao-com-o-sistema-sieg",
+    "name": "Como é feita a integração com o sistema SIEG?",
+    "snippet": "Nov 3, 2025 — Como será feito? Passo 1 – Na aba Integrações API SIEG , marque a opção “Ativar/Desativar API ” e copie a Chave API exibida no campo abaixo.",
+    "host_name": "faq.memocashsolucoes.com.br",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://ajuda.vhsys.com.br/categorias/apps-e-integracoes/integracao-com-a-sieg",
+    "name": "Integração com a SIEG",
+    "snippet": "Jan 28, 2026 — Para conectar e permitir a comunicação entre o ERP e o SIEG , você precisa utilizar a chave API e o E-mail cadastrado na plataforma SIEG . Essa ...\nPara conectar e permitir a comunicação entre o ERP e o SIEG, você precisa utilizar a chave API e o E-mail cadastrado na plataforma SIEG. Essa chave serve para vincular e autenticar os dois sistemas.",
+    "host_name": "ajuda.vhsys.com.br",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.sieg.com/hub",
+    "name": "Hub",
+    "snippet": "Plataforma de gestão fiscal e automação contábil para escritórios de contabilidade. contato@ sieg .com (11) 3842 7110 (81) 3033 5087 ...\nPolítica de Privacidade e Termos de Uso Política de Qualidade © 2026 SIEG. Todos os direitos reservados.",
+    "host_name": "www.sieg.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://edu.sittax.com.br/sittax-base-conhecimento/base-tecnica/importacao/integracao-configuracao-sieg-api",
+    "name": "Integração/Configuração SIEG API | Sittax - Central de Ajuda",
+    "snippet": "Clique na opção “Gerar nova chave API”. · Preencha os campos conforme abaixo: Nome de identificação: escolha um nome ...",
+    "host_name": "edu.sittax.com.br",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://sieg.sleekplan.app/feedback/79682",
+    "name": "Integração SIEG API - NFes TRANSPORTADOR | Docs Fiscais",
+    "snippet": "Desenvolvemos uma integração para um cliente a fim de obter os documentos eletrônicos no qual o mesmo aparece como TRANSPORTADOR. O SIEG busca esses documentos ...",
+    "host_name": "sieg.sleekplan.app",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://vrtech.app/publico/post/gerar-token---sieg/50a7dbcf-2493-446e-8e04-ecea3725539e",
+    "name": "Gerar Token - Sieg",
+    "snippet": "Localize e clique em “ Integração API SIEG ” ou “Integrações API ”. Gere uma Nova Chave API Clique no botão “+ Gerar nova chave API ”. Configure a Chave",
+    "host_name": "vrtech.app",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://integracoes.sieg.com/sistema-externo/docs/introducao-a-api",
+    "name": "Introdução | API SIEG para Sistemas Externos | sieg",
+    "snippet": "Se você deseja tornar o seu software um sistema parceiro da SIEG através de uma integração externa, continue nesta página para conferir o passo a passo completo de autenticação via OAuth.",
+    "host_name": "integracoes.sieg.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://integracoes.sieg.com/sistema-externo/docs/guia-de-uso",
+    "name": "Fluxo geral | API SIEG para Sistemas Externos | sieg",
+    "snippet": "Essas credenciais são utilizadas para a geração do Token JWT. A API adota um modelo de autenticação em dois níveis, no qual o sistema externo é autenticado por meio do JWT, e o acesso à base de dados é definido por um mecanismo adicional de autorização: OAuth 2.0.",
+    "host_name": "integracoes.sieg.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://app.sieg.com/external-system-integration.aspx",
+    "name": "Integração de Sistema Externo - app.sieg.com",
+    "snippet": "Importante: Este e-mail será usado para enviar as credenciais de integração (Client ID e Secret Key) após aprovação. Certifique-se de informar um e-mail válido do responsável técnico.",
+    "host_name": "app.sieg.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

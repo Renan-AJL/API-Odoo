@@ -1,21 +1,25 @@
 /**
- * services/sieg-auth.js — SIEG JWT Authentication v3.0
+ * services/sieg-auth.js — SIEG Authentication v5.0 (FINAL)
  * 
- * O Swagger do SIEG mostra /api/v1/create-jwt com:
- *   - consumes: [] (sem body definido)
- *   - parameters: [] (sem params definidos)
+ * Documentacao oficial: integracoes.sieg.com/sistema-externo/docs/guia-de-uso
  * 
- * Isso indica que a autenticacao pode ser via:
- *   1. Basic Auth header (Authorization: Basic base64(clientId:clientSecret))
- *   2. Query parameters (?ClientId=X&SecretKey=Y)
- *   3. Form-encoded body (mesmo sem consumes definido)
- *   4. JSON body com PascalCase (SecretKey/ClientId)
- *   5. JSON body com camelCase (secretKey/clientId)
+ * AUTENTICACAO EM DOIS NIVEIS:
+ *   Nivel 1 - JWT: Identifica o sistema externo
+ *     POST /api/v1/create-jwt
+ *     Headers: X-Client-Id + X-Secret-Key
+ *     Validade: 24 horas
+ * 
+ *   Nivel 2 - OAuth 2.0: Autoriza acesso a dados de cliente especifico
+ *     Header: X-OAuth-Token
+ *     Necessario para rotas que acessam dados de clientes
+ * 
+ * Todas as requisicoes precisam:
+ *   Authorization: Bearer {jwt_token}
+ *   X-OAuth-Token: {oauth_token} (quando acesso a dados de cliente)
  */
 const axios = require('axios');
 
-const SIEG_BASE = 'https://api.sieg.com';
-const SIEG_JWT_URL = SIEG_BASE + '/api/v1/create-jwt';
+const SIEG_JWT_URL = 'https://api.sieg.com/api/v1/create-jwt';
 
 // In-memory cache
 let _jwtCache = {
@@ -23,9 +27,12 @@ let _jwtCache = {
   expiresAt: 0,
 };
 
-/**
- * Get clientId and clientSecret from config
- */
+let _oauthCache = {
+  accessToken: null,
+  refreshToken: null,
+  expiresAt: 0,
+};
+
 function getCredentials() {
   try {
     var config = require('../config');
@@ -34,7 +41,6 @@ function getCredentials() {
       clientSecret: config.sieg && config.sieg.clientSecret,
     };
   } catch (e) {
-    // Fallback to env vars
     return {
       clientId: process.env.SIEG_CLIENT_ID,
       clientSecret: process.env.SIEG_CLIENT_SECRET,
@@ -43,98 +49,80 @@ function getCredentials() {
 }
 
 /**
- * Estrategia 1: Basic Auth Header
- * Authorization: Basic base64(clientId:clientSecret)
+ * Gerar JWT via headers X-Client-Id + X-Secret-Key
+ * Documentacao: integracoes.sieg.com/sistema-externo/docs/guia-de-uso
  */
-async function tryBasicAuth(clientId, clientSecret) {
-  console.log('[SIEG-AUTH] Tentativa 1: Basic Auth header...');
-  var creds = Buffer.from(clientId + ':' + clientSecret).toString('base64');
-  var resp = await axios.post(SIEG_JWT_URL, null, {
-    headers: {
-      'Authorization': 'Basic ' + creds,
-    },
-    timeout: 15000,
-  });
-  return resp.data;
+async function createJwt() {
+  var creds = getCredentials();
+  if (!creds.clientId || !creds.clientSecret) {
+    throw new Error('[SIEG-AUTH] SIEG_CLIENT_ID e SIEG_CLIENT_SECRET nao configurados');
+  }
+
+  console.log('[SIEG-AUTH] Gerando JWT... (Client: ***' + creds.clientId.slice(-4) + ')');
+
+  try {
+    var resp = await axios.post(SIEG_JWT_URL, null, {
+      headers: {
+        'X-Client-Id': creds.clientId,
+        'X-Secret-Key': creds.clientSecret,
+        'Content-Length': '0',
+      },
+      timeout: 15000,
+    });
+
+    var data = resp.data;
+    var token = extractToken(data);
+
+    if (!token) {
+      console.error('[SIEG-AUTH] Resposta sem token:', JSON.stringify(data).slice(0, 300));
+      throw new Error('[SIEG-AUTH] Resposta do create-jwt nao contem token');
+    }
+
+    // Cache por 24h (menos 5 min de buffer)
+    _jwtCache.token = token;
+    _jwtCache.expiresAt = Date.now() + (24 * 60 * 60 * 1000) - (5 * 60 * 1000);
+
+    console.log('[SIEG-AUTH] JWT obtido! Expira:', new Date(_jwtCache.expiresAt).toISOString());
+    console.log('[SIEG-AUTH] Token:', token.substring(0, 50) + '...');
+
+    return { token: token, raw: data };
+  } catch (err) {
+    var errMsg = err.response?.data || err.message;
+    var errStr = typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg);
+    console.error('[SIEG-AUTH] Falha ao gerar JWT:', errStr);
+    throw new Error('[SIEG-AUTH] Falha ao gerar JWT: ' + errStr);
+  }
 }
 
 /**
- * Estrategia 2: Query Parameters
- * GET /api/v1/create-jwt?ClientId=X&SecretKey=Y
+ * Obter headers de autenticacao para chamadas API
+ * 
+ * Para endpoints de sistema (send-xml, emitir-nfse, gerarDanfeViaXml):
+ *   - Authorization: Bearer {jwt}
+ * 
+ * Para endpoints de dados de cliente (listar, baixar-xml, etc.):
+ *   - Authorization: Bearer {jwt}
+ *   - X-OAuth-Token: {oauth_token}
  */
-async function tryQueryParams(clientId, clientSecret) {
-  console.log('[SIEG-AUTH] Tentativa 2: Query parameters...');
-  var resp = await axios.get(SIEG_JWT_URL, {
-    params: {
-      ClientId: clientId,
-      SecretKey: clientSecret,
-    },
-    timeout: 15000,
-  });
-  return resp.data;
-}
+async function getAuthHeaders(options) {
+  options = options || {};
 
-/**
- * Estrategia 3: Form-encoded POST
- * Content-Type: application/x-www-form-urlencoded
- */
-async function tryFormEncoded(clientId, clientSecret) {
-  console.log('[SIEG-AUTH] Tentativa 3: Form-encoded POST...');
-  var params = new URLSearchParams();
-  params.append('ClientId', clientId);
-  params.append('SecretKey', clientSecret);
-  var resp = await axios.post(SIEG_JWT_URL, params.toString(), {
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    timeout: 15000,
-  });
-  return resp.data;
-}
+  // Garantir JWT valido
+  if (!_jwtCache.token || Date.now() >= _jwtCache.expiresAt) {
+    await createJwt();
+  }
 
-/**
- * Estrategia 4: JSON PascalCase (SecretKey/ClientId)
- */
-async function tryJsonPascal(clientId, clientSecret) {
-  console.log('[SIEG-AUTH] Tentativa 4: JSON PascalCase...');
-  var resp = await axios.post(SIEG_JWT_URL, {
-    ClientId: clientId,
-    SecretKey: clientSecret,
-  }, {
-    headers: { 'Content-Type': 'application/json' },
-    timeout: 15000,
-  });
-  return resp.data;
-}
+  var headers = {
+    'Authorization': 'Bearer ' + _jwtCache.token,
+    'Content-Type': 'application/json',
+  };
 
-/**
- * Estrategia 5: JSON camelCase (clientId/secretKey)
- */
-async function tryJsonCamel(clientId, clientSecret) {
-  console.log('[SIEG-AUTH] Tentativa 5: JSON camelCase...');
-  var resp = await axios.post(SIEG_JWT_URL, {
-    clientId: clientId,
-    secretKey: clientSecret,
-  }, {
-    headers: { 'Content-Type': 'application/json' },
-    timeout: 15000,
-  });
-  return resp.data;
-}
+  // Para rotas que acessam dados de cliente, adicionar OAuth
+  if (options.requireOAuth && _oauthCache.accessToken) {
+    headers['X-OAuth-Token'] = _oauthCache.accessToken;
+  }
 
-/**
- * Estrategia 6: Query params com camelCase
- */
-async function tryQueryCamel(clientId, clientSecret) {
-  console.log('[SIEG-AUTH] Tentativa 6: Query params camelCase...');
-  var resp = await axios.get(SIEG_JWT_URL, {
-    params: {
-      clientId: clientId,
-      secretKey: clientSecret,
-    },
-    timeout: 15000,
-  });
-  return resp.data;
+  return headers;
 }
 
 /**
@@ -142,97 +130,33 @@ async function tryQueryCamel(clientId, clientSecret) {
  */
 function extractToken(data) {
   if (!data) return null;
-  // Pode vir como string direta, ou dentro de um objeto
   if (typeof data === 'string' && data.length > 20) return data;
   return data.token || data.jwt || data.access_token || data.accessToken || data.Token || data.Jwt || null;
 }
 
 /**
- * Criar JWT tentando multiplas estrategias em sequencia
- * Para na primeira que funcionar.
+ * Set OAuth token (obtido via fluxo OAuth ou configuracao)
  */
-async function createJwt() {
-  var creds = getCredentials();
-  if (!creds.clientId || !creds.clientSecret) {
-    throw new Error('[SIEG-AUTH] SIEG_CLIENT_ID e SIEG_CLIENT_SECRET nao configurados nas env vars');
-  }
-
-  console.log('[SIEG-AUTH] ClientId: ***' + creds.clientId.slice(-4) + ' | Tentando autenticacao...');
-
-  var strategies = [
-    tryBasicAuth,
-    tryQueryParams,
-    tryFormEncoded,
-    tryJsonPascal,
-    tryJsonCamel,
-    tryQueryCamel,
-  ];
-
-  var lastError = null;
-  for (var i = 0; i < strategies.length; i++) {
-    try {
-      var result = await strategies[i](creds.clientId, creds.clientSecret);
-      console.log('[SIEG-AUTH] Estrategia ' + (i + 1) + ' retornou:', JSON.stringify(result).slice(0, 300));
-      
-      var token = extractToken(result);
-      if (token) {
-        // Estimar expiracao (padrao: 1h)
-        var expiresIn = (result.expires_in || result.expiresIn || 3600);
-        _jwtCache.token = token;
-        _jwtCache.expiresAt = Date.now() + (expiresIn * 1000) - 60000;
-        console.log('[SIEG-AUTH] JWT obtido com sucesso (estrategia ' + (i + 1) + ')! Expira:', new Date(_jwtCache.expiresAt).toISOString());
-        console.log('[SIEG-AUTH] Token (primeiros 50 chars):', token.substring(0, 50) + '...');
-        return { token: token, estrategia: i + 1, raw: result };
-      }
-      
-      // Se a resposta veio mas nao tem token, pode ser sucesso com formato inesperado
-      // Vamos logar e continuar tentando
-      console.log('[SIEG-AUTH] Estrategia ' + (i + 1) + ' retornou resposta mas sem token reconhecido. Continuando...');
-    } catch (err) {
-      var errMsg = err.response?.data || err.message;
-      console.log('[SIEG-AUTH] Estrategia ' + (i + 1) + ' falhou:', typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg).slice(0, 200));
-      lastError = err;
-    }
-  }
-
-  throw new Error('[SIEG-AUTH] Todas as 6 estrategias de auth falharam. Ultimo erro: ' + (lastError?.response?.data || lastError?.message));
+function setOAuthToken(accessToken, refreshToken, expiresIn) {
+  _oauthCache.accessToken = accessToken;
+  _oauthCache.refreshToken = refreshToken || null;
+  _oauthCache.expiresAt = Date.now() + ((expiresIn || 3600) * 1000) - 60000;
+  console.log('[SIEG-AUTH] OAuth token configurado');
 }
 
 /**
- * Get authorization headers for SIEG API calls
- */
-async function getAuthHeaders() {
-  // Return cached token if valid
-  if (_jwtCache.token && Date.now() < _jwtCache.expiresAt) {
-    return {
-      'Authorization': 'Bearer ' + _jwtCache.token,
-      'Content-Type': 'application/json',
-    };
-  }
-
-  // Try to get new JWT
-  var result = await createJwt();
-  return {
-    'Authorization': 'Bearer ' + result.token,
-    'Content-Type': 'application/json',
-  };
-}
-
-/**
- * Get current JWT state (for debugging)
+ * Get current auth state
  */
 function getTokenState() {
   return {
-    hasToken: !!_jwtCache.token,
-    expiresAt: _jwtCache.expiresAt,
-    isExpired: Date.now() >= _jwtCache.expiresAt,
-    tokenPreview: _jwtCache.token ? _jwtCache.token.substring(0, 30) + '...' : null,
+    hasJwt: !!_jwtCache.token,
+    jwtExpiresAt: _jwtCache.expiresAt,
+    jwtExpired: Date.now() >= _jwtCache.expiresAt,
+    jwtPreview: _jwtCache.token ? _jwtCache.token.substring(0, 30) + '...' : null,
+    hasOAuth: !!_oauthCache.accessToken,
   };
 }
 
-/**
- * Invalidate cache (for testing / force re-auth)
- */
 function invalidateCache() {
   _jwtCache.token = null;
   _jwtCache.expiresAt = 0;
@@ -241,6 +165,7 @@ function invalidateCache() {
 module.exports = {
   createJwt,
   getAuthHeaders,
+  setOAuthToken,
   getTokenState,
   invalidateCache,
 };

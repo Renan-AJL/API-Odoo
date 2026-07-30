@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://developer.transmitsecurity.com/guides/user/auth_fapi_private_key_jwt",
+    "name": "Authenticate with private key JWT",
+    "snippet": "Leveraging JSON Web Tokens ( JWT ) signed with a private key for client authentication ensures a secure and seamless identity experience that meets FAPI ... Read more",
+    "host_name": "developer.transmitsecurity.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.secureauth.com/iam/private-key-jwt-client-authentication",
+    "name": "Private key JWT client authentication",
+    "snippet": "Use the `private_key_jwt` method to authenticate a client by signing a JSON Web Token (JWT) with an asymmetric key. JWT ID to prevent replay attacks",
+    "host_name": "docs.secureauth.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://auth0.com/docs/get-started/authentication-and-authorization-flow/authenticate-with-private-key-jwt",
+    "name": "Authenticate with Private Key JWT",
+    "snippet": "Describes how to build an assertion to use Private Key JWT Authentication. Build the client assertion. This assertion is a JWT signed by the private key when ...",
+    "host_name": "auth0.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.authlete.com/kb/oauth-and-openid-connect/client-authentication/client-auth-private-key-jwt",
+    "name": "Client authentication using private_key_jwt method",
+    "snippet": "Authlete supports private_key_jwt as a client authentication method so that authorization servers can enable it. This article describes overview of the method. Read more",
+    "host_name": "www.authlete.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.signicat.com/docs/eid-hub/oidc/advanced-security/client-authentication-with-private-key-jwt",
+    "name": "Client authentication with Private Key JWT",
+    "snippet": "Before configuring an application that authenticates using Private Key JWT , you must generate an RSA key pair. You can choose between: Import the public part of ... Read more",
+    "host_name": "developer.signicat.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]
