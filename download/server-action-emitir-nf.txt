@@ -7,14 +7,15 @@
 # Cole SOMENTE o codigo Python abaixo (sem esta linha de comentario)
 # ==============================================================
 
-# Validar campos existem
-campos_check = ['x_studio_nfe_status', 'x_studio_nfe_chave', 'x_studio_nfe_protocolo', 'x_studio_nfse_numero', 'x_studio_nfse_status']
-campos_faltando = []
-for c in campos_check:
-    if not hasattr(record, c):
-        campos_faltando.append(c)
-if campos_faltando:
-    raise UserError('Campos faltando em account.move: ' + ', '.join(campos_faltando))
+# Validar campos existem (sem hasattr - bloqueado no Odoo SaaS)
+try:
+    _test_nfe_st = record.x_studio_nfe_status
+    _test_nfe_ch = record.x_studio_nfe_chave
+    _test_nfe_pr = record.x_studio_nfe_protocolo
+    _test_nfse_nu = record.x_studio_nfse_numero
+    _test_nfse_st = record.x_studio_nfse_status
+except Exception:
+    raise UserError('Campos x_studio_ nao encontrados em account.move. Verifique se criou: x_studio_nfe_status, x_studio_nfe_chave, x_studio_nfe_protocolo, x_studio_nfse_numero, x_studio_nfse_status')
 
 # Validacoes
 
@@ -57,6 +58,7 @@ if tem_servico and not tem_produto:
     tipo_nf = 'nfse'
 elif tem_produto and not tem_servico:
     tipo_label = 'NF-e (Produto)'
+    tipo_nf = 'nfe'
 else:
     tipo_label = 'NF-e (Misto)'
     tipo_nf = 'nfe'
