@@ -113,6 +113,14 @@ const config = {
   },
   isTeConfigured: !!(process.env.TE_APP_KEY && process.env.TE_REQUESTER_KEY),
 
+  // --- SIEG (NF-e / NFS-e) ---
+  sieg: {
+    clientId: process.env.SIEG_CLIENT_ID || '',
+    clientSecret: process.env.SIEG_CLIENT_SECRET || '',
+    tpAmb: process.env.SIEG_TP_AMB || '1', // 1=producao, 2=homologacao
+  },
+  BASE_URL: process.env.BASE_URL || '',
+
   // --- CNP Ja ---
   cnpjaApiBase: cnpjaApiBase,
   cnpjaApiToken: cnpjaApiToken,
