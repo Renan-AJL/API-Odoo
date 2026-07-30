@@ -67,4 +67,11 @@ services:
         value: "60"
       - key: DEBUG
         value: "false"
+      # --- SIEG (NF-e / NFS-e) ---
+      - key: SIEG_CLIENT_ID
+        value: "odoo_e7d5d98da53c"
+      - key: SIEG_CLIENT_SECRET
+        sync: false
+      - key: SIEG_TP_AMB
+        value: "2"
     healthCheckPath: /api/v1/health
