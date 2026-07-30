@@ -149,13 +149,46 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   var partner = await readPartner(client, db, uid, pwd, partnerId);
 
   // 4. Read invoice lines + product data
-  var lineIds = move.invoice_line_ids || [];
-  var rawLines = await executeKw(client, db, uid, pwd, 'account.move.line', 'read', [lineIds, [
-    'display_type', 'product_id', 'name', 'quantity', 'price_unit',
-    'price_subtotal', 'tax_ids', 'discount',
-  ]]);
-  var invoiceLines = rawLines.filter(function(l) { return !l.display_type; });
-  if (!invoiceLines.length) throw new Error('Fatura sem linhas de produto/servico');
+  // IMPORTANT: Odoo XML-RPC returns One2many as [id, name] tuples — extract plain IDs
+  var lineIdsRaw = move.invoice_line_ids || [];
+  var lineIds = lineIdsRaw.map(function(v) { return Array.isArray(v) ? v[0] : v; }).filter(function(v) { return typeof v === 'number' && v > 0; });
+  console.log('[SIEG-EMIT] Linhas da fatura: ' + lineIdsRaw.length + ' raw, ' + lineIds.length + ' IDs extraidos');
+
+  if (!lineIds.length) throw new Error('Fatura sem linhas (invoice_line_ids vazio ou invalido)');
+
+  // Try reading with standard fields first
+  var rawLines = [];
+  try {
+    rawLines = await executeKw(client, db, uid, pwd, 'account.move.line', 'read', [lineIds, [
+      'display_type', 'product_id', 'name', 'quantity', 'price_unit',
+      'price_subtotal', 'tax_ids', 'discount',
+    ]]);
+  } catch (lineErr) {
+    // If price_subtotal or discount fails, try minimal field set
+    console.warn('[SIEG-EMIT] Campo invalido em account.move.line, tentando campo minimos:', lineErr.message.substring(0, 120));
+    try {
+      rawLines = await executeKw(client, db, uid, pwd, 'account.move.line', 'read', [lineIds, [
+        'display_type', 'product_id', 'name', 'quantity', 'price_unit', 'tax_ids',
+      ]]);
+    } catch (e2) {
+      throw new Error('Nao foi possivel ler linhas da fatura: ' + e2.message.substring(0, 200));
+    }
+  }
+
+  console.log('[SIEG-EMIT] rawLines retornadas: ' + (rawLines ? rawLines.length : 0));
+  if (rawLines) {
+    for (var dl = 0; dl < Math.min(rawLines.length, 3); dl++) {
+      var rl = rawLines[dl];
+      console.log('[SIEG-EMIT]   Line ' + rl.id + ': display_type=' + JSON.stringify(rl.display_type) + ' product=' + JSON.stringify(rl.product_id) + ' name=' + (rl.name || '').substring(0, 40));
+    }
+  }
+
+  // Filter: keep only lines that are NOT section/note/payment headers
+  var invoiceLines = (rawLines || []).filter(function(l) {
+    return l.display_type !== 'line_section' && l.display_type !== 'line_note' && l.display_type !== 'line_payment';
+  });
+  console.log('[SIEG-EMIT] invoiceLines apos filtro: ' + invoiceLines.length);
+  if (!invoiceLines.length) throw new Error('Fatura sem linhas de produto/servico (todas tinham display_type)');
 
   // 5. Get next NF number from company
   var serie, numField, nextNum;
