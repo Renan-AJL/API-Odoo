@@ -517,13 +517,14 @@ async function buildLineData(client, db, uid, pwd, line) {
   var prodStudio = {}; // x_studio_ fields from product
 
   if (productId) {
-    // Read safe product fields first (no detailed_type which may not exist in SaaS)
-    var PRODUCT_SAFE = ['default_code', 'barcode', 'name', 'ncm_id', 'uom_id',
+    // Read safe product fields first (no l10n_br fields that may not exist in SaaS)
+    var PRODUCT_SAFE = ['default_code', 'barcode', 'name', 'uom_id',
       'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code'];
+    var pr = null;
     try {
       var prods = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], PRODUCT_SAFE]);
       if (prods && prods[0]) {
-        var pr = prods[0];
+        pr = prods[0];
         defaultCode = pr.default_code || '';
         barcode = pr.barcode || '';
         productName = pr.name || productName;
@@ -540,15 +541,19 @@ async function buildLineData(client, db, uid, pwd, line) {
           } catch (tpErr) {}
         }
 
-        // NCM (l10n_br_fiscal.ncm may not exist in SaaS)
-        if (pr.ncm_id && Array.isArray(pr.ncm_id)) {
-          try {
-            var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[pr.ncm_id[0]], ['code']]);
-            if (ncmRec && ncmRec[0]) ncm = ncmRec[0].code || '';
-          } catch (e) {
-            // l10n_br_fiscal not installed — try product.default_code as NCM fallback
-            console.log('[SIEG-EMIT] l10n_br_fiscal.ncm nao disponivel, usando default_code como NCM');
+        // Try ncm_id separately (l10n_br field, may not exist in SaaS)
+        try {
+          var ncmData = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['ncm_id']]);
+          if (ncmData && ncmData[0] && ncmData[0].ncm_id && Array.isArray(ncmData[0].ncm_id)) {
+            try {
+              var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[ncmData[0].ncm_id[0]], ['code']]);
+              if (ncmRec && ncmRec[0]) ncm = ncmRec[0].code || '';
+            } catch (e) {
+              console.log('[SIEG-EMIT] l10n_br_fiscal.ncm nao disponivel, usando default_code como NCM');
+            }
           }
+        } catch (ncmErr) {
+          // ncm_id field not available in this instance
         }
 
         // UoM

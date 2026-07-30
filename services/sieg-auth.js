@@ -96,25 +96,35 @@ async function createJwt() {
   if (!clientId || !clientSecret) {
     throw new Error('[SIEG-AUTH] SIEG_CLIENT_ID e SIEG_CLIENT_SECRET nao configurados');
   }
-  try {
-    // SIEG expects PascalCase: ClientId + SecretKey (not clientSecret)
-    const resp = await axios.post(SIEG_JWT_URL, {
-      ClientId: clientId,
-      SecretKey: clientSecret,
-    }, { timeout: 15000 });
-    const data = resp.data;
-    // Cache JWT token
-    const jwtToken = data.token || data.jwt || data.access_token || data.accessToken;
-    if (jwtToken) {
-      _jwtCache.token = jwtToken;
-      _jwtCache.expiresAt = Date.now() + ((data.expires_in || data.expiresIn || 3600) * 1000) - 60000;
-      console.log('[SIEG-AUTH] JWT obtido com sucesso, expira em:', new Date(_jwtCache.expiresAt).toISOString());
+
+  // Try multiple field name formats — SIEG docs are inconsistent about casing
+  var formats = [
+    { ClientId: clientId, SecretKey: clientSecret },
+    { clientId: clientId, secretKey: clientSecret },
+    { client_id: clientId, client_secret: clientSecret },
+  ];
+  var lastErr = null;
+
+  for (var i = 0; i < formats.length; i++) {
+    var payload = formats[i];
+    var keys = Object.keys(payload).join(', ');
+    try {
+      console.log('[SIEG-AUTH] Tentativa JWT #' + (i+1) + ' com campos: ' + keys + ' (ID=' + clientId.substring(0,8) + '...)');
+      const resp = await axios.post(SIEG_JWT_URL, payload, { timeout: 15000 });
+      const data = resp.data;
+      const jwtToken = data.token || data.jwt || data.access_token || data.accessToken;
+      if (jwtToken) {
+        _jwtCache.token = jwtToken;
+        _jwtCache.expiresAt = Date.now() + ((data.expires_in || data.expiresIn || 3600) * 1000) - 60000;
+        console.log('[SIEG-AUTH] JWT obtido com sucesso (formato #' + (i+1) + '), expira em:', new Date(_jwtCache.expiresAt).toISOString());
+      }
+      return data;
+    } catch (err) {
+      console.error('[SIEG-AUTH] Formato #' + (i+1) + ' (' + keys + ') falhou:', err.response?.data || err.message);
+      lastErr = err;
     }
-    return data;
-  } catch (err) {
-    console.error('[SIEG-AUTH] Erro ao criar JWT:', err.response?.data || err.message);
-    throw err;
   }
+  throw lastErr;
 }
 
 /**
