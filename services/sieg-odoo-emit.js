@@ -338,6 +338,26 @@ async function postChatterResult(client, db, uid, pwd, moveId, moveName, tipo, i
   } catch (e) { console.error('[SIEG-EMIT] Erro postar chatter:', e.message); }
 }
 
+// Safe Read: tries BR fields, falls back to standard Odoo fields
+var PARTNER_SAFE = ['name','street','street2','city','state_id','zip','phone','email','is_company','vat','country_id','city_id'];
+var PARTNER_BR = ['cnpj_cpf','inscr_est','legal_name','number','district','l10n_br_city_id'];
+
+async function safeReadPartner(client, db, uid, pwd, pid) {
+  try {
+    var r = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[pid], PARTNER_SAFE.concat(PARTNER_BR)]);
+    if (r && r.length) return r[0];
+  } catch (e) {
+    if (e.message && e.message.indexOf('Invalid field') >= 0) {
+      console.warn('[SIEG-EMIT] Campo BR invalido, fallback padrao:', e.message.substring(0, 100));
+      try {
+        var r2 = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[pid], PARTNER_SAFE]);
+        if (r2 && r2.length) return r2[0];
+      } catch (e2) {}
+    }
+  }
+  return {};
+}
+
 // ============================================================
 // Read Company
 // ============================================================
@@ -353,12 +373,7 @@ async function readCompany(client, db, uid, pwd, companyId) {
   var pId = tupId(c.partner_id);
   var p = {};
   if (pId) {
-    var pRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[pId], [
-      'cnpj_cpf', 'inscr_est', 'legal_name', 'street', 'street2', 'number',
-      'city', 'state_id', 'zip', 'phone', 'email',
-      'city_id', 'l10n_br_city_id', 'district',
-    ]]);
-    if (pRecs && pRecs[0]) p = pRecs[0];
+    p = await safeReadPartner(client, db, uid, pwd, pId);
   }
 
   var stateCode = '', stateIbge = '';
@@ -375,7 +390,7 @@ async function readCompany(client, db, uid, pwd, companyId) {
   if (cityRef && Array.isArray(cityRef)) cityIbge = await readCityIbge(client, db, uid, pwd, cityRef[0]);
 
   return {
-    cnpj_cpf: p.cnpj_cpf || c.vat || '22603750000190',
+    cnpj_cpf: (p.cnpj_cpf || p.vat || c.vat || '22603750000190').replace(/[^0-9]/g, ''),
     legal_name: p.legal_name || c.name || 'AJL FERRO E ACO LTDA',
     name: c.name || 'AJL',
     inscr_est: p.inscr_est || '9069585890',
@@ -384,7 +399,7 @@ async function readCompany(client, db, uid, pwd, companyId) {
     street2: p.street2 || p.district || '',
     city: c.city || p.city || 'Curitiba',
     state: stateCode || 'PR',
-    zip: c.zip || p.zip || '',
+    zip: (c.zip || p.zip || '').replace(/[^0-9]/g, ''),
     city_ibge_code: cityIbge || '4106902',
     state_ibge: stateIbge || '41',
     crt: '1',
@@ -401,13 +416,8 @@ async function readCompany(client, db, uid, pwd, companyId) {
 // Read Partner
 // ============================================================
 async function readPartner(client, db, uid, pwd, partnerId) {
-  var recs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], [
-    'name', 'legal_name', 'cnpj_cpf', 'inscr_est',
-    'street', 'street2', 'number', 'city', 'state_id', 'zip',
-    'phone', 'email', 'is_company', 'city_id', 'l10n_br_city_id', 'district',
-  ]]);
-  if (!recs || !recs.length) throw new Error('Parceiro ' + partnerId + ' nao encontrado');
-  var p = recs[0];
+  var p = await safeReadPartner(client, db, uid, pwd, partnerId);
+  if (!p.name) throw new Error('Parceiro ' + partnerId + ' nao encontrado');
 
   var stateCode = '';
   var stId = tupId(p.state_id);
@@ -423,7 +433,7 @@ async function readPartner(client, db, uid, pwd, partnerId) {
   if (cityRef && Array.isArray(cityRef)) cityIbge = await readCityIbge(client, db, uid, pwd, cityRef[0]);
 
   return {
-    cnpj_cpf: p.cnpj_cpf || '',
+    cnpj_cpf: (p.cnpj_cpf || p.vat || '').replace(/[^0-9]/g, ''),
     legal_name: p.legal_name || p.name || '',
     xNome: p.name || '',
     inscr_est: p.inscr_est || '',
@@ -432,7 +442,7 @@ async function readPartner(client, db, uid, pwd, partnerId) {
     street2: p.street2 || p.district || '',
     city: p.city || '',
     state: stateCode,
-    zip: p.zip || '',
+    zip: (p.zip || '').replace(/[^0-9]/g, ''),
     city_ibge_code: cityIbge,
     phone: p.phone || '',
     email: p.email || '',
