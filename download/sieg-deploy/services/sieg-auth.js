@@ -1,184 +1,246 @@
 /**
- * services/sieg-auth.js — SIEG OAuth2 Token Management
- * Gerencia access_token e refresh_token para a API SIEG (engine)
+ * services/sieg-auth.js — SIEG JWT Authentication v3.0
+ * 
+ * O Swagger do SIEG mostra /api/v1/create-jwt com:
+ *   - consumes: [] (sem body definido)
+ *   - parameters: [] (sem params definidos)
+ * 
+ * Isso indica que a autenticacao pode ser via:
+ *   1. Basic Auth header (Authorization: Basic base64(clientId:clientSecret))
+ *   2. Query parameters (?ClientId=X&SecretKey=Y)
+ *   3. Form-encoded body (mesmo sem consumes definido)
+ *   4. JSON body com PascalCase (SecretKey/ClientId)
+ *   5. JSON body com camelCase (secretKey/clientId)
  */
 const axios = require('axios');
-const config = require('../config');
 
-const SIEG_TOKEN_URL = 'https://api.sieg.com/api/v1/oauth/generate-token';
-const SIEG_REFRESH_URL = 'https://api.sieg.com/api/v1/oauth/refresh';
-const SIEG_JWT_URL = 'https://api.sieg.com/api/v1/create-jwt';
+const SIEG_BASE = 'https://api.sieg.com';
+const SIEG_JWT_URL = SIEG_BASE + '/api/v1/create-jwt';
 
-// In-memory token store (safe for single-instance Render deploy)
-let _tokenState = {
-  accessToken: null,
-  refreshToken: null,
-  expiresAt: 0, // Date.now() when token expires
-};
-
-// JWT token cache (server-to-server auth via clientId + clientSecret)
+// In-memory cache
 let _jwtCache = {
   token: null,
   expiresAt: 0,
 };
 
 /**
- * Exchange OAuth authorization code for tokens
+ * Get clientId and clientSecret from config
  */
-async function exchangeCode(code) {
+function getCredentials() {
   try {
-    const resp = await axios.post(SIEG_TOKEN_URL, {
-      accessToken: code,
-      state: '',
-      redirectUri: `${config.BASE_URL || 'https://odoo-api-tudoentregue.onrender.com'}/callback/sieg`,
-    });
-    const data = resp.data;
-    _tokenState.accessToken = data.access_token || data.accessToken;
-    _tokenState.refreshToken = data.refresh_token || data.refreshToken;
-    _tokenState.expiresAt = Date.now() + ((data.expires_in || data.expiresIn || 3600) * 1000) - 60000; // 1min buffer
-    console.log('[SIEG-AUTH] Token obtido com sucesso, expira em:', new Date(_tokenState.expiresAt).toISOString());
-    return _tokenState;
-  } catch (err) {
-    console.error('[SIEG-AUTH] Erro ao trocar code por token:', err.response?.data || err.message);
-    throw err;
+    var config = require('../config');
+    return {
+      clientId: config.sieg && config.sieg.clientId,
+      clientSecret: config.sieg && config.sieg.clientSecret,
+    };
+  } catch (e) {
+    // Fallback to env vars
+    return {
+      clientId: process.env.SIEG_CLIENT_ID,
+      clientSecret: process.env.SIEG_CLIENT_SECRET,
+    };
   }
 }
 
 /**
- * Refresh the access token
+ * Estrategia 1: Basic Auth Header
+ * Authorization: Basic base64(clientId:clientSecret)
  */
-async function refreshToken() {
-  if (!_tokenState.refreshToken) {
-    throw new Error('[SIEG-AUTH] Nenhum refresh_token disponivel. Faca autorizacao OAuth primeiro.');
-  }
-  try {
-    const resp = await axios.post(SIEG_REFRESH_URL, {
-      token: _tokenState.refreshToken,
-    });
-    const data = resp.data;
-    _tokenState.accessToken = data.access_token || data.accessToken;
-    _tokenState.refreshToken = data.refresh_token || data.refreshToken || _tokenState.refreshToken;
-    _tokenState.expiresAt = Date.now() + ((data.expires_in || data.expiresIn || 3600) * 1000) - 60000;
-    console.log('[SIEG-AUTH] Token renovado com sucesso');
-    return _tokenState;
-  } catch (err) {
-    console.error('[SIEG-AUTH] Erro ao renovar token:', err.response?.data || err.message);
-    _tokenState.accessToken = null; // force re-auth
-    throw err;
-  }
+async function tryBasicAuth(clientId, clientSecret) {
+  console.log('[SIEG-AUTH] Tentativa 1: Basic Auth header...');
+  var creds = Buffer.from(clientId + ':' + clientSecret).toString('base64');
+  var resp = await axios.post(SIEG_JWT_URL, null, {
+    headers: {
+      'Authorization': 'Basic ' + creds,
+    },
+    timeout: 15000,
+  });
+  return resp.data;
 }
 
 /**
- * Get valid access token, refreshing if needed
+ * Estrategia 2: Query Parameters
+ * GET /api/v1/create-jwt?ClientId=X&SecretKey=Y
  */
-async function getAccessToken() {
-  if (_tokenState.accessToken && Date.now() < _tokenState.expiresAt) {
-    return _tokenState.accessToken;
-  }
-  // Try refresh
-  if (_tokenState.refreshToken) {
-    try {
-      await refreshToken();
-      return _tokenState.accessToken;
-    } catch (e) {
-      console.error('[SIEG-AUTH] Refresh falhou, necessario re-autorizar');
-    }
-  }
-  throw new Error('[SIEG-AUTH] Sem token valido. Configure OAuth SIEG.');
+async function tryQueryParams(clientId, clientSecret) {
+  console.log('[SIEG-AUTH] Tentativa 2: Query parameters...');
+  var resp = await axios.get(SIEG_JWT_URL, {
+    params: {
+      ClientId: clientId,
+      SecretKey: clientSecret,
+    },
+    timeout: 15000,
+  });
+  return resp.data;
 }
 
 /**
- * Create JWT for SIEG API (alternative auth method)
+ * Estrategia 3: Form-encoded POST
+ * Content-Type: application/x-www-form-urlencoded
+ */
+async function tryFormEncoded(clientId, clientSecret) {
+  console.log('[SIEG-AUTH] Tentativa 3: Form-encoded POST...');
+  var params = new URLSearchParams();
+  params.append('ClientId', clientId);
+  params.append('SecretKey', clientSecret);
+  var resp = await axios.post(SIEG_JWT_URL, params.toString(), {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    timeout: 15000,
+  });
+  return resp.data;
+}
+
+/**
+ * Estrategia 4: JSON PascalCase (SecretKey/ClientId)
+ */
+async function tryJsonPascal(clientId, clientSecret) {
+  console.log('[SIEG-AUTH] Tentativa 4: JSON PascalCase...');
+  var resp = await axios.post(SIEG_JWT_URL, {
+    ClientId: clientId,
+    SecretKey: clientSecret,
+  }, {
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 15000,
+  });
+  return resp.data;
+}
+
+/**
+ * Estrategia 5: JSON camelCase (clientId/secretKey)
+ */
+async function tryJsonCamel(clientId, clientSecret) {
+  console.log('[SIEG-AUTH] Tentativa 5: JSON camelCase...');
+  var resp = await axios.post(SIEG_JWT_URL, {
+    clientId: clientId,
+    secretKey: clientSecret,
+  }, {
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 15000,
+  });
+  return resp.data;
+}
+
+/**
+ * Estrategia 6: Query params com camelCase
+ */
+async function tryQueryCamel(clientId, clientSecret) {
+  console.log('[SIEG-AUTH] Tentativa 6: Query params camelCase...');
+  var resp = await axios.get(SIEG_JWT_URL, {
+    params: {
+      clientId: clientId,
+      secretKey: clientSecret,
+    },
+    timeout: 15000,
+  });
+  return resp.data;
+}
+
+/**
+ * Extrair token JWT da resposta (tenta varios campos)
+ */
+function extractToken(data) {
+  if (!data) return null;
+  // Pode vir como string direta, ou dentro de um objeto
+  if (typeof data === 'string' && data.length > 20) return data;
+  return data.token || data.jwt || data.access_token || data.accessToken || data.Token || data.Jwt || null;
+}
+
+/**
+ * Criar JWT tentando multiplas estrategias em sequencia
+ * Para na primeira que funcionar.
  */
 async function createJwt() {
-  const clientId = config.sieg && config.sieg.clientId;
-  const clientSecret = config.sieg && config.sieg.clientSecret;
-  if (!clientId || !clientSecret) {
-    throw new Error('[SIEG-AUTH] SIEG_CLIENT_ID e SIEG_CLIENT_SECRET nao configurados');
+  var creds = getCredentials();
+  if (!creds.clientId || !creds.clientSecret) {
+    throw new Error('[SIEG-AUTH] SIEG_CLIENT_ID e SIEG_CLIENT_SECRET nao configurados nas env vars');
   }
-  try {
-    const resp = await axios.post(SIEG_JWT_URL, {
-      clientId: clientId,
-      clientSecret: clientSecret,
-    }, { timeout: 15000 });
-    const data = resp.data;
-    // Cache JWT token
-    const jwtToken = data.token || data.jwt || data.access_token || data.accessToken;
-    if (jwtToken) {
-      _jwtCache.token = jwtToken;
-      _jwtCache.expiresAt = Date.now() + ((data.expires_in || data.expiresIn || 3600) * 1000) - 60000;
-      console.log('[SIEG-AUTH] JWT obtido com sucesso, expira em:', new Date(_jwtCache.expiresAt).toISOString());
+
+  console.log('[SIEG-AUTH] ClientId: ***' + creds.clientId.slice(-4) + ' | Tentando autenticacao...');
+
+  var strategies = [
+    tryBasicAuth,
+    tryQueryParams,
+    tryFormEncoded,
+    tryJsonPascal,
+    tryJsonCamel,
+    tryQueryCamel,
+  ];
+
+  var lastError = null;
+  for (var i = 0; i < strategies.length; i++) {
+    try {
+      var result = await strategies[i](creds.clientId, creds.clientSecret);
+      console.log('[SIEG-AUTH] Estrategia ' + (i + 1) + ' retornou:', JSON.stringify(result).slice(0, 300));
+      
+      var token = extractToken(result);
+      if (token) {
+        // Estimar expiracao (padrao: 1h)
+        var expiresIn = (result.expires_in || result.expiresIn || 3600);
+        _jwtCache.token = token;
+        _jwtCache.expiresAt = Date.now() + (expiresIn * 1000) - 60000;
+        console.log('[SIEG-AUTH] JWT obtido com sucesso (estrategia ' + (i + 1) + ')! Expira:', new Date(_jwtCache.expiresAt).toISOString());
+        console.log('[SIEG-AUTH] Token (primeiros 50 chars):', token.substring(0, 50) + '...');
+        return { token: token, estrategia: i + 1, raw: result };
+      }
+      
+      // Se a resposta veio mas nao tem token, pode ser sucesso com formato inesperado
+      // Vamos logar e continuar tentando
+      console.log('[SIEG-AUTH] Estrategia ' + (i + 1) + ' retornou resposta mas sem token reconhecido. Continuando...');
+    } catch (err) {
+      var errMsg = err.response?.data || err.message;
+      console.log('[SIEG-AUTH] Estrategia ' + (i + 1) + ' falhou:', typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg).slice(0, 200));
+      lastError = err;
     }
-    return data;
-  } catch (err) {
-    console.error('[SIEG-AUTH] Erro ao criar JWT:', err.response?.data || err.message);
-    throw err;
   }
+
+  throw new Error('[SIEG-AUTH] Todas as 6 estrategias de auth falharam. Ultimo erro: ' + (lastError?.response?.data || lastError?.message));
 }
 
 /**
  * Get authorization headers for SIEG API calls
  */
 async function getAuthHeaders() {
-  // Strategy 1: Use cached JWT (server-to-server, no browser needed)
+  // Return cached token if valid
   if (_jwtCache.token && Date.now() < _jwtCache.expiresAt) {
     return {
       'Authorization': 'Bearer ' + _jwtCache.token,
       'Content-Type': 'application/json',
     };
   }
-  // Strategy 2: Try to get new JWT via clientId + clientSecret
-  if (config.sieg && config.sieg.clientId && config.sieg.clientSecret) {
-    try {
-      await createJwt();
-      if (_jwtCache.token) {
-        return {
-          'Authorization': 'Bearer ' + _jwtCache.token,
-          'Content-Type': 'application/json',
-        };
-      }
-    } catch (jwtErr) {
-      console.warn('[SIEG-AUTH] JWT falhou, tentando OAuth:', jwtErr.message);
-    }
-  }
-  // Strategy 3: Fall back to OAuth token
-  const token = await getAccessToken();
+
+  // Try to get new JWT
+  var result = await createJwt();
   return {
-    'Authorization': 'Bearer ' + token,
+    'Authorization': 'Bearer ' + result.token,
     'Content-Type': 'application/json',
   };
 }
 
 /**
- * Manual token setter (for initial setup / testing)
- */
-function setTokens(accessToken, refreshToken, expiresIn = 3600) {
-  _tokenState.accessToken = accessToken;
-  _tokenState.refreshToken = refreshToken;
-  _tokenState.expiresAt = Date.now() + (expiresIn * 1000) - 60000;
-}
-
-/**
- * Get current token state (for debugging)
+ * Get current JWT state (for debugging)
  */
 function getTokenState() {
   return {
-    hasAccessToken: !!_tokenState.accessToken,
-    hasRefreshToken: !!_tokenState.refreshToken,
-    expiresAt: _tokenState.expiresAt,
-    isExpired: Date.now() >= _tokenState.expiresAt,
-    hasJwt: !!_jwtCache.token,
-    jwtExpired: Date.now() >= _jwtCache.expiresAt,
-    jwtExpiresAt: _jwtCache.expiresAt,
+    hasToken: !!_jwtCache.token,
+    expiresAt: _jwtCache.expiresAt,
+    isExpired: Date.now() >= _jwtCache.expiresAt,
+    tokenPreview: _jwtCache.token ? _jwtCache.token.substring(0, 30) + '...' : null,
   };
 }
 
+/**
+ * Invalidate cache (for testing / force re-auth)
+ */
+function invalidateCache() {
+  _jwtCache.token = null;
+  _jwtCache.expiresAt = 0;
+}
+
 module.exports = {
-  exchangeCode,
-  refreshToken,
-  getAccessToken,
-  getAuthHeaders,
   createJwt,
-  setTokens,
+  getAuthHeaders,
   getTokenState,
+  invalidateCache,
 };
