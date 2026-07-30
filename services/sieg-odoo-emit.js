@@ -517,17 +517,28 @@ async function buildLineData(client, db, uid, pwd, line) {
   var prodStudio = {}; // x_studio_ fields from product
 
   if (productId) {
+    // Read safe product fields first (no detailed_type which may not exist in SaaS)
+    var PRODUCT_SAFE = ['default_code', 'barcode', 'name', 'ncm_id', 'uom_id',
+      'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code'];
     try {
-      var prods = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
-        'default_code', 'barcode', 'name', 'detailed_type', 'ncm_id', 'uom_id',
-        'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code',
-      ]]);
+      var prods = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], PRODUCT_SAFE]);
       if (prods && prods[0]) {
         var pr = prods[0];
         defaultCode = pr.default_code || '';
         barcode = pr.barcode || '';
-        detailedType = pr.detailed_type || 'product';
         productName = pr.name || productName;
+
+        // Try detailed_type separately (may not exist in Odoo 19 SaaS)
+        try {
+          var dt = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['detailed_type']]);
+          if (dt && dt[0] && dt[0].detailed_type) detailedType = dt[0].detailed_type;
+        } catch (dtErr) {
+          // detailed_type not available — use type field instead
+          try {
+            var tp = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['type']]);
+            if (tp && tp[0]) detailedType = tp[0].type === 'service' ? 'service' : 'product';
+          } catch (tpErr) {}
+        }
 
         // NCM (l10n_br_fiscal.ncm may not exist in SaaS)
         if (pr.ncm_id && Array.isArray(pr.ncm_id)) {

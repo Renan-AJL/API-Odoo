@@ -97,9 +97,10 @@ async function createJwt() {
     throw new Error('[SIEG-AUTH] SIEG_CLIENT_ID e SIEG_CLIENT_SECRET nao configurados');
   }
   try {
+    // SIEG expects PascalCase: ClientId + SecretKey (not clientSecret)
     const resp = await axios.post(SIEG_JWT_URL, {
-      clientId: clientId,
-      clientSecret: clientSecret,
+      ClientId: clientId,
+      SecretKey: clientSecret,
     }, { timeout: 15000 });
     const data = resp.data;
     // Cache JWT token
