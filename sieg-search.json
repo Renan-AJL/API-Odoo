@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://www.authlete.com/kb/oauth-and-openid-connect/client-authentication/client-auth-private-key-jwt",
+    "name": "Client authentication using private_key_jwt method - Authlete",
+    "snippet": "Client · Client settings · Generating a JWT assertion",
+    "host_name": "www.authlete.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.va.gov/explore/api/benefits-claims/client-credentials",
+    "name": "Benefits Claims API Client Credentials Grant - VA API Platform",
+    "snippet": "To get authorized to make API requests, generate a JSON web token (JWT) and sign it using your private key. You'll then use the signed JWT as a client assertion",
+    "host_name": "developer.va.gov",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.signicat.com/docs/eid-hub/oidc/advanced-security/client-authentication-with-private-key-jwt",
+    "name": "Client authentication with Private Key JWT - Signicat Documentation",
+    "snippet": "In the Signicat Dashboard, navigate to Products > eID and Wallet Hub > OIDC clients. · Select the client you wish to use. · In the client ...",
+    "host_name": "developer.signicat.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://devforum.okta.com/t/get-a-service-application-jwt-with-a-client-secret/23074",
+    "name": "Get a Service Application JWT with a Client Secret - API",
+    "snippet": "With the org auth server, you will need to use the private_key_jwt client authentication method, as shown on the documentation you linked.",
+    "host_name": "devforum.okta.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.secureauth.com/iam/private-key-jwt-client-authentication",
+    "name": "Private key JWT client authentication - SecureAuth Product Docs",
+    "snippet": "Audience (aud) parameter...",
+    "host_name": "docs.secureauth.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

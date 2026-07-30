@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://www.sieg.com",
+    "name": "SIEG: Home",
+    "snippet": "Plataforma SIEG integrada ao ecossistema de parceiros. Compatível com o seu ERP. Acesse toda a infraestrutura SIEG via API Aberta. Para qualquer sistema ... Read more",
+    "host_name": "www.sieg.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://jwt.io",
+    "name": "JSON Web Tokens - jwt.io",
+    "snippet": "JSON Web Token ( JWT ) is a compact URL-safe means of representing claims to be transferred between two parties. Decode, verify, and generate JSON Web Tokens,",
+    "host_name": "jwt.io",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://suporte.dominioatendimento.com/central/faces/solucao.html?codigo=7539",
+    "name": "Como integrar SIEG com Domínio?",
+    "snippet": "Se você possui o SIEG Hub, pode integrá-lo com a Escrita Fiscal para facilitar a escrituração dos documentos fiscais, conforme segue: 1 - Configuração na SIEG . ...",
+    "host_name": "suporte.dominioatendimento.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=Mu0UoxrVujo",
+    "name": "YouTube",
+    "snippet": "Share your videos with friends, family, and the world.",
+    "host_name": "www.youtube.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://ajuda.vhsys.com.br/categorias/apps-e-integracoes/integracao-com-a-sieg",
+    "name": "Integração com a SIEG",
+    "snippet": "Jan 28, 2026 — Para conectar e permitir a comunicação entre o ERP e o SIEG , você precisa utilizar a chave API e o E-mail cadastrado na plataforma SIEG . Essa ... Read more",
+    "host_name": "ajuda.vhsys.com.br",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

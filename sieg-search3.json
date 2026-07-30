@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://www.sieg.com/hub",
+    "name": "Hub",
+    "snippet": "Plataforma de gestão fiscal e automação contábil para escritórios de contabilidade. contato@sieg.com (11) 3842 7110 (81) 3033 5087 ... Read more",
+    "host_name": "www.sieg.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.cloud.google.com/docs/authentication/api-keys?hl=pt",
+    "name": "Faça a gestão das chaves da API | Authentication",
+    "snippet": "Chav es da API associadas a uma conta de serviço. Esta página descreve como criar, editar e restringir chaves da API. Use chaves de API para aceder às APIs. ...",
+    "host_name": "docs.cloud.google.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.ibm.com/br-pt/think/topics/api-key",
+    "name": "O que é chave API?",
+    "snippet": "Uma chave API é um identificador exclusivo usado para autenticar softwares e sistemas que tentam acessar outros softwares ou sistemas por meio de uma API.",
+    "host_name": "www.ibm.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/learnprogramming/comments/1h1qxaa/how_are_api_keys_used_in_sites_for_authentication/?tl=pt-br",
+    "name": "Como são usadas as chaves de API em sites para",
+    "snippet": "as chaves de API são como seu e-mail/senha ao entrar em um site , mas geralmente estão criptografadas no banco de dados e usadas. Os ...",
+    "host_name": "www.reddit.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://manual-integracao-assinatura-eletronica.servicos.gov.br/pt_BR/6.1/iniciarintegracao.html",
+    "name": "Passo a passo — documentação Roteiro de Integracão API",
+    "snippet": "O próximo passo é o envio do arquivo com a chave pública para a pessoa e então ela poderá criptografar um e-mail ou um documento com a sua chave pública. Se ... Read more",
+    "host_name": "manual-integracao-assinatura-eletronica.servicos.gov.br",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]
