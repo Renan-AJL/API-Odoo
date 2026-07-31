@@ -15,7 +15,7 @@
  * 
  * Schema enviar XML:
  *   Request:  { "Xml": "<base64>" }
- *   Response: { isSuccess, errorMessage, statusCode, data, isFailure }
+ *   Response: { IsSuccess, ErrorMessage, StatusCode, Data, IsFailure }
  */
 const axios = require('axios');
 const { getAuthHeaders } = require('./sieg-auth');
@@ -29,7 +29,7 @@ const SIEG_BASE = 'https://api.sieg.com';
  * A SIEG assina o XML com certificado, envia a SEFAZ e retorna resultado
  * 
  * Schema: { "Xml": "<xml em base64>" }
- * Response: { isSuccess, data, errorMessage, statusCode }
+ * Response: { IsSuccess, Data, ErrorMessage, StatusCode, IsFailure }
  */
 async function enviarNFe(dadosOdoo) {
   const xml = gerarXmlNFe(dadosOdoo);
@@ -43,18 +43,16 @@ async function enviarNFe(dadosOdoo) {
   const result = resp.data;
   console.log('[SIEG-API] Resposta send-xml:', JSON.stringify(result).slice(0, 500));
 
-  // Verificar resultado no formato SIEG
-  var sucesso = false;
-  if (typeof result === 'object') {
-    sucesso = result.isSuccess === true;
-  }
+  // Verificar resultado no formato SIEG (PascalCase)
+  var sucesso = !!(result.IsSuccess === true);
 
   return {
     sucesso: sucesso,
     xmlEnviado: xml,
     resposta: result,
-    data: result.data || null,
-    erro: result.errorMessage || null,
+    data: result.Data || null,
+    erro: result.ErrorMessage || null,
+    statusCode: result.StatusCode || null,
   };
 }
 
@@ -74,17 +72,16 @@ async function emitirNFSe(dadosOdoo) {
   const result = resp.data;
   console.log('[SIEG-API] Resposta send-xml NFS-e:', JSON.stringify(result).slice(0, 500));
 
-  var sucesso = false;
-  if (typeof result === 'object') {
-    sucesso = result.isSuccess === true;
-  }
+  // Verificar resultado no formato SIEG (PascalCase)
+  var sucesso = !!(result.IsSuccess === true);
 
   return {
     sucesso: sucesso,
     xmlEnviado: xml,
     resposta: result,
-    data: result.data || null,
-    erro: result.errorMessage || null,
+    data: result.Data || null,
+    erro: result.ErrorMessage || null,
+    statusCode: result.StatusCode || null,
   };
 }
 
