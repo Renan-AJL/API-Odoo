@@ -151,7 +151,7 @@ const SIEG_POLL_INTERVAL_MS = parseInt(process.env.SIEG_POLL_INTERVAL_MS, 10) ||
 var siegPollTimer = null;
 
 function startSiegPolling() {
-  if (!config.odoo.enabled || !config.sieg.apiKey) {
+  if (!config.odoo.enabled || !config.sieg.clientId || !config.sieg.apiKey) {
     console.log('  [SIEG-POLL] DESATIVADO (Odoo ou SIEG nao configurados)');
     return;
   }
@@ -217,9 +217,12 @@ app.listen(PORT, () => {
   console.log('  [TE-AUTO-SYNC] DESATIVADO - Envio manual via botao na fatura');
   console.log('  ---');
   console.log('  [SIEG NF-e/NFS-e]');
+  console.log('  Client ID: ' + (config.sieg.clientId ? '***' + config.sieg.clientId.slice(-4) : 'NAO CONFIGURADO'));
+  console.log('  OAuth Token: ' + (config.sieg.oauthToken ? '***' + config.sieg.oauthToken.slice(-4) : 'NAO CONFIGURADO'));
   console.log('  API Key: ' + (config.sieg.apiKey ? '***' + config.sieg.apiKey.slice(-4) : 'NAO CONFIGURADO'));
   console.log('  TP Amb: ' + (config.sieg.tpAmb === '1' ? 'PRODUCAO' : 'HOMOLOGACAO'));
-  console.log('  Polling: ' + (config.odoo.enabled && config.sieg.apiKey ? 'ATIVO (' + (SIEG_POLL_INTERVAL_MS / 1000) + 's)' : 'DESATIVADO'));
+  var siegReady = config.odoo.enabled && config.sieg.clientId && config.sieg.apiKey && config.sieg.oauthToken;
+  console.log('  Polling: ' + (siegReady ? 'ATIVO (' + (SIEG_POLL_INTERVAL_MS / 1000) + 's)' : 'DESATIVADO'));
 
   // Iniciar polling SIEG
   startSiegPolling();

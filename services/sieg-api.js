@@ -1,87 +1,126 @@
 /**
- * services/sieg-api.js — Comunicação com API SIEG (up.sieg.com)
+ * services/sieg-api.js — Comunicacao com API SIEG
  * 
- * Doc oficial: https://ajuda.sieg.com/hc/pt-br/articles/integracao-api-sieg
- * 
- * Autenticação: api_key como query parameter
- * URL base: https://up.sieg.com
+ * Documentacao: SIEG API para Sistemas Externos
  * 
  * Endpoints:
- *   - EnviarXml: POST /EnviarXml?api_key={key}  body: {"Xml": "base64"}
+ *   - Enviar XMLs:    POST (XML em Base64)
+ *   - Gerar DANFE:    POST /api/v1/gerarDanfeViaXml
+ *   - Gerar DANFSE:   POST /api/v1/gerarDanfseViaXml
+ * 
+ * Headers obrigatorios em TODAS as requisicoes:
+ *   Authorization: Bearer {jwt}
+ *   X-OAuth-Token: {oauth_token}
+ *   (X-API-Key se configurado)
+ * 
+ * Schema enviar XML:
+ *   Request:  { "Xml": "<base64>" }
+ *   Response: { IsSuccess, ErrorMessage, StatusCode, Data, IsFailure }
  */
 const axios = require('axios');
+const { getAuthHeaders } = require('./sieg-auth');
 const { gerarXmlNFe } = require('./sieg-nfe-xml');
 const { gerarXmlDPS } = require('./sieg-nfse-xml');
-const config = require('../config');
 
-const SIEG_BASE = 'https://up.sieg.com';
+const SIEG_BASE = 'https://api.sieg.com';
 
 /**
- * Enviar NF-e XML ao SIEG via API up.sieg.com
+ * Enviar NF-e XML ao SIEG
+ * A SIEG assina o XML com certificado, envia a SEFAZ e retorna resultado
+ * 
+ * Schema: { "Xml": "<xml em base64>" }
+ * Response: { IsSuccess, Data, ErrorMessage, StatusCode, IsFailure }
  */
 async function enviarNFe(dadosOdoo) {
   const xml = gerarXmlNFe(dadosOdoo);
-  console.log('[SIEG-API] Enviando NF-e XML (' + xml.length + ' chars) via up.sieg.com');
+  console.log('[SIEG-API] Enviando NF-e XML (' + xml.length + ' chars)');
 
-  const apiKey = config.sieg && config.sieg.apiKey;
-  if (!apiKey) throw new Error('[SIEG-API] SIEG_API_KEY nao configurada no Render');
-
-  const url = SIEG_BASE + '/EnviarXml?api_key=' + encodeURIComponent(apiKey);
-  const resp = await axios.post(url, {
+  const headers = await getAuthHeaders();
+  const resp = await axios.post(SIEG_BASE + '/api/v1/send-xml', {
     Xml: Buffer.from(xml, 'utf-8').toString('base64'),
-  }, { timeout: 60000 });
+  }, { headers, timeout: 60000 });
 
   const result = resp.data;
-  console.log('[SIEG-API] Resposta EnviarXml:', JSON.stringify(result).slice(0, 500));
+  console.log('[SIEG-API] Resposta send-xml:', JSON.stringify(result).slice(0, 500));
 
-  // SIEG up.sieg.com retorna "Importado com sucesso" ou erro
-  var sucesso = (resp.status === 200 && (typeof result === 'string' && result.indexOf('sucesso') >= 0))
-    || (result && (result.status === 200 || result.Status === 200 || result.sucesso));
+  // Verificar resultado no formato SIEG (PascalCase)
+  var sucesso = !!(result.IsSuccess === true);
 
   return {
-    sucesso: !!sucesso,
+    sucesso: sucesso,
     xmlEnviado: xml,
     resposta: result,
-    status: resp.status,
+    data: result.Data || null,
+    erro: result.ErrorMessage || null,
+    statusCode: result.StatusCode || null,
   };
 }
 
 /**
- * Emitir NFS-e via SIEG (mesmo endpoint EnviarXml)
+ * Emitir NFS-e via SIEG
+ * Envia DPS XML, SIEG processa e retorna resultado
  */
 async function emitirNFSe(dadosOdoo) {
   const xml = gerarXmlDPS(dadosOdoo);
-  console.log('[SIEG-API] Emitindo NFS-e DPS (' + xml.length + ' chars) via up.sieg.com');
+  console.log('[SIEG-API] Emitindo NFS-e DPS (' + xml.length + ' chars)');
 
-  const apiKey = config.sieg && config.sieg.apiKey;
-  if (!apiKey) throw new Error('[SIEG-API] SIEG_API_KEY nao configurada no Render');
-
-  const url = SIEG_BASE + '/EnviarXml?api_key=' + encodeURIComponent(apiKey);
-  const resp = await axios.post(url, {
+  const headers = await getAuthHeaders();
+  const resp = await axios.post(SIEG_BASE + '/api/v1/send-xml', {
     Xml: Buffer.from(xml, 'utf-8').toString('base64'),
-  }, { timeout: 60000 });
+  }, { headers, timeout: 60000 });
 
   const result = resp.data;
-  console.log('[SIEG-API] Resposta EnviarXml NFS-e:', JSON.stringify(result).slice(0, 500));
+  console.log('[SIEG-API] Resposta send-xml NFS-e:', JSON.stringify(result).slice(0, 500));
 
-  var sucesso = (resp.status === 200 && (typeof result === 'string' && result.indexOf('sucesso') >= 0))
-    || (result && (result.status === 200 || result.Status === 200 || result.sucesso));
+  // Verificar resultado no formato SIEG (PascalCase)
+  var sucesso = !!(result.IsSuccess === true);
 
   return {
-    sucesso: !!sucesso,
+    sucesso: sucesso,
     xmlEnviado: xml,
     resposta: result,
-    status: resp.status,
+    data: result.Data || null,
+    erro: result.ErrorMessage || null,
+    statusCode: result.StatusCode || null,
   };
+}
+
+/**
+ * Gerar DANFE (PDF) a partir do XML autorizado
+ */
+async function gerarDanfe(xmlAutorizado) {
+  console.log('[SIEG-API] Gerando DANFE via XML (' + xmlAutorizado.length + ' chars)');
+
+  const headers = await getAuthHeaders();
+  const resp = await axios.post(SIEG_BASE + '/api/v1/gerarDanfeViaXml', {
+    Xml: Buffer.from(xmlAutorizado, 'utf-8').toString('base64'),
+  }, { headers, timeout: 30000 });
+
+  return resp.data;
+}
+
+/**
+ * Gerar DANFSE (PDF) a partir do XML autorizado
+ */
+async function gerarDanfse(xmlAutorizado) {
+  console.log('[SIEG-API] Gerando DANFSE via XML (' + xmlAutorizado.length + ' chars)');
+
+  const headers = await getAuthHeaders();
+  const resp = await axios.post(SIEG_BASE + '/api/v1/gerarDanfseViaXml', {
+    Xml: Buffer.from(xmlAutorizado, 'utf-8').toString('base64'),
+  }, { headers, timeout: 30000 });
+
+  return resp.data;
 }
 
 /**
  * Emitir nota fiscal (auto-detect NF-e ou NFS-e)
+ * Funcao principal chamada pela rota e pelo polling
  */
 async function emitirNota(dadosOdoo) {
   let tipo = dadosOdoo.tipo;
   if (!tipo) {
-    tipo = (dadosOdoo.service && dadosOdoo.lines?.every(l => l.detailed_type === 'service')) ? 'nfse' : 'nfe';
+    tipo = (dadosOdoo.service && dadosOdoo.lines && dadosOdoo.lines.every(function(l) { return l.detailed_type === 'service'; })) ? 'nfse' : 'nfe';
   }
 
   let resultado;
@@ -90,13 +129,37 @@ async function emitirNota(dadosOdoo) {
   } else {
     resultado = await enviarNFe(dadosOdoo);
   }
-
   resultado.tipo = tipo;
+
+  // Se autorizado, gerar PDF
+  if (resultado.sucesso && resultado.data) {
+    try {
+      var xmlAutorizado = resultado.data;
+      // Se data vier em base64, decodificar
+      if (xmlAutorizado.length < 500 && xmlAutorizado.indexOf('<?xml') === -1) {
+        xmlAutorizado = Buffer.from(xmlAutorizado, 'base64').toString('utf-8');
+      }
+      
+      if (tipo === 'nfse') {
+        resultado.pdfBase64 = (await gerarDanfse(xmlAutorizado));
+      } else {
+        resultado.pdfBase64 = (await gerarDanfe(xmlAutorizado));
+      }
+      resultado.pdfGerado = true;
+    } catch (errPdf) {
+      console.error('[SIEG-API] Erro ao gerar PDF (nota ainda pode estar autorizada):', errPdf.message);
+      resultado.pdfGerado = false;
+      resultado.pdfErro = errPdf.message;
+    }
+  }
+
   return resultado;
 }
 
 module.exports = {
   enviarNFe,
   emitirNFSe,
+  gerarDanfe,
+  gerarDanfse,
   emitirNota,
 };

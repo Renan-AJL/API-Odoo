@@ -115,8 +115,12 @@ const config = {
 
   // --- SIEG (NF-e / NFS-e) ---
   sieg: {
+    clientId: process.env.SIEG_CLIENT_ID || '',
+    clientSecret: process.env.SIEG_CLIENT_SECRET || '',
+    oauthToken: process.env.SIEG_OAUTH_TOKEN || '',
     apiKey: process.env.SIEG_API_KEY || '',
-    tpAmb: process.env.SIEG_TP_AMB || '1', // 1=producao, 2=homologacao
+    callbackUrl: process.env.SIEG_CALLBACK_URL || '',
+    tpAmb: process.env.SIEG_TP_AMB || '2', // 1=producao, 2=homologacao
   },
   BASE_URL: process.env.BASE_URL || '',
 

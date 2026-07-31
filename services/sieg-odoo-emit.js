@@ -34,9 +34,10 @@ var config = require('../config');
 function createClient(url) {
   var base = url.replace(/\/+$/, '');
   var host = base.replace('https://', '').replace('http://', '');
+  var port = base.startsWith('https') ? 443 : 80;
   return {
-    common: xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/common', port: 443 }),
-    models: xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/object', port: 443 }),
+    common: xmlrpc.createClient({ host: host, path: '/xmlrpc/2/common', port: port }),
+    models: xmlrpc.createClient({ host: host, path: '/xmlrpc/2/object', port: port }),
   };
 }
 
@@ -132,7 +133,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   // 1. Read account.move
   var moves = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], [
     'name', 'partner_id', 'company_id', 'invoice_date', 'date',
-    'amount_total', 'amount_untaxed', 'narration', 'invoice_line_ids',
+    'amount_total', 'amount_untaxed', 'note', 'invoice_line_ids',
     'x_studio_nfe_status', 'x_studio_nfse_status', 'payment_state',
   ]]);
   if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
@@ -149,46 +150,13 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   var partner = await readPartner(client, db, uid, pwd, partnerId);
 
   // 4. Read invoice lines + product data
-  // IMPORTANT: Odoo XML-RPC returns One2many as [id, name] tuples — extract plain IDs
-  var lineIdsRaw = move.invoice_line_ids || [];
-  var lineIds = lineIdsRaw.map(function(v) { return Array.isArray(v) ? v[0] : v; }).filter(function(v) { return typeof v === 'number' && v > 0; });
-  console.log('[SIEG-EMIT] Linhas da fatura: ' + lineIdsRaw.length + ' raw, ' + lineIds.length + ' IDs extraidos');
-
-  if (!lineIds.length) throw new Error('Fatura sem linhas (invoice_line_ids vazio ou invalido)');
-
-  // Try reading with standard fields first
-  var rawLines = [];
-  try {
-    rawLines = await executeKw(client, db, uid, pwd, 'account.move.line', 'read', [lineIds, [
-      'display_type', 'product_id', 'name', 'quantity', 'price_unit',
-      'price_subtotal', 'tax_ids', 'discount',
-    ]]);
-  } catch (lineErr) {
-    // If price_subtotal or discount fails, try minimal field set
-    console.warn('[SIEG-EMIT] Campo invalido em account.move.line, tentando campo minimos:', lineErr.message.substring(0, 120));
-    try {
-      rawLines = await executeKw(client, db, uid, pwd, 'account.move.line', 'read', [lineIds, [
-        'display_type', 'product_id', 'name', 'quantity', 'price_unit', 'tax_ids',
-      ]]);
-    } catch (e2) {
-      throw new Error('Nao foi possivel ler linhas da fatura: ' + e2.message.substring(0, 200));
-    }
-  }
-
-  console.log('[SIEG-EMIT] rawLines retornadas: ' + (rawLines ? rawLines.length : 0));
-  if (rawLines) {
-    for (var dl = 0; dl < Math.min(rawLines.length, 3); dl++) {
-      var rl = rawLines[dl];
-      console.log('[SIEG-EMIT]   Line ' + rl.id + ': display_type=' + JSON.stringify(rl.display_type) + ' product=' + JSON.stringify(rl.product_id) + ' name=' + (rl.name || '').substring(0, 40));
-    }
-  }
-
-  // Filter: keep only lines that are NOT section/note/payment headers
-  var invoiceLines = (rawLines || []).filter(function(l) {
-    return l.display_type !== 'line_section' && l.display_type !== 'line_note' && l.display_type !== 'line_payment';
-  });
-  console.log('[SIEG-EMIT] invoiceLines apos filtro: ' + invoiceLines.length);
-  if (!invoiceLines.length) throw new Error('Fatura sem linhas de produto/servico (todas tinham display_type)');
+  var lineIds = move.invoice_line_ids || [];
+  var rawLines = await executeKw(client, db, uid, pwd, 'account.move.line', 'read', [lineIds, [
+    'display_type', 'product_id', 'name', 'quantity', 'price_unit',
+    'price_subtotal', 'tax_ids', 'discount',
+  ]]);
+  var invoiceLines = rawLines.filter(function(l) { return !l.display_type; });
+  if (!invoiceLines.length) throw new Error('Fatura sem linhas de produto/servico');
 
   // 5. Get next NF number from company
   var serie, numField, nextNum;
@@ -218,7 +186,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       number: String(nextNum),
       date_order: move.invoice_date || move.date,
       amount_total: move.amount_total,
-      note: move.narration || '',
+      note: move.note || '',
     },
     lines: linesData,
     config: {
@@ -362,6 +330,7 @@ async function postChatterResult(client, db, uid, pwd, moveId, moveName, tipo, i
       res_id: moveId,
       body: body,
       message_type: 'comment',
+      subtype_xmlid: 'mail.mt_note',
     };
     if (attachIds.length > 0) {
       msgVals.attachment_ids = [[6, 0, attachIds]];
@@ -369,43 +338,6 @@ async function postChatterResult(client, db, uid, pwd, moveId, moveName, tipo, i
     await executeKw(client, db, uid, pwd, 'mail.message', 'create', [msgVals]);
     console.log('[SIEG-EMIT] Mensagem postada no chatter');
   } catch (e) { console.error('[SIEG-EMIT] Erro postar chatter:', e.message); }
-}
-
-// Safe Read: only standard Odoo fields (no l10n_br dependency)
-var PARTNER_SAFE = ['name','street','street2','city','state_id','zip','phone','email','is_company','vat','country_id','city_id'];
-
-// BR-specific fields to try ONE BY ONE (never in batch to avoid partial rejection)
-var PARTNER_BR_INDIVIDUAL = ['inscr_est','legal_name','number','district','l10n_br_city_id'];
-
-async function safeReadPartner(client, db, uid, pwd, pid) {
-  // Step 1: Read only standard fields (guaranteed to work)
-  var r;
-  try {
-    r = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[pid], PARTNER_SAFE]);
-  } catch (e) {
-    console.error('[SIEG-EMIT] Erro ao ler parceiro ' + pid + ':', e.message.substring(0, 150));
-    return {};
-  }
-  if (!r || !r.length) return {};
-  var partner = r[0];
-
-  // Map vat -> cnpj_cpf for downstream compatibility
-  partner.cnpj_cpf = partner.vat || '';
-
-  // Step 2: Try each BR field individually (silent fail per field)
-  for (var i = 0; i < PARTNER_BR_INDIVIDUAL.length; i++) {
-    var field = PARTNER_BR_INDIVIDUAL[i];
-    try {
-      var br = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[pid], [field]]);
-      if (br && br[0] && br[0][field] !== undefined && br[0][field] !== false) {
-        partner[field] = br[0][field];
-      }
-    } catch (e) {
-      // Field does not exist in this Odoo instance — skip silently
-    }
-  }
-
-  return partner;
 }
 
 // ============================================================
@@ -423,21 +355,20 @@ async function readCompany(client, db, uid, pwd, companyId) {
   var pId = tupId(c.partner_id);
   var p = {};
   if (pId) {
-    p = await safeReadPartner(client, db, uid, pwd, pId);
+    var pRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[pId], [
+      'cnpj_cpf', 'inscr_est', 'legal_name', 'street', 'street2', 'number',
+      'city', 'state_id', 'zip', 'phone', 'email',
+      'city_id', 'l10n_br_city_id', 'district',
+    ]]);
+    if (pRecs && pRecs[0]) p = pRecs[0];
   }
 
   var stateCode = '', stateIbge = '';
   var stateId = tupId(c.state_id || p.state_id);
   if (stateId) {
-    // Read code first (standard field)
     try {
-      var sts = await executeKw(client, db, uid, pwd, 'res.country.state', 'read', [[stateId], ['code']]);
-      if (sts && sts[0]) stateCode = sts[0].code || '';
-    } catch (e) {}
-    // Try ibge_code separately (l10n_br field, may not exist)
-    try {
-      var sts2 = await executeKw(client, db, uid, pwd, 'res.country.state', 'read', [[stateId], ['ibge_code']]);
-      if (sts2 && sts2[0]) stateIbge = sts2[0].ibge_code || '';
+      var sts = await executeKw(client, db, uid, pwd, 'res.country.state', 'read', [[stateId], ['code', 'ibge_code']]);
+      if (sts && sts[0]) { stateCode = sts[0].code || ''; stateIbge = sts[0].ibge_code || ''; }
     } catch (e) {}
   }
 
@@ -446,7 +377,7 @@ async function readCompany(client, db, uid, pwd, companyId) {
   if (cityRef && Array.isArray(cityRef)) cityIbge = await readCityIbge(client, db, uid, pwd, cityRef[0]);
 
   return {
-    cnpj_cpf: (p.cnpj_cpf || p.vat || c.vat || '22603750000190').replace(/[^0-9]/g, ''),
+    cnpj_cpf: p.cnpj_cpf || c.vat || '22603750000190',
     legal_name: p.legal_name || c.name || 'AJL FERRO E ACO LTDA',
     name: c.name || 'AJL',
     inscr_est: p.inscr_est || '9069585890',
@@ -455,7 +386,7 @@ async function readCompany(client, db, uid, pwd, companyId) {
     street2: p.street2 || p.district || '',
     city: c.city || p.city || 'Curitiba',
     state: stateCode || 'PR',
-    zip: (c.zip || p.zip || '').replace(/[^0-9]/g, ''),
+    zip: c.zip || p.zip || '',
     city_ibge_code: cityIbge || '4106902',
     state_ibge: stateIbge || '41',
     crt: '1',
@@ -472,8 +403,13 @@ async function readCompany(client, db, uid, pwd, companyId) {
 // Read Partner
 // ============================================================
 async function readPartner(client, db, uid, pwd, partnerId) {
-  var p = await safeReadPartner(client, db, uid, pwd, partnerId);
-  if (!p.name) throw new Error('Parceiro ' + partnerId + ' nao encontrado');
+  var recs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], [
+    'name', 'legal_name', 'cnpj_cpf', 'inscr_est',
+    'street', 'street2', 'number', 'city', 'state_id', 'zip',
+    'phone', 'email', 'is_company', 'city_id', 'l10n_br_city_id', 'district',
+  ]]);
+  if (!recs || !recs.length) throw new Error('Parceiro ' + partnerId + ' nao encontrado');
+  var p = recs[0];
 
   var stateCode = '';
   var stId = tupId(p.state_id);
@@ -489,7 +425,7 @@ async function readPartner(client, db, uid, pwd, partnerId) {
   if (cityRef && Array.isArray(cityRef)) cityIbge = await readCityIbge(client, db, uid, pwd, cityRef[0]);
 
   return {
-    cnpj_cpf: (p.cnpj_cpf || p.vat || '').replace(/[^0-9]/g, ''),
+    cnpj_cpf: p.cnpj_cpf || '',
     legal_name: p.legal_name || p.name || '',
     xNome: p.name || '',
     inscr_est: p.inscr_est || '',
@@ -498,7 +434,7 @@ async function readPartner(client, db, uid, pwd, partnerId) {
     street2: p.street2 || p.district || '',
     city: p.city || '',
     state: stateCode,
-    zip: (p.zip || '').replace(/[^0-9]/g, ''),
+    zip: p.zip || '',
     city_ibge_code: cityIbge,
     phone: p.phone || '',
     email: p.email || '',
@@ -517,43 +453,24 @@ async function buildLineData(client, db, uid, pwd, line) {
   var prodStudio = {}; // x_studio_ fields from product
 
   if (productId) {
-    // Read safe product fields first (no l10n_br fields that may not exist in SaaS)
-    var PRODUCT_SAFE = ['default_code', 'barcode', 'name', 'uom_id',
-      'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code'];
-    var pr = null;
     try {
-      var prods = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], PRODUCT_SAFE]);
+      var prods = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
+        'default_code', 'barcode', 'name', 'detailed_type', 'ncm_id', 'uom_id',
+        'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code',
+      ]]);
       if (prods && prods[0]) {
-        pr = prods[0];
+        var pr = prods[0];
         defaultCode = pr.default_code || '';
         barcode = pr.barcode || '';
+        detailedType = pr.detailed_type || 'product';
         productName = pr.name || productName;
 
-        // Try detailed_type separately (may not exist in Odoo 19 SaaS)
-        try {
-          var dt = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['detailed_type']]);
-          if (dt && dt[0] && dt[0].detailed_type) detailedType = dt[0].detailed_type;
-        } catch (dtErr) {
-          // detailed_type not available — use type field instead
+        // NCM
+        if (pr.ncm_id && Array.isArray(pr.ncm_id)) {
           try {
-            var tp = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['type']]);
-            if (tp && tp[0]) detailedType = tp[0].type === 'service' ? 'service' : 'product';
-          } catch (tpErr) {}
-        }
-
-        // Try ncm_id separately (l10n_br field, may not exist in SaaS)
-        try {
-          var ncmData = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['ncm_id']]);
-          if (ncmData && ncmData[0] && ncmData[0].ncm_id && Array.isArray(ncmData[0].ncm_id)) {
-            try {
-              var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[ncmData[0].ncm_id[0]], ['code']]);
-              if (ncmRec && ncmRec[0]) ncm = ncmRec[0].code || '';
-            } catch (e) {
-              console.log('[SIEG-EMIT] l10n_br_fiscal.ncm nao disponivel, usando default_code como NCM');
-            }
-          }
-        } catch (ncmErr) {
-          // ncm_id field not available in this instance
+            var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[pr.ncm_id[0]], ['code']]);
+            if (ncmRec && ncmRec[0]) ncm = ncmRec[0].code || '';
+          } catch (e) {}
         }
 
         // UoM
@@ -604,7 +521,7 @@ function buildServiceBlock(linesData, move) {
   var cNBS = '999999999';
   var pAliq = '2.00';
   var cIntContrib = '';
-  var xDescServ = move.narration || 'Servico prestado conforme contrato';
+  var xDescServ = move.note || 'Servico prestado conforme contrato';
 
   for (var i = 0; i < linesData.length; i++) {
     var l = linesData[i];
@@ -724,6 +641,7 @@ async function safeUpdateError(client, db, uid, pwd, moveId, tipo, errMsg) {
     await executeKw(client, db, uid, pwd, 'mail.message', 'create', [{
       model: 'account.move', res_id: moveId,
       body: '<b>Erro na Emissao de ' + (tipo === 'nfe' ? 'NF-e' : 'NFS-e') + '</b><br/>' + errMsg.substring(0, 500),
+      message_type: 'comment', subtype_xmlid: 'mail.mt_note',
     }]);
   } catch (e) { console.error('[SIEG-EMIT] Falha ao registrar erro:', e.message); }
 }
