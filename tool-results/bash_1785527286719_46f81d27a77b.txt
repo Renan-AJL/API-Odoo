@@ -1,0 +1,2360 @@
+===== sieg-swagger-engine.json =====
+{
+  "swagger": "2.0",
+  "info": {
+    "version": "engine",
+    "title": "SIEG API Engine",
+    "description": "API Engine"
+  },
+  "host": "api.sieg.com",
+  "schemes": [
+    "https"
+  ],
+  "paths": {
+    "/api/v1/listar": {
+      "get": {
+        "tags": [
+          "Certificates"
+        ],
+        "summary": "Listar Certificados cadastrados",
+        "description": "<br />\r\n            Obtenha uma lista de certificados cadastrados e valide as informações do seu certificado, incluindo os tipos de notas ativadas para captura, entre outros.\r\n            É necessário enviar um parâmetro booleano chamado 'active', definindo-o como true ou false, para filtrar os certificados ativos ou inativos.\r\n            Por padrão, serão retornados os 100 primeiros certificados. Utilize a paginação para acessar os demais.",
+        "operationId": "Certificates_Get",
+        "consumes": [],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "active",
+            "in": "query",
+            "description": "Filtrar certificados ativos (true) ou inativos (false)",
+            "required": true,
+            "type": "boolean"
+          },
+          {
+            "name": "pagina",
+            "in": "query",
+            "description": "Página da pesquisa (padrão: 0)",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta."
+          },
+          "404": {
+            "description": "Nenhum certificado encontrado."
+          },
+          "500": {
+            "description": "Erro interno do servidor."
+          }
+        }
+      }
+    },
+    "/api/v1/registrar": {
+      "post": {
+        "tags": [
+          "Certificates"
+        ],
+        "summary": "Registrar Certificado",
+        "description": "<br />\r\n            Utilize esta rota para cadastrar certificados. Envie as informações necessárias no corpo da requisição, seguindo o padrão especificado na documentação.\r\n            Instruções: No campo \"TipoCertificado\" especificar se é Pfx ou P12. No campo \"TipoConsultaNfse\" especificar se é Municipal ou Nacional.\r\n            No campo UfCertificado especificar o código do Município baseado nos códigos do IBGE.\r\n            Certificado digital deve ser enviado em Base64.",
+        "operationId": "Certificates_Post",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "certificadoRequest",
+            "in": "body",
+            "description": "Json com dados da solicitação",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/CertificadoRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta."
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          },
+          "500": {
+            "description": "Erro interno do servidor."
+          }
+        }
+      }
+    },
+    "/api/v1/editar": {
+      "post": {
+        "tags": [
+          "Certificates"
+        ],
+        "summary": "Atualizar Certificado",
+        "description": "<br />\r\n            Utilize esta rota para editar certificados. Envie as informações necessárias no corpo da requisição, seguindo o padrão especificado na documentação.\r\n            Instruções: No campo \"TipoCertificado\" especificar se é Pfx ou P12. No campo \"TipoConsultaNfse\" especificar se é Municipal ou Nacional.\r\n            No campo UfCertificado especificar o código do Município baseado nos códigos do IBGE.",
+        "operationId": "Certificates_Edit",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "certificadoRequest",
+            "in": "body",
+            "description": "Json com dados da solicitação",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/CertificadoRequestEdit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta."
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          },
+          "500": {
+            "description": "Erro interno do servidor."
+          }
+        }
+      }
+    },
+    "/api/v1/habilitar": {
+      "post": {
+        "tags": [
+          "Certificates"
+        ],
+        "summary": "Ativar Certificado",
+        "description": "<br />\r\n            Utilize esta rota para reativar certificados desativados. É necessário enviar o ID do certificado desativado para realizar a ativação.",
+        "operationId": "Certificates_Enable",
+        "consumes": [],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "description": "ID do certificado",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, certificado habilitado."
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          },
+          "500": {
+            "description": "Erro interno do servidor."
+          }
+        }
+      }
+    },
+    "/api/v1/desabilitar": {
+      "post": {
+        "tags": [
+          "Certificates"
+        ],
+        "summary": "Desabilitar Certificado",
+        "description": "<br />\r\n            Utilize esta rota para desativar certificados ativos. É necessário enviar o ID do certificado ativo para realizar a desativação.",
+        "operationId": "Certificates_Disable",
+        "consumes": [],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "description": "ID do certificado",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, certificado desabilitado."
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          },
+          "500": {
+            "description": "Erro interno do servidor."
+          }
+        }
+      }
+    },
+    "/api/v1/deletar": {
+      "delete": {
+        "tags": [
+          "Certificates"
+        ],
+        "summary": "Deletar Certificado",
+        "description": "<br />\r\n            Utilize esta rota para deletar um certificado. É necessário fornecer o ID do certificado que deseja excluir.",
+        "operationId": "Certificates_Delete",
+        "consumes": [],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "description": "ID do certificado",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, certificado deletado."
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          },
+          "500": {
+            "description": "Erro interno do servidor."
+          }
+        }
+      }
+    },
+    "/api/v1/status": {
+      "get": {
+        "tags": [
+          "Certificates"
+        ],
+        "summary": "Status do Certificado",
+        "description": "<br />\r\n            Utilize esta rota para validar o status da consulta do certificado. É necessário enviar o ID do certificado.",
+        "operationId": "Certificates_Status",
+        "consumes": [],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "description": "ID do certificado",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta."
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          },
+          "500": {
+            "description": "Erro interno do servidor."
+          }
+        }
+      }
+    },
+    "/api/v1/baixar-xml/nsu": {
+      "post": {
+        "tags": [
+          "DownloadXml"
+        ],
+        "summary": "Download de XMLs por Nsu",
+        "description": "<br />\r\n              Se autentique na rota de acordo com a documentação...\r\n              Ao realizar o download dos eventos, o sistema capturará os eventos associados a cada nota, podendo resultar em mais de 50 retornos.\r\n            <br /><br />\r\n            Instruções de envio:\r\n              ListaNsu deve ser uma lista de no máximo 50 itens.\r\n              BaixarEventos indica se vai baixar os eventos vinculados a nota.\r\n              TipoXml -&gt; 1 - NFe / 2 - CTe / 3 - NFSe / 4 - NFCe / 5 - CFe\r\n              DataEmissaoInicial filtra a data de emissão a partir do dia especificado",
+        "operationId": "DownloadXml_DownloadXmlNsu",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "downloadRequest",
+            "in": "body",
+            "description": "Json com dados da solicitação",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/DownloadNsuRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta.",
+            "schema": {
+              "$ref": "#/definitions/DownloadNsuRequestDto"
+            }
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          }
+        }
+      }
+    },
+    "/api/v1/baixar-xml/nsu/lote": {
+      "post": {
+        "tags": [
+          "DownloadXml"
+        ],
+        "summary": "Download de XMLs em Lote por NSU",
+        "description": "<br />\r\n              Realiza o download em lote dos XMLs com base em uma lista de NSUs fornecida.\r\n              Ao realizar o download dos eventos, o sistema capturará os eventos associados a cada nota.\r\n            <br /><br />\r\n            Instruções de envio:\r\n              ListaNsu deve ser uma lista de no máximo 50 NSUs.\r\n              BaixarEventos indica se vai baixar os eventos vinculados à nota.",
+        "operationId": "DownloadXml_DownloadXmlNsuLote",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "downloadRequest",
+            "in": "body",
+            "description": "Json com dados da solicitação",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/DownloadNsuLoteRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta.",
+            "schema": {
+              "$ref": "#/definitions/DownloadNsuLoteRequestDto"
+            }
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          }
+        }
+      }
+    },
+    "/api/v1/buscar-xmls/nsu": {
+      "post": {
+        "tags": [
+          "DownloadXml"
+        ],
+        "summary": "",
+        "operationId": "DownloadXml_ListDocumentsToConsultByNsu",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "nsuToConsult",
+            "in": "body",
+            "description": "",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/NsuToConsultRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta.",
+            "schema": {
+              "$ref": "#/definitions/NsuToConsultRequestDto"
+            }
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          }
+        }
+      }
+    },
+    "/api/v1/consultar-nsu": {
+      "get": {
+        "tags": [
+          "DownloadXml"
+        ],
+        "summary": "Retorna o primeiro e o último NSU disponíveis para a empresa autenticada.",
+        "description": "<br />\r\n              O PrimeiroNsu representa o menor NSU disponível nos índices do Elasticsearch (últimos 4 meses).\r\n              O UltimoNsu representa o contador atual de NSU da empresa.",
+        "operationId": "DownloadXml_GetNsuRange",
+        "consumes": [],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta."
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          }
+        }
+      }
+    },
+    "/api/v1/baixar-xml": {
+      "post": {
+        "tags": [
+          "DownloadXml"
+        ],
+        "summary": "Download de XML Específico",
+        "description": "<br />\r\n                Integre o seu sistema com o Cofre SIEG e realize o download de XMLs específicos que estão armazenados em nuvem\r\n            <br /><br />\r\n              Instruções para o Filtro de Eventos:\r\n                Confirmação da operação: 210200 / Desconhecimento da operação: 210220 / Operação não realizada: 210240 / Conhecimento da operação: 210210 / \r\n                Cancelamento da NFe: 110111 / Cancelamento NFe por substituição: 110112 / Carta de Correção: 110110 / Cancelamento CTe: 610601 / \r\n                Cancelamento NFS-e: 101101 / Cancelamento NFSe por substituição: 105102 / Cancelamento NFSe Deferrido: 105104 / Averbacao para Exportacao: 790700",
+        "operationId": "DownloadXml_BaixarXml",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "request",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/DownloadIndividualXmlRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta.",
+            "schema": {
+              "$ref": "#/definitions/DownloadResponse"
+            }
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          }
+        }
+      }
+    },
+    "/api/v1/baixar-xmls": {
+      "post": {
+        "tags": [
+          "DownloadXml"
+        ],
+        "summary": "Download de XMLs em Lote V2 (Retorno padrão API antiga)",
+        "description": "<br />\r\n              Integre o seu sistema com o Cofre SIEG e realize o download em lote dos XMLs armazenados.\r\n              Ao realizar o download dos eventos, o sistema capturará os eventos associados a cada nota, podendo resultar em mais de 50 retornos.\r\n            <br /><br />\r\n              Instruções gerais:\r\n                O filtro de data de emissão aceita apenas hora, minuto e segundo para NFe, NFCe, CTe e CFe. Para NFSe, somente dia, mês e ano são permitidos.\r\n                O filtro de valor, por padrão, utiliza um intervalo de R$1,00. Para alterá-lo, basta usar o filtro de margem de valor.\r\n              Instruções para o Filtro de Eventos:\r\n                Confirmação da operação: 210200 / Desconhecimento da operação: 210220 / Operação não realizada: 210240 / Conhecimento da operação: 210210 / \r\n                Cancelamento da NFe: 110111 / Cancelamento NFe por substituição: 110112 / Carta de Correção: 110110 / Cancelamento CTe: 610601 / \r\n                Cancelamento NFS-e: 101101 / Cancelamento NFSe por substituição: 105102 / Cancelamento NFSe Deferrido: 105104 / Averbacao para Exportacao: 790700",
+        "operationId": "DownloadXml_BaixarXmls",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "downloadRequestV2",
+            "in": "body",
+            "description": "Json com dados da solicitação",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/DownloadRequestDtoV2"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta.",
+            "schema": {
+              "$ref": "#/definitions/DownloadResponse"
+            }
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          }
+        }
+      }
+    },
+    "/api/v1/contar-xmls": {
+      "post": {
+        "tags": [
+          "DownloadXml"
+        ],
+        "summary": "Contagem de XMLs",
+        "description": "<br />\r\n             Use os filtros opcionais de CNPJ para uma análise mais específica (ao utilizar CnpjTom/CnpjRem apenas retornará CTEs).\r\n             É necessário passar os campos DataEmissaoInicio/DataEmissaoFim e/ou DataUploadInicio/DataUploadFim (Limite de 3 meses)",
+        "operationId": "DownloadXml_CountXmls",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "request",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ContarXmlsRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta.",
+            "schema": {
+              "$ref": "#/definitions/CountXmlsResponse"
+            }
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          }
+        }
+      }
+    },
+    "/api/v1/baixar-eventos": {
+      "post": {
+        "tags": [
+          "DownloadXml"
+        ],
+        "summary": "Baixar Eventos",
+        "description": "Instruções Gerais:\r\nO valor máximo do 'Take' é de 50 (valor padrão: 50). Não é necessário passar o tipo de Xml quando utilizar o filtro de chave.\r\n<br /><br />\r\nIntruções para 'TipoXml': 1 - NFe / 2 - CTe / 3 - NFSe / 4 - NFCe / 5 - CFe\r\n<br /><br />\r\nInstruções para o filtro de Evento de acordo com o número do evento:\r\n<br />\r\n    Confirmação da operação: 210200 / Desconhecimento da operação: 210220 / Operação não realizada: 210240 / Conhecimento da operação: 210210 / \r\n    Cancelamento da NFe: 110111 / Cancelamento NFe por substituição: 110112 / Carta de Correção: 110110\r\n<br /><br />\r\nObs: Retorno da API - Evento(s) em Base 64.",
+        "operationId": "DownloadXml_GetEvents",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "request",
+            "in": "body",
+            "description": "Json com dados da solicitação",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/DownloadEventsRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta."
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          }
+        }
+      }
+    },
+    "/api/v1/update-external-system-token": {
+      "put": {
+        "tags": [
+          "ExternalSystem"
+        ],
+        "summary": "Atualiza credenciais de um sistema externo existente",
+        "operationId": "ExternalSystem_UpdateExternalSystemCredentials",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "updateExternalSystem",
+            "in": "body",
+            "description": "Dados para atualização",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/UpdateExternalSystemRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/send-xml": {
+      "post": {
+        "tags": [
+          "ExternalSystemXml"
+        ],
+        "summary": "Endpoint para receber e processar XML de uma empresa externa",
+        "operationId": "ExternalSystemXml_SendXmlExternalCompany",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "externalSystemXmlRequest",
+            "in": "body",
+            "description": "Requisição contendo os dados do XML e informações da empresa de destino",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ExternalSystemXmlRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/enviar-xml": {
+      "post": {
+        "tags": [
+          "ExternalSystemXml"
+        ],
+        "summary": "Endpoint para receber e processar XML de uma empresa externa",
+        "operationId": "ExternalSystemXml_SendXmlExternalCompany",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "externalSystemXmlRequest",
+            "in": "body",
+            "description": "Requisição contendo os dados do XML e informações da empresa de destino",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ExternalSystemXmlRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/create-jwt": {
+      "post": {
+        "tags": [
+          "JwtToken"
+        ],
+        "summary": "Cria um token JWT para sistema interno",
+        "operationId": "JwtToken_CreateStandardJwt",
+        "consumes": [],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/manifestar-por-chave": {
+      "post": {
+        "tags": [
+          "Manifestation"
+        ],
+        "summary": "Manifestação de XMLs por chave",
+        "description": "Instruções para o tipo de Evento de acordo com o número do evento:\r\n<br />\r\n    NF-e: \r\n    Confirmação da operação - 210200 / Desconhecimento da operação - 210220 / Operação não realizada - 210240 / Conhecimento da operação - 210210\r\n<br />\r\n    CT-e: \r\n    Prestação do Serviço em Desacordo - 610110\r\n<br /><br />\r\n    Obs: A justificativa deve conter de 15 a 255 caracteres, quando necessária.",
+        "operationId": "Manifestation_ManifestationByKey",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "manifestation",
+            "in": "body",
+            "description": "",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ManifestationByKeyRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta."
+          },
+          "400": {
+            "description": "Erro ao processar requisição.",
+            "schema": {
+              "$ref": "#/definitions/ManifestationByKeyRequestDto"
+            }
+          },
+          "500": {
+            "description": "Erro interno do servidor."
+          }
+        }
+      }
+    },
+    "/api/v1/manifestar-xml": {
+      "post": {
+        "tags": [
+          "Manifestation"
+        ],
+        "summary": "Manifestação de XMLs",
+        "description": "<br />\r\n            **Essa rota está destinada a Manifestação de NFe\r\n            <br />\r\n            Instruções para o tipo de Evento de acordo com o número do evento:\r\n            <br />\r\n                NF-e: \r\n                Confirmação da operação - 210200 / Desconhecimento da operação - 210220 / Operação não realizada - 210240 / Conhecimento da operação - 210210\r\n            <br />\r\n                CT-e: \r\n                Prestação do Serviço em Desacordo - 610110\r\n            <br /><br />\r\n                Obs: A justificativa deve conter de 15 a 255 caracteres, quando necessária.",
+        "operationId": "Manifestation_ManifestationXml",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "manifestation",
+            "in": "body",
+            "description": "Json com dados da solicitação",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ManifestationRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta."
+          },
+          "400": {
+            "description": "Erro ao processar requisição.",
+            "schema": {
+              "$ref": "#/definitions/ManifestationRequest"
+            }
+          },
+          "404": {
+            "description": "XML não encontrado."
+          },
+          "500": {
+            "description": "Erro interno do servidor."
+          }
+        }
+      }
+    },
+    "/api/v1/consultar-status-manifestacao": {
+      "post": {
+        "tags": [
+          "Manifestation"
+        ],
+        "summary": "Consulta do status da manifestação por chave",
+        "description": "<br />\r\n                Como a manifestação é processada de forma assíncrona (dependente da SEFAZ, podendo haver retentativas,\r\n                indisponibilidade, duplicidade, erro fora do prazo ou sucesso posterior), use esta rota para consultar o\r\n                status/log atual da manifestação previamente encaminhada.\r\n            <br /><br />\r\n                Recebe uma lista de chaves de acesso (44 dígitos cada, no máximo 50 por consulta) e retorna, para cada\r\n                chave, o status do processamento, o histórico de retorno da SEFAZ e se o evento está devidamente\r\n                vinculado à nota no Cofre.",
+        "operationId": "Manifestation_ConsultManifestationStatusByKey",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "consult",
+            "in": "body",
+            "description": "Json com a lista de chaves de acesso",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ManifestationStatusByKeyRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ManifestationStatusResponseDto"
+              }
+            }
+          },
+          "400": {
+            "description": "Erro ao processar requisição.",
+            "schema": {
+              "$ref": "#/definitions/ManifestationStatusByKeyRequestDto"
+            }
+          },
+          "500": {
+            "description": "Erro interno do servidor."
+          }
+        }
+      }
+    },
+    "/api/v1/emitir-nfse": {
+      "post": {
+        "tags": [
+          "NFSe"
+        ],
+        "operationId": "NFSe_EmitirNFSe",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "dto",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/EmitirNFSeDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/gerar-danfse": {
+      "post": {
+        "tags": [
+          "NFSe"
+        ],
+        "operationId": "NFSe_GerarDanfse",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "dto",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/GerarDanfseDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/oauth/generate-token": {
+      "post": {
+        "tags": [
+          "OAuthExternalSystem"
+        ],
+        "summary": "Gera um token de acesso a partir de um código de autorização.",
+        "operationId": "OAuthExternalSystem_Token",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "generateToken",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/OAuthGenerateTokenRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/oauth/revoke": {
+      "post": {
+        "tags": [
+          "OAuthExternalSystem"
+        ],
+        "summary": "Revoga um token de acesso ativo, invalidando-o permanentemente.",
+        "operationId": "OAuthExternalSystem_Revoke",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "authRevoke",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/OAuthCredentialsRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/oauth/refresh": {
+      "post": {
+        "tags": [
+          "OAuthExternalSystem"
+        ],
+        "summary": "Renova um token de acesso existente, estendendo seu tempo de validade.",
+        "operationId": "OAuthExternalSystem_Refresh",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "oAuthRefresh",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/OAuthCredentialsRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/gerarDanfeViaChave": {
+      "get": {
+        "tags": [
+          "PdfXml"
+        ],
+        "summary": "Geração de DaNFe por Chave do Xml NF-e",
+        "description": "<br />\r\n             Esta API oferece um serviço para gerar o Documento Auxiliar da Nota Fiscal Eletrônica (DaNFe) utilizando a Chave do Xml da NF-e como entrada.\r\n             <br /><br />\r\n             Obs: O Danfe é retornado em bytes[] e criptografado em Base64.",
+        "operationId": "PdfXml_GenerateDanfeByXmlKey",
+        "consumes": [],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "xmlKey",
+            "in": "query",
+            "description": "Chave da NF-e",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/gerarDanfeViaXml": {
+      "post": {
+        "tags": [
+          "PdfXml"
+        ],
+        "summary": "Geração de DaNFe por Xml NF-e",
+        "description": "<br />\r\n             Esta API oferece um serviço para gerar o Documento Auxiliar da Nota Fiscal Eletrônica (DaNFe) utilizando o Xml NF-e como entrada.\r\n             <br /><br />\r\n             Obs: O arquivo Xml deve ser enviado em Base64 e o Danfe é retornado em bytes[], criptografado em Base64.",
+        "operationId": "PdfXml_GenerateDanfeByXml",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "request",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/FileRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/gerarDacteViaChave": {
+      "get": {
+        "tags": [
+          "PdfXml"
+        ],
+        "summary": "Geração de DaCTe por Chave do Xml CT-e",
+        "description": "<br />\r\n             Esta API fornece um serviço para gerar o Documento Auxiliar do Conhecimento de Transporte Eletrônico (DACTE) a partir da Chave do Xml do CT-e como entrada.\r\n             <br /><br />\r\n             Obs: O Dacte é retornado em bytes[] e criptografado em Base64.",
+        "operationId": "PdfXml_GenerateDacteByXmlKey",
+        "consumes": [],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "xmlKey",
+            "in": "query",
+            "description": "Chave da CT-e",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/gerarDacteViaXml": {
+      "post": {
+        "tags": [
+          "PdfXml"
+        ],
+        "summary": "Geração de DaCTe por Xml CT-e",
+        "description": "<br />\r\n             Esta API fornece um serviço para gerar o Documento Auxiliar do Conhecimento de Transporte Eletrônico (DACTE) a partir do Xml CT-e como entrada.\r\n             <br /><br />\r\n             Obs: O arquivo Xml deve ser enviado em Base64 e o Dacte é retornado em bytes[], criptografado em Base64.",
+        "operationId": "PdfXml_GenerateDacteByXml",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "request",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/FileRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/gerarDanfseViaChave": {
+      "get": {
+        "tags": [
+          "PdfXml"
+        ],
+        "summary": "Geração de DaNFSe por Chave do Xml NFS-e",
+        "description": "<br />\r\n             Esta API fornece um serviço para gerar o Documento Auxiliar do Conhecimento de Transporte Eletrônico (DANFSE) a partir da Chave do Xml do NFS-e como entrada.\r\n             <br /><br />\r\n             Obs: O Danfse é retornado em bytes[] e criptografado em Base64.",
+        "operationId": "PdfXml_GenerateDanfseByXmlKey",
+        "consumes": [],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "xmlKey",
+            "in": "query",
+            "description": "Chave da NFS-e",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/gerarDanfseViaXml": {
+      "post": {
+        "tags": [
+          "PdfXml"
+        ],
+        "summary": "Geração de DaNFSe por Xml NFS-e",
+        "description": "<br />\r\n             Esta API fornece um serviço para gerar o Documento Auxiliar do Conhecimento de Transporte Eletrônico (DANFSE) a partir do Xml NFS-e como entrada.\r\n             <br /><br />\r\n             Obs: O arquivo Xml deve ser enviado em Base64 e o Danfse é retornado em bytes[], criptografado em Base64.",
+        "operationId": "PdfXml_GenerateDanfseByXml",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "request",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/FileRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/relatorios-pre-configurados": {
+      "post": {
+        "tags": [
+          "Reports"
+        ],
+        "operationId": "Reports_GenerateReportsXmls",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "request",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/XmlReportsRequestDto"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta."
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          },
+          "404": {
+            "description": "Nenhum dado encontrado."
+          },
+          "500": {
+            "description": "Erro interno do servidor."
+          }
+        }
+      }
+    },
+    "/api/v1/Adicionar": {
+      "post": {
+        "tags": [
+          "Tags"
+        ],
+        "summary": "Adicionar Tags",
+        "description": "<br />\r\n              Adicione Tags aos seus XMLs, envie os dados solicitados no json de entrada nessa rota para registrar as tags.\r\n            <br /><br />\r\n              Instruções:\r\n                Envie a chave da nota ou o número e CNPJ para adicionar a Tag desejada.\r\n            <br />\r\n                Obs: Para o CTe, a disponibilidade é restrita à chave do XML.\r\n            <br />\r\n                Valores válidos para 'XmlType': 1 - NFe / 2 - CTe / 3 - NFSe / 4 - NFCe / 5 - CFe",
+        "operationId": "Tags_AddTags",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "request",
+            "in": "body",
+            "description": "Json com dados da solicitação",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/TagsRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta."
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          },
+          "500": {
+            "description": "Erro interno do sistema."
+          }
+        }
+      }
+    },
+    "/api/v1/Remover": {
+      "post": {
+        "tags": [
+          "Tags"
+        ],
+        "summary": "Remover Tags",
+        "description": "<br />\r\n              Remova Tags dos XMLs, envie os dados solicitados no json de entrada nessa rota para remover as tags.\r\n            <br /><br />\r\n              Instruções:\r\n                Envie a chave da nota ou o número e CNPJ para remover a Tag desejada.\r\n            <br />\r\n                Obs: Para o CTe, a disponibilidade é restrita à chave do XML.\r\n            <br />\r\n                Valores válidos para 'XmlType': 1 - NFe / 2 - CTe / 3 - NFSe / 4 - NFCe / 5 - CFe",
+        "operationId": "Tags_RemoveTags",
+        "consumes": [
+          "application/json",
+          "text/json"
+        ],
+        "produces": [
+          "application/json",
+          "text/json"
+        ],
+        "parameters": [
+          {
+            "name": "request",
+            "in": "body",
+            "description": "Json com dados da solicitação",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/TagsRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sucesso, verificar corpo da resposta."
+          },
+          "400": {
+            "description": "Erro ao processar requisição."
+          },
+          "500": {
+            "description": "Erro interno do sistema."
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "CertificadoRequest": {
+      "type": "object",
+      "properties": {
+        "Nome": {
+          "type": "string"
+        },
+        "CnpjCpf": {
+          "type": "string"
+        },
+        "IntegracaoEstadual": {
+          "type": "boolean"
+        },
+        "CnpjIntegracaoEstadual": {
+          "type": "string"
+        },
+        "ConsultaSat": {
+          "type": "boolean"
+        },
+        "ConsultaNfe": {
+          "type": "boolean"
+        },
+        "ConsultaCte": {
+          "type": "boolean"
+        },
+        "ConsultaNfse": {
+          "type": "boolean"
+        },
+        "ConsultaNfce": {
+          "type": "boolean"
+        },
+        "BaixarCancelados": {
+          "type": "boolean"
+        },
+        "ConsultaNoturna": {
+          "type": "boolean"
+        },
+        "ConsultaRegiaoHorario": {
+          "type": "boolean"
+        },
+        "DataInicialConsultaRegiaoHorario": {
+          "type": "string"
+        },
+        "DataFinalConsultaRegiaoHorario": {
+          "type": "string"
+        },
+        "ExcluirTransferenciaFiliais": {
+          "type": "boolean"
+        },
+        "UfCertificado": {
+          "type": "string"
+        },
+        "SenhaCertificado": {
+          "type": "string"
+        },
+        "TipoCertificado": {
+          "type": "string"
+        },
+        "Certificado": {
+          "type": "string"
+        },
+        "TipoConsultaNfse": {
+          "type": "string"
+        },
+        "ServicoPrestador": {
+          "type": "boolean"
+        },
+        "ServicoTomador": {
+          "type": "boolean"
+        },
+        "ListaPrestador": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Provider"
+          }
+        },
+        "NomeMunicipio": {
+          "type": "string"
+        },
+        "InscricaoMunicipal": {
+          "type": "string"
+        },
+        "DiasRetroativos": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "NomeUsuario": {
+          "type": "string"
+        },
+        "SenhaUsuario": {
+          "type": "string"
+        }
+      }
+    },
+    "Provider": {
+      "type": "object",
+      "properties": {
+        "<Cnpj>k__BackingField": {
+          "type": "string"
+        },
+        "<InscMunicipal>k__BackingField": {
+          "type": "string"
+        }
+      }
+    },
+    "CertificadoRequestEdit": {
+      "type": "object",
+      "properties": {
+        "CertificadoId": {
+          "type": "string"
+        },
+        "IntegracaoEstadual": {
+          "type": "boolean"
+        },
+        "CnpjIntegracaoEstadual": {
+          "type": "string"
+        },
+        "ConsultaSat": {
+          "type": "boolean"
+        },
+        "ConsultaNfe": {
+          "type": "boolean"
+        },
+        "ConsultaCte": {
+          "type": "boolean"
+        },
+        "ConsultaNfse": {
+          "type": "boolean"
+        },
+        "ConsultaNfce": {
+          "type": "boolean"
+        },
+        "BaixarCancelados": {
+          "type": "boolean"
+        },
+        "ConsultaNoturna": {
+          "type": "boolean"
+        },
+        "ExcluirTransferenciaFiliais": {
+          "type": "boolean"
+        },
+        "UfCertificado": {
+          "type": "string"
+        },
+        "SenhaCertificado": {
+          "type": "string"
+        },
+        "TipoCertificado": {
+          "type": "string"
+        },
+        "Certificado": {
+          "type": "string"
+        },
+        "TipoConsultaNfse": {
+          "type": "string"
+        },
+        "ConsultaRegiaoHorario": {
+          "type": "boolean"
+        },
+        "DataInicialConsultaRegiaoHorario": {
+          "type": "string"
+        },
+        "DataFinalConsultaRegiaoHorario": {
+          "type": "string"
+        },
+        "ServicoPrestador": {
+          "type": "boolean"
+        },
+        "ServicoTomador": {
+          "type": "boolean"
+        },
+        "ListaPrestador": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Provider"
+          }
+        },
+        "NomeMunicipio": {
+          "type": "string"
+        },
+        "InscricaoMunicipal": {
+          "type": "string"
+        },
+        "DiasRetroativos": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "NomeUsuario": {
+          "type": "string"
+        },
+        "SenhaUsuario": {
+          "type": "string"
+        }
+      }
+    },
+    "DownloadNsuRequestDto": {
+      "type": "object",
+      "properties": {
+        "Nsu": {
+          "format": "int64",
+          "type": "integer"
+        }
+      }
+    },
+    "DownloadNsuLoteRequestDto": {
+      "type": "object",
+      "properties": {
+        "NumerosNsu": {
+          "type": "array",
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "NsuToConsultRequestDto": {
+      "type": "object",
+      "properties": {
+        "NsuInicial": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "LimiteResultados": {
+          "format": "int32",
+          "type": "integer"
+        }
+      }
+    },
+    "DownloadIndividualXmlRequestDto": {
+      "type": "object",
+      "properties": {
+        "ChaveXml": {
+          "type": "string"
+        },
+        "TipoXml": {
+          "format": "int32",
+          "enum": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            10,
+            99,
+            100
+          ],
+          "type": "integer"
+        },
+        "BaixarEventos": {
+          "type": "boolean"
+        }
+      }
+    },
+    "DownloadResponse": {
+      "type": "object",
+      "properties": {
+        "Status": {
+          "type": "string"
+        },
+        "Codigo": {
+          "type": "string"
+        },
+        "Mensagens": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "DownloadRequestDtoV2": {
+      "type": "object",
+      "properties": {
+        "TipoXml": {
+          "format": "int32",
+          "enum": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            10,
+            99,
+            100
+          ],
+          "type": "integer"
+        },
+        "Take": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "Skip": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "DataEmissaoInicio": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "DataEmissaoFim": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "DataUploadInicio": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "DataUploadFim": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "CnpjEmit": {
+          "type": "string"
+        },
+        "CnpjDest": {
+          "type": "string"
+        },
+        "CnpjRem": {
+          "type": "string"
+        },
+        "CnpjTom": {
+          "type": "string"
+        },
+        "Tag": {
+          "type": "string"
+        },
+        "BaixarEventos": {
+          "type": "boolean"
+        },
+        "TipoEvento": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "Valor": {
+          "format": "double",
+          "type": "number"
+        },
+        "IntervaloValorNota": {
+          "format": "int32",
+          "type": "integer"
+        }
+      }
+    },
+    "ContarXmlsRequestDto": {
+      "type": "object",
+      "properties": {
+        "CnpjEmit": {
+          "type": "string"
+        },
+        "CnpjDest": {
+          "type": "string"
+        },
+        "CnpjTom": {
+          "type": "string"
+        },
+        "CnpjRem": {
+          "type": "string"
+        },
+        "DataEmissaoInicio": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "DataEmissaoFim": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "DataUploadInicio": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "DataUploadFim": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "ContarEventos": {
+          "type": "boolean"
+        }
+      }
+    },
+    "CountXmlsResponse": {
+      "type": "object",
+      "properties": {
+        "NFe": {
+          "format": "int32",
+          "type": "integer",
+          "readOnly": true
+        },
+        "NFCe": {
+          "format": "int32",
+          "type": "integer",
+          "readOnly": true
+        },
+        "CTe": {
+          "format": "int32",
+          "type": "integer",
+          "readOnly": true
+        },
+        "CFe": {
+          "format": "int32",
+          "type": "integer",
+          "readOnly": true
+        },
+        "NFSe": {
+          "format": "int32",
+          "type": "integer",
+          "readOnly": true
+        },
+        "CountEvent": {
+          "$ref": "#/definitions/CountEventResponse"
+        }
+      }
+    },
+    "CountEventResponse": {
+      "type": "object",
+      "properties": {
+        "NfeCount": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "NfceCount": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "CteCount": {
+          "format": "int32",
+          "type": "integer"
+        }
+      }
+    },
+    "DownloadEventsRequestDto": {
+      "type": "object",
+      "properties": {
+        "ChaveXml": {
+          "type": "string"
+        },
+        "TipoXml": {
+          "format": "int32",
+          "enum": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            10,
+            99,
+            100
+          ],
+          "type": "integer"
+        },
+        "TipoEvento": {
+          "format": "int32",
+          "enum": [
+            0,
+            1,
+            101101,
+            101103,
+            105102,
+            105104,
+            105105,
+            110110,
+            110111,
+            110112,
+            110113,
+            110130,
+            110131,
+            110160,
+            110170,
+            203202,
+            210200,
+            210210,
+            210220,
+            210240,
+            240130,
+            240131,
+            240140,
+            240150,
+            240160,
+            240170,
+            305103,
+            310610,
+            310611,
+            310620,
+            410300,
+            440130,
+            440140,
+            440150,
+            440160,
+            510620,
+            510630,
+            610110,
+            610130,
+            610131,
+            610501,
+            610510,
+            610511,
+            610514,
+            610515,
+            610550,
+            610552,
+            610554,
+            610600,
+            610601,
+            610614,
+            610615,
+            790700,
+            990900,
+            990910
+          ],
+          "type": "integer"
+        },
+        "DataInicioEvento": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "DataFimEvento": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "CnpjEmit": {
+          "type": "string"
+        },
+        "CnpjDest": {
+          "type": "string"
+        },
+        "CnpjRem": {
+          "type": "string"
+        },
+        "CnpjTom": {
+          "type": "string"
+        },
+        "Skip": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "Take": {
+          "format": "int32",
+          "type": "integer"
+        }
+      }
+    },
+    "UpdateExternalSystemRequestDto": {
+      "type": "object",
+      "properties": {
+        "ContactName": {
+          "type": "string"
+        },
+        "ContactEmail": {
+          "type": "string"
+        },
+        "ContactPhone": {
+          "type": "string"
+        },
+        "CompanyName": {
+          "type": "string"
+        },
+        "SystemName": {
+          "type": "string"
+        },
+        "SystemUrlInfo": {
+          "type": "string"
+        }
+      }
+    },
+    "CancellationToken": {
+      "type": "object",
+      "properties": {
+        "IsCancellationRequested": {
+          "type": "boolean",
+          "readOnly": true
+        },
+        "CanBeCanceled": {
+          "type": "boolean",
+          "readOnly": true
+        },
+        "WaitHandle": {
+          "$ref": "#/definitions/WaitHandle",
+          "readOnly": true
+        }
+      }
+    },
+    "WaitHandle": {
+      "type": "object",
+      "properties": {
+        "Handle": {
+          "type": "object"
+        },
+        "SafeWaitHandle": {
+          "$ref": "#/definitions/SafeWaitHandle"
+        }
+      }
+    },
+    "SafeWaitHandle": {
+      "type": "object",
+      "properties": {
+        "IsInvalid": {
+          "type": "boolean",
+          "readOnly": true
+        },
+        "IsClosed": {
+          "type": "boolean",
+          "readOnly": true
+        }
+      }
+    },
+    "ExternalSystemXmlRequestDto": {
+      "type": "object",
+      "properties": {
+        "Xml": {
+          "type": "string"
+        }
+      }
+    },
+    "ManifestationByKeyRequestDto": {
+      "type": "object",
+      "properties": {
+        "Manifestacao": {
+          "format": "int32",
+          "enum": [
+            0,
+            1,
+            101101,
+            101103,
+            105102,
+            105104,
+            105105,
+            110110,
+            110111,
+            110112,
+            110113,
+            110130,
+            110131,
+            110160,
+            110170,
+            203202,
+            210200,
+            210210,
+            210220,
+            210240,
+            240130,
+            240131,
+            240140,
+            240150,
+            240160,
+            240170,
+            305103,
+            310610,
+            310611,
+            310620,
+            410300,
+            440130,
+            440140,
+            440150,
+            440160,
+            510620,
+            510630,
+            610110,
+            610130,
+            610131,
+            610501,
+            610510,
+            610511,
+            610514,
+            610515,
+            610550,
+            610552,
+            610554,
+            610600,
+            610601,
+            610614,
+            610615,
+            790700,
+            990900,
+            990910
+          ],
+          "type": "integer"
+        },
+        "CnpjDestinatario": {
+          "type": "string"
+        },
+        "Justificativa": {
+          "type": "string"
+        },
+        "Chave": {
+          "type": "string"
+        }
+      }
+    },
+    "ManifestationRequest": {
+      "type": "object",
+      "properties": {
+        "Numero": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "CnpjEmitente": {
+          "type": "string"
+        },
+        "Serie": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "Manifestação": {
+          "format": "int32",
+          "enum": [
+            0,
+            1,
+            101101,
+            101103,
+            105102,
+            105104,
+            105105,
+            110110,
+            110111,
+            110112,
+            110113,
+            110130,
+            110131,
+            110160,
+            110170,
+            203202,
+            210200,
+            210210,
+            210220,
+            210240,
+            240130,
+            240131,
+            240140,
+            240150,
+            240160,
+            240170,
+            305103,
+            310610,
+            310611,
+            310620,
+            410300,
+            440130,
+            440140,
+            440150,
+            440160,
+            510620,
+            510630,
+            610110,
+            610130,
+            610131,
+            610501,
+            610510,
+            610511,
+            610514,
+            610515,
+            610550,
+            610552,
+            610554,
+            610600,
+            610601,
+            610614,
+            610615,
+            790700,
+            990900,
+            990910
+          ],
+          "type": "integer"
+        },
+        "CnpjDestinatario": {
+          "type": "string"
+        },
+        "Justificativa": {
+          "type": "string"
+        }
+      }
+    },
+    "ManifestationStatusByKeyRequestDto": {
+      "type": "object",
+      "properties": {
+        "Chaves": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ManifestationStatusResponseDto": {
+      "type": "object",
+      "properties": {
+        "Chave": {
+          "type": "string"
+        },
+        "TipoDocumento": {
+          "type": "string"
+        },
+        "Status": {
+          "type": "string"
+        },
+        "NaFila": {
+          "type": "boolean"
+        },
+        "EmProcessamento": {
+          "type": "boolean"
+        },
+        "Tentativas": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "DataEnvioParaFila": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "EventoRegistradoNoCofre": {
+          "type": "boolean"
+        },
+        "Observacao": {
+          "type": "string"
+        },
+        "Historico": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ManifestationLogEntryDto"
+          }
+        }
+      }
+    },
+    "ManifestationLogEntryDto": {
+      "type": "object",
+      "properties": {
+        "TipoEvento": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "CStat": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "Mensagem": {
+          "type": "string"
+        },
+        "DataRegistro": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "RegistradoNoCofre": {
+          "type": "boolean"
+        }
+      }
+    },
+    "EmitirNFSeDto": {
+      "type": "object",
+      "properties": {
+        "NFSeJson": {
+          "type": "string"
+        },
+        "NFSeXml": {
+          "type": "string"
+        },
+        "CertificadoBase64": {
+          "type": "string"
+        },
+        "CertificadoSenha": {
+          "type": "string"
+        }
+      }
+    },
+    "GerarDanfseDto": {
+      "type": "object",
+      "properties": {
+        "XmlNFSe": {
+          "type": "string"
+        }
+      }
+    },
+    "OAuthGenerateTokenRequestDto": {
+      "type": "object",
+      "properties": {
+        "AccessToken": {
+          "type": "string"
+        },
+        "State": {
+          "type": "string"
+        },
+        "RedirectUri": {
+          "type": "string"
+        }
+      }
+    },
+    "OAuthCredentialsRequestDto": {
+      "type": "object",
+      "properties": {
+        "Token": {
+          "type": "string"
+        }
+      }
+    },
+    "FileRequest": {
+      "type": "object",
+      "properties": {
+        "ArquivoXml": {
+          "type": "string"
+        }
+      }
+    },
+    "XmlReportsRequestDto": {
+      "type": "object",
+      "properties": {
+        "Cnpj": {
+          "type": "string"
+        },
+        "TipoDownload": {
+          "format": "int32",
+          "enum": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "type": "integer"
+        },
+        "TipoXml": {
+          "format": "int32",
+          "enum": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            10,
+            99,
+            100
+          ],
+          "type": "integer"
+        },
+        "Mes": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "Ano": {
+          "format": "int32",
+          "type": "integer"
+        }
+      }
+    },
+    "TagsRequest": {
+      "type": "object",
+      "properties": {
+        "ChaveXml": {
+          "type": "string"
+        },
+        "NumeroXml": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "TipoXml": {
+          "format": "int32",
+          "enum": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            10,
+            99,
+            100
+          ],
+          "type": "integer"
+        },
+        "CnpjEmit": {
+          "type": "string"
+        },
+        "CnpjDest": {
+          "type": "string"
+        },
+        "ListTags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
+
+===== sieg-swagger-ver.json =====
+{
+  "code": 200,
+  "data": {
+    "description": "",
+    "html": "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\">{\"swagger\":\"2.0\",\"info\":{\"version\":\"ver\",\"title\":\"SIEG SOLUÇÕES\",\"description\":\"Registro de Integrações\"},\"host\":\"api.sieg.com\",\"schemes\":[\"https\"],\"paths\":{\"/api/Certificado/ListarCertificados\":{\"get\":{\"tags\":[\"Certificado\"],\"summary\":\"Listar Certificados cadastrados.\",\"description\":\"<br />\\r\\n            Obtenha uma lista de certificados cadastrados e valide as informações do seu certificado, incluindo os tipos de notas ativadas para captura, entre outros. É necessário enviar um parâmetro booleano chamado 'active',\\r\\n            definindo-o como true ou false, para filtrar os certificados ativos ou inativos. Por padrão, serão retornados os 100 primeiros certificados encontrados.\\r\\n            Caso precise verificar outros, utilize a paginação. Por exemplo, ao passar para a página 1, serão retornados os certificados de 101 a 200.\",\"operationId\":\"Certificado_Get\",\"consumes\":[],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"active\",\"in\":\"query\",\"required\":true,\"type\":\"boolean\"},{\"name\":\"pagina\",\"in\":\"query\",\"description\":\"Página da pesquisa\",\"required\":false,\"type\":\"integer\",\"format\":\"int32\"}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\",\"schema\":{\"$ref\":\"#/definitions/EstadualResponse\"}},\"400\":{\"description\":\"Erro ao processar requisição.\",\"schema\":{\"$ref\":\"#/definitions/EstadualResponse\"}}}}},\"/api/Certificado/Registrar\":{\"post\":{\"tags\":[\"Certificado\"],\"summary\":\"Registrar Certificado\",\"description\":\"<br />\\r\\n            Utilize esta rota para cadastrar certificados. Envie as informações necessárias no corpo da requisição, seguindo o padrão especificado na documentação.\\r\\n            Instruções: No campo \\\"TipoCertificado\\\" especificar se é Pfx ou P12. No campo \\\"TipoConsultaNfse\\\" especificar se é Municipal ou Nacional. No campo UfCertificado especificar o código do Município baseado nos códigos do IBGE.\\r\\n            Caso deseje cadastrar uma automação, não enviar um ID, pois o ID será criado automaticamente. Se você enviar um ID, a rota tentará editar a automação correspondente ao ID enviado. (Certificado digital precisa ser enviado em Base64)\",\"operationId\":\"Certificado_Post\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"certificadoRequest\",\"in\":\"body\",\"description\":\"Json com dados da solicitação\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/CertificadoRequest\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\",\"schema\":{\"$ref\":\"#/definitions/EstadualResponse\"}},\"400\":{\"description\":\"Erro ao processar requisição.\",\"schema\":{\"$ref\":\"#/definitions/EstadualResponse\"}}}}},\"/api/Certificado/Editar\":{\"post\":{\"tags\":[\"Certificado\"],\"summary\":\"Atualizar Certificado\",\"description\":\"<br />\\r\\n            Utilize esta rota para editar certificados. Envie as informações necessárias no corpo da requisição, seguindo o padrão especificado na documentação.\\r\\n            Instruções: No campo \\\"TipoCertificado\\\" especificar se é Pfx ou P12. No campo \\\"TipoConsultaNfse\\\" especificar se é Municipal ou Nacional. No campo UfCertificado especificar o código do Município baseado nos códigos do IBGE.\",\"operationId\":\"Certificado_Post\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"certificadoRequest\",\"in\":\"body\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/CertificadoRequestEdit\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\",\"schema\":{\"$ref\":\"#/definitions/EstadualResponse\"}},\"400\":{\"description\":\"Erro ao processar requisição.\",\"schema\":{\"$ref\":\"#/definitions/EstadualResponse\"}}}}},\"/api/Certificado/habilitar\":{\"post\":{\"tags\":[\"Certificado\"],\"summary\":\"Ativar Certificado\",\"description\":\"<br />\\r\\n            Utilize esta rota para reativar certificados desativados. É necessário enviar o ID do certificado desativado para realizar a ativação, você pode utilizar a rota de busca de certificados para validar o ID.\",\"operationId\":\"Certificado_EnableCertificate\",\"consumes\":[],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"id\",\"in\":\"query\",\"description\":\"Id Certificado\",\"required\":true,\"type\":\"string\"}],\"responses\":{\"200\":{\"description\":\"OK\",\"schema\":{\"type\":\"object\"}}}}},\"/api/Certificado/desabilitar\":{\"post\":{\"tags\":[\"Certificado\"],\"summary\":\"Desabilitar Certificado\",\"description\":\"<br />\\r\\n            Utilize esta rota para desativar certificados ativos. É necessário enviar o ID do certificado ativo para realizar a desativação, você pode utilizar a rota de busca de certificados para validar o ID.\",\"operationId\":\"Certificado_DisableCertificate\",\"consumes\":[],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"id\",\"in\":\"query\",\"description\":\"Id Certificado\",\"required\":true,\"type\":\"string\"}],\"responses\":{\"200\":{\"description\":\"OK\",\"schema\":{\"type\":\"object\"}}}}},\"/api/Certificado/deletar/{id}\":{\"post\":{\"tags\":[\"Certificado\"],\"summary\":\"Deletar Certificado\",\"description\":\"<br />\\r\\n            Utilize esta rota para deletar uma automação. É necessário fornecer o ID do certificado que deseja excluir.\\r\\n            Você pode utilizar a rota de busca de certificados para validar o ID antes de enviar a requisição de exclusão.\",\"operationId\":\"Certificado_DeleteCertificate\",\"consumes\":[],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"id\",\"in\":\"path\",\"description\":\"Id Certificado\",\"required\":true,\"type\":\"string\"}],\"responses\":{\"200\":{\"description\":\"OK\",\"schema\":{\"type\":\"object\"}}}}},\"/api/Certificado/status\":{\"get\":{\"tags\":[\"Certificado\"],\"summary\":\"Status Certificado\",\"description\":\"<br />\\r\\n            Utilize esta rota para validar o status da consulta do certificado. É necessário enviar o tipo de nota (NFe, CTe, NFSe, NFCe, CFe), fornecer o ID do certificado na requisição, você pode utilizar a rota de busca de certificados para validar o ID.\",\"operationId\":\"Certificado_CertificateStatus\",\"consumes\":[],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"id\",\"in\":\"query\",\"description\":\"\",\"required\":true,\"type\":\"string\"}],\"responses\":{\"200\":{\"description\":\"OK\",\"schema\":{\"type\":\"object\"}}}}},\"/BaixarXml\":{\"post\":{\"tags\":[\"Download\"],\"summary\":\"Download de XML Específico\",\"description\":\"<br />\\r\\n                Integre o seu sistema com o Cofre SIEG e realize o download de XMLs específicos que estão armazenados em nuvem\\r\\n            <br /><br />\\r\\n              Instruções para o Filtro de Eventos:\\r\\n                Confirmação da operação: 210200 / Desconhecimento da operação: 210220 / Operação não realizada: 210240 / Conhecimento da operação: 210210 / \\r\\n                Cancelamento da NFe: 110111 / Cancelamento NFe por substituição: 110112 / Carta de Correção: 110110 / Cancelamento CTe: 610601 / \\r\\n                Cancelamento NFS-e: 101101 / Cancelamento NFSe por substituição: 105102 / Cancelamento NFSe Deferrido: 105104 / Averbacao para Exportacao: 790700\",\"operationId\":\"Download_BaixarXml\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"xmlKey\",\"in\":\"body\",\"required\":true,\"schema\":{\"type\":\"string\"}},{\"name\":\"xmlType\",\"in\":\"query\",\"required\":true,\"type\":\"integer\",\"format\":\"int32\",\"enum\":[1,2,3,4,5,6,7,8,10,99,100]},{\"name\":\"downloadEvent\",\"in\":\"query\",\"required\":false,\"type\":\"boolean\"}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\",\"schema\":{\"$ref\":\"#/definitions/DownloadResponse\"}},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}},\"/BaixarXmls\":{\"post\":{\"tags\":[\"Download\"],\"summary\":\"Download de XMLs em Lote\",\"description\":\"<br />\\r\\n              Integre o seu sistema com o Cofre SIEG e realize o download em lote dos XMLs armazenados.\\r\\n              Ao realizar o download dos eventos, o sistema capturará os eventos associados a cada nota, podendo resultar em mais de 50 retornos.\\r\\n            <br /><br />\\r\\n              Instruções gerais:\\r\\n                O filtro de data de emissão aceita apenas hora, minuto e segundo para NFe, NFCe, CTe e CFe. Para NFSe, somente dia, mês e ano são permitidos.\\r\\n                O filtro de valor, por padrão, utiliza um intervalo de R$1,00. Para alterá-lo, basta usar o filtro de margem de valor.\\r\\n              Instruções para o Filtro de Eventos:\\r\\n                Confirmação da operação: 210200 / Desconhecimento da operação: 210220 / Operação não realizada: 210240 / Conhecimento da operação: 210210 / \\r\\n                Cancelamento da NFe: 110111 / Cancelamento NFe por substituição: 110112 / Carta de Correção: 110110 / Cancelamento CTe: 610601 / \\r\\n                Cancelamento NFS-e: 101101 / Cancelamento NFSe por substituição: 105102 / Cancelamento NFSe Deferrido: 105104 / Averbacao para Exportacao: 790700\",\"operationId\":\"Download_BaixarXmls\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"downloadRequest\",\"in\":\"body\",\"description\":\"Json com dados da solicitação\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/DownloadRequestDto\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\",\"schema\":{\"$ref\":\"#/definitions/DownloadResponse\"}},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}},\"/BaixarXmlsV2\":{\"post\":{\"tags\":[\"Download\"],\"summary\":\"Download de XMLs em Lote V2 (Retorno padrão API antiga)\",\"description\":\"<br />\\r\\n              Integre o seu sistema com o Cofre SIEG e realize o download em lote dos XMLs armazenados.\\r\\n              Ao realizar o download dos eventos, o sistema capturará os eventos associados a cada nota, podendo resultar em mais de 50 retornos.\\r\\n            <br /><br />\\r\\n              Instruções gerais:\\r\\n                O filtro de data de emissão aceita apenas hora, minuto e segundo para NFe, NFCe, CTe e CFe. Para NFSe, somente dia, mês e ano são permitidos.\\r\\n                O filtro de valor, por padrão, utiliza um intervalo de R$1,00. Para alterá-lo, basta usar o filtro de margem de valor.\\r\\n              Instruções para o Filtro de Eventos:\\r\\n                Confirmação da operação: 210200 / Desconhecimento da operação: 210220 / Operação não realizada: 210240 / Conhecimento da operação: 210210 / \\r\\n                Cancelamento da NFe: 110111 / Cancelamento NFe por substituição: 110112 / Carta de Correção: 110110 / Cancelamento CTe: 610601 / \\r\\n                Cancelamento NFS-e: 101101 / Cancelamento NFSe por substituição: 105102 / Cancelamento NFSe Deferrido: 105104 / Averbacao para Exportacao: 790700\",\"operationId\":\"Download_BaixarXmlsV2\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"downloadRequest\",\"in\":\"body\",\"description\":\"Json com dados da solicitação\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/DownloadRequestDto\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\",\"schema\":{\"$ref\":\"#/definitions/DownloadResponse\"}},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}},\"/ContarXmls\":{\"post\":{\"tags\":[\"Download\"],\"summary\":\"Contagem de XMLs\",\"description\":\"<br />\\r\\n             Use os filtros opcionais de CNPJ para uma análise mais específica (ao utilizar CnpjTom/CnpjRem apenas retornará CTEs).\\r\\n             É necessário passar os campos DataEmissaoInicio/DataEmissaoFim e/ou DataUploadInicio/DataUploadFim (Limite de 3 meses)\",\"operationId\":\"Download_CountXmls\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"request\",\"in\":\"body\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/ContarXmlsRequestDto\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\",\"schema\":{\"$ref\":\"#/definitions/CountXmlsResponse\"}},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}},\"/BaixarEventos\":{\"post\":{\"tags\":[\"Download\"],\"summary\":\"Baixar Eventos\",\"description\":\"Instruções Gerais:\\r\\nO valor máximo do 'Take' é de 50 (valor padrão: 50). Não é necessário passar o tipo de Xml quando utilizar o filtro de chave.\\r\\n<br /><br />\\r\\nIntruções para 'TipoXml': 1 - NFe / 2 - CTe / 3 - NFSe / 4 - NFCe / 5 - CFe\\r\\n<br /><br />\\r\\nInstruções para o filtro de Evento de acordo com o número do evento:\\r\\n<br />\\r\\n    Confirmação da operação: 210200 / Desconhecimento da operação: 210220 / Operação não realizada: 210240 / Conhecimento da operação: 210210 / \\r\\n    Cancelamento da NFe: 110111 / Cancelamento NFe por substituição: 110112 / Carta de Correção: 110110\\r\\n<br /><br />\\r\\nObs: Retorno da API - Evento(s) em Base 64.\",\"operationId\":\"Download_GetEvents\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"request\",\"in\":\"body\",\"description\":\"Json com dados da solicitação\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/DownloadEventsRequestDto\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\"},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}},\"/api/ManifestarXml/{chave}\":{\"post\":{\"tags\":[\"Manifestacao\"],\"summary\":\"Manifestação de XMLs por chave\",\"description\":\"Instruções para o tipo de Evento de acordo com o número do evento:\\r\\n<br />\\r\\n    NF-e: \\r\\n    Confirmação da operação - 210200 / Desconhecimento da operação - 210220 / Operação não realizada - 210240 / Conhecimento da operação - 210210\\r\\n<br />\\r\\n    CT-e: \\r\\n    Prestação do Serviço em Desacordo - 610110\\r\\n<br /><br />\\r\\n    Obs: A justificativa deve conter de 15 a 255 caracteres, quando necessária.\",\"operationId\":\"Manifestacao_ManifestarXmlPorChave\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"chave\",\"in\":\"path\",\"description\":\"\",\"required\":true,\"type\":\"string\"},{\"name\":\"request\",\"in\":\"body\",\"description\":\"Json com dados da solicitação\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/ManifestationByKeyRequest\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\"},\"400\":{\"description\":\"Erro ao processar requisição.\",\"schema\":{\"$ref\":\"#/definitions/ManifestationByKeyRequest\"}}}}},\"/api/ManifestarXml\":{\"post\":{\"tags\":[\"Manifestacao\"],\"summary\":\"Manifestação de XMLs\",\"description\":\"<br />\\r\\n            **Essa rota está destinada a Manifestação de NFe\\r\\n            <br />\\r\\n            Instruções para o tipo de Evento de acordo com o número do evento:\\r\\n            <br />\\r\\n                NF-e: \\r\\n                Confirmação da operação - 210200 / Desconhecimento da operação - 210220 / Operação não realizada - 210240 / Conhecimento da operação - 210210\\r\\n            <br />\\r\\n                CT-e: \\r\\n                Prestação do Serviço em Desacordo - 610110\\r\\n            <br /><br />\\r\\n                Obs: A justificativa deve conter de 15 a 255 caracteres, quando necessária.\",\"operationId\":\"Manifestacao_ManifestarXml\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"request\",\"in\":\"body\",\"description\":\"Json com dados da solicitação\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/ManifestationRequest\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\"},\"400\":{\"description\":\"Erro ao processar requisição.\",\"schema\":{\"$ref\":\"#/definitions/ManifestationRequest\"}}}}},\"/api/Arquivos/GerarDanfeViaChave\":{\"get\":{\"tags\":[\"Pdf\"],\"summary\":\"Geração de DaNFe por Chave do Xml NF-e\",\"description\":\"<br />\\r\\n             Esta API oferece um serviço para gerar o Documento Auxiliar da Nota Fiscal Eletrônica (DaNFe) utilizando a Chave do Xml da NF-e como entrada.\\r\\n             <br /><br />\\r\\n             Obs: O Danfe é retornado em bytes[] e criptografado em Base64.\",\"operationId\":\"Pdf_GenerateDanfeByXmlKey\",\"consumes\":[],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"xmlKey\",\"in\":\"query\",\"description\":\"Chave da NF-e\",\"required\":true,\"type\":\"string\"}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\"},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}},\"/api/Arquivos/GerarDanfeViaXml\":{\"post\":{\"tags\":[\"Pdf\"],\"summary\":\"Geração de DaNFe por Xml NF-e\",\"description\":\"<br />\\r\\n             Esta API oferece um serviço para gerar o Documento Auxiliar da Nota Fiscal Eletrônica (DaNFe) utilizando o Xml NF-e como entrada.\\r\\n             <br /><br />\\r\\n             Obs: O arquivo Xml deve ser enviado em Base64 e o Danfe é retornado em bytes[], criptografado em Base64.\",\"operationId\":\"Pdf_GenerateDanfeByXml\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"request\",\"in\":\"body\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/FileRequest\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\"},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}},\"/api/Arquivos/GerarDacteViaChave\":{\"get\":{\"tags\":[\"Pdf\"],\"summary\":\"Geração de DaCTe por Chave do Xml CT-e\",\"description\":\"<br />\\r\\n             Esta API fornece um serviço para gerar o Documento Auxiliar do Conhecimento de Transporte Eletrônico (DACTE) a partir da Chave do Xml do CT-e como entrada.\\r\\n             <br /><br />\\r\\n             Obs: O Dacte é retornado em bytes[] e criptografado em Base64.\",\"operationId\":\"Pdf_GenerateDacteByXmlKey\",\"consumes\":[],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"xmlKey\",\"in\":\"query\",\"description\":\"Chave da CT-e\",\"required\":true,\"type\":\"string\"}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\"},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}},\"/api/Arquivos/GerarDacteViaXml\":{\"post\":{\"tags\":[\"Pdf\"],\"summary\":\"Geração de DaCTe por Xml CT-e\",\"description\":\"<br />\\r\\n             Esta API fornece um serviço para gerar o Documento Auxiliar do Conhecimento de Transporte Eletrônico (DACTE) a partir do Xml CT-e como entrada.\\r\\n             <br /><br />\\r\\n             Obs: O arquivo Xml deve ser enviado em Base64 e o Dacte é retornado em bytes[], criptografado em Base64.\",\"operationId\":\"Pdf_GenerateDacteByXml\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"request\",\"in\":\"body\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/FileRequest\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\"},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}},\"/api/Arquivos/GerarDanfseViaChave\":{\"get\":{\"tags\":[\"Pdf\"],\"summary\":\"Geração de DaNFSe por Chave do Xml NFS-e\",\"description\":\"<br />\\r\\n             Esta API fornece um serviço para gerar o Documento Auxiliar do Conhecimento de Transporte Eletrônico (DANFSE) a partir da Chave do Xml do NFS-e como entrada.\\r\\n             <br /><br />\\r\\n             Obs: O Danfse é retornado em bytes[] e criptografado em Base64.\",\"operationId\":\"Pdf_GenerateDanfseByXmlKey\",\"consumes\":[],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"xmlKey\",\"in\":\"query\",\"description\":\"Chave da NFS-e\",\"required\":true,\"type\":\"string\"}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\"},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}},\"/api/Arquivos/GerarDanfseViaXml\":{\"post\":{\"tags\":[\"Pdf\"],\"summary\":\"Geração de DaNFSe por Xml NFS-e\",\"description\":\"<br />\\r\\n             Esta API fornece um serviço para gerar o Documento Auxiliar do Conhecimento de Transporte Eletrônico (DANFSE) a partir do Xml NFS-e como entrada.\\r\\n             <br /><br />\\r\\n             Obs: O arquivo Xml deve ser enviado em Base64 e o Danfse é retornado em bytes[], criptografado em Base64.\",\"operationId\":\"Pdf_GenerateDanfseByXml\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"request\",\"in\":\"body\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/FileRequest\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\"},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}},\"/api/relatorio/xml\":{\"post\":{\"tags\":[\"Relatorio\"],\"summary\":\"Relatório Xml's (Excel)\",\"description\":\"Instruções gerais: <br />\\r\\nO retorno da api é em Base 64.\\r\\nAno e mês são parâmetros utilizados para identificar o período do relatório. <br /><br /><br />\\r\\nInstruções para os filtros: <br />\\r\\nXmlType: 1 - NFe / 2 - CTe / 3 - NFS-e / 4 - NFCe / 5 - CFe <br />\\r\\nTypeXmlDownloadReport : 1 - Monofasico / 2 - RelatorioBasico / 3 - DetalhamentoProdutos / 4 - CTe / 5 - NFSe\",\"operationId\":\"Relatorio_XmlReports\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"request\",\"in\":\"body\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/XmlReportsRequest\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\"},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}},\"/api/Tags/AddTags\":{\"post\":{\"tags\":[\"TagsLegacy\"],\"summary\":\"Adicionar Tags\",\"description\":\"<br />\\r\\n              Adicione Tags aos seus XMLs, envie os dados solicitados no json de entrada nessa rota para registrar as tags.\\r\\n            <br /><br />\\r\\n              Instruções:\\r\\n                Envie a chave da nota ou o número e CNPJ para adicionar a Tag desejada.\\r\\n            <br />\\r\\n                Obs: Para o CTe, a disponibilidade é restrita à chave do XML.\\r\\n            <br />\\r\\n                Valores válidos para 'XmlType': 1 - NFe / 2 - CTe / 3 - NFSe / 4 - NFCe / 5 - CFe\",\"operationId\":\"TagsLegacy_AddTags\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"request\",\"in\":\"body\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/TagsRequest\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\"},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}},\"/api/Tags/RemoveTags\":{\"post\":{\"tags\":[\"TagsLegacy\"],\"summary\":\"Remover Tags\",\"description\":\"<br />\\r\\n              Remova Tags dos XMLs, envie os dados solicitados no json de entrada nessa rota para remover as tags.\\r\\n            <br /><br />\\r\\n              Instruções:\\r\\n                Envie a chave da nota ou o número e CNPJ para remover a Tag desejada.\\r\\n            <br />\\r\\n                Obs: Para o CTe, a disponibilidade é restrita à chave do XML.\\r\\n            <br />\\r\\n                Valores válidos para 'XmlType': 1 - NFe / 2 - CTe / 3 - NFSe / 4 - NFCe / 5 - CFe\",\"operationId\":\"TagsLegacy_RemoveTags\",\"consumes\":[\"application/json\",\"text/json\"],\"produces\":[\"application/json\",\"text/json\"],\"parameters\":[{\"name\":\"request\",\"in\":\"body\",\"required\":true,\"schema\":{\"$ref\":\"#/definitions/TagsRequest\"}}],\"responses\":{\"200\":{\"description\":\"Sucesso, verificar corpo da resposta.\"},\"400\":{\"description\":\"Erro ao processar requisição.\"}}}}},\"definitions\":{\"EstadualResponse\":{\"type\":\"object\",\"properties\":{\"Id\":{\"type\":\"string\"},\"Status\":{\"type\":\"string\"}}},\"CertificadoRequest\":{\"type\":\"object\",\"properties\":{\"Nome\":{\"type\":\"string\"},\"CnpjCpf\":{\"type\":\"string\"},\"IntegracaoEstadual\":{\"type\":\"boolean\"},\"CnpjIntegracaoEstadual\":{\"type\":\"string\"},\"ConsultaSat\":{\"type\":\"boolean\"},\"ConsultaNfe\":{\"type\":\"boolean\"},\"ConsultaCte\":{\"type\":\"boolean\"},\"ConsultaNfse\":{\"type\":\"boolean\"},\"ConsultaNfce\":{\"type\":\"boolean\"},\"BaixarCancelados\":{\"type\":\"boolean\"},\"ConsultaNoturna\":{\"type\":\"boolean\"},\"ConsultaRegiaoHorario\":{\"type\":\"boolean\"},\"DataInicialConsultaRegiaoHorario\":{\"type\":\"string\"},\"DataFinalConsultaRegiaoHorario\":{\"type\":\"string\"},\"ExcluirTransferenciaFiliais\":{\"type\":\"boolean\"},\"UfCertificado\":{\"type\":\"string\"},\"SenhaCertificado\":{\"type\":\"string\"},\"TipoCertificado\":{\"type\":\"string\"},\"Certificado\":{\"type\":\"string\"},\"TipoConsultaNfse\":{\"type\":\"string\"},\"ServicoPrestador\":{\"type\":\"boolean\"},\"ServicoTomador\":{\"type\":\"boolean\"},\"ListaPrestador\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/Provider\"}},\"NomeMunicipio\":{\"type\":\"string\"},\"InscricaoMunicipal\":{\"type\":\"string\"},\"DiasRetroativos\":{\"format\":\"int32\",\"type\":\"integer\"},\"NomeUsuario\":{\"type\":\"string\"},\"SenhaUsuario\":{\"type\":\"string\"}}},\"Provider\":{\"type\":\"object\",\"properties\":{\"<Cnpj>k__BackingField\":{\"type\":\"string\"},\"<InscMunicipal>k__BackingField\":{\"type\":\"string\"}}},\"CertificadoRequestEdit\":{\"type\":\"object\",\"properties\":{\"CertificadoId\":{\"type\":\"string\"},\"IntegracaoEstadual\":{\"type\":\"boolean\"},\"CnpjIntegracaoEstadual\":{\"type\":\"string\"},\"ConsultaSat\":{\"type\":\"boolean\"},\"ConsultaNfe\":{\"type\":\"boolean\"},\"ConsultaCte\":{\"type\":\"boolean\"},\"ConsultaNfse\":{\"type\":\"boolean\"},\"ConsultaNfce\":{\"type\":\"boolean\"},\"BaixarCancelados\":{\"type\":\"boolean\"},\"ConsultaNoturna\":{\"type\":\"boolean\"},\"ExcluirTransferenciaFiliais\":{\"type\":\"boolean\"},\"UfCertificado\":{\"type\":\"string\"},\"SenhaCertificado\":{\"type\":\"string\"},\"TipoCertificado\":{\"type\":\"string\"},\"Certificado\":{\"type\":\"string\"},\"TipoConsultaNfse\":{\"type\":\"string\"},\"ConsultaRegiaoHorario\":{\"type\":\"boolean\"},\"DataInicialConsultaRegiaoHorario\":{\"type\":\"string\"},\"DataFinalConsultaRegiaoHorario\":{\"type\":\"string\"},\"ServicoPrestador\":{\"type\":\"boolean\"},\"ServicoTomador\":{\"type\":\"boolean\"},\"ListaPrestador\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/definitions/Provider\"}},\"NomeMunicipio\":{\"type\":\"string\"},\"InscricaoMunicipal\":{\"type\":\"string\"},\"DiasRetroativos\":{\"format\":\"int32\",\"type\":\"integer\"},\"NomeUsuario\":{\"type\":\"string\"},\"SenhaUsuario\":{\"type\":\"string\"}}},\"DownloadResponse\":{\"type\":\"object\",\"properties\":{\"Status\":{\"type\":\"string\"},\"Codigo\":{\"type\":\"string\"},\"Mensagens\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}},\"DownloadRequestDto\":{\"type\":\"object\",\"properties\":{\"XmlType\":{\"format\":\"int32\",\"enum\":[1,2,3,4,5,6,7,8,10,99,100],\"type\":\"integer\"},\"Take\":{\"format\":\"int32\",\"type\":\"integer\"},\"Skip\":{\"format\":\"int32\",\"type\":\"integer\"},\"DataEmissaoInicio\":{\"format\":\"date-time\",\"type\":\"string\"},\"DataEmissaoFim\":{\"format\":\"date-time\",\"type\":\"string\"},\"DataUploadInicio\":{\"format\":\"date-time\",\"type\":\"string\"},\"DataUploadFim\":{\"format\":\"date-time\",\"type\":\"string\"},\"CnpjEmit\":{\"type\":\"string\"},\"CnpjDest\":{\"type\":\"string\"},\"CnpjRem\":{\"type\":\"string\"},\"CnpjTom\":{\"type\":\"string\"},\"Tag\":{\"type\":\"string\"},\"Downloadevent\":{\"type\":\"boolean\"},\"TypeEvent\":{\"format\":\"int32\",\"type\":\"integer\"},\"Value\":{\"format\":\"double\",\"type\":\"number\"},\"ValueRange\":{\"format\":\"int32\",\"type\":\"integer\"}}},\"ContarXmlsRequestDto\":{\"type\":\"object\",\"properties\":{\"CnpjEmit\":{\"type\":\"string\"},\"CnpjDest\":{\"type\":\"string\"},\"CnpjTom\":{\"type\":\"string\"},\"CnpjRem\":{\"type\":\"string\"},\"DataEmissaoInicio\":{\"format\":\"date-time\",\"type\":\"string\"},\"DataEmissaoFim\":{\"format\":\"date-time\",\"type\":\"string\"},\"DataUploadInicio\":{\"format\":\"date-time\",\"type\":\"string\"},\"DataUploadFim\":{\"format\":\"date-time\",\"type\":\"string\"},\"ContarEventos\":{\"type\":\"boolean\"}}},\"CountXmlsResponse\":{\"type\":\"object\",\"properties\":{\"NFe\":{\"format\":\"int32\",\"type\":\"integer\",\"readOnly\":true},\"NFCe\":{\"format\":\"int32\",\"type\":\"integer\",\"readOnly\":true},\"CTe\":{\"format\":\"int32\",\"type\":\"integer\",\"readOnly\":true},\"CFe\":{\"format\":\"int32\",\"type\":\"integer\",\"readOnly\":true},\"NFSe\":{\"format\":\"int32\",\"type\":\"integer\",\"readOnly\":true},\"CountEvent\":{\"$ref\":\"#/definitions/CountEventResponse\"}}},\"CountEventResponse\":{\"type\":\"object\",\"properties\":{\"NfeCount\":{\"format\":\"int32\",\"type\":\"integer\"},\"NfceCount\":{\"format\":\"int32\",\"type\":\"integer\"},\"CteCount\":{\"format\":\"int32\",\"type\":\"integer\"}}},\"DownloadEventsRequestDto\":{\"type\":\"object\",\"properties\":{\"ChaveXml\":{\"type\":\"string\"},\"TipoXml\":{\"format\":\"int32\",\"enum\":[1,2,3,4,5,6,7,8,10,99,100],\"type\":\"integer\"},\"TipoEvento\":{\"format\":\"int32\",\"enum\":[0,1,101101,101103,105102,105104,105105,110110,110111,110112,110113,110130,110131,110160,110170,203202,210200,210210,210220,210240,240130,240131,240140,240150,240160,240170,305103,310610,310611,310620,410300,440130,440140,440150,440160,510620,510630,610110,610130,610131,610501,610510,610511,610514,610515,610550,610552,610554,610600,610601,610614,610615,790700,990900,990910],\"type\":\"integer\"},\"DataInicioEvento\":{\"format\":\"date-time\",\"type\":\"string\"},\"DataFimEvento\":{\"format\":\"date-time\",\"type\":\"string\"},\"CnpjEmit\":{\"type\":\"string\"},\"CnpjDest\":{\"type\":\"string\"},\"CnpjRem\":{\"type\":\"string\"},\"CnpjTom\":{\"type\":\"string\"},\"Skip\":{\"format\":\"int32\",\"type\":\"integer\"},\"Take\":{\"format\":\"int32\",\"type\":\"integer\"}}},\"ManifestationByKeyRequest\":{\"description\":\"Paramêtros base para a requisição de manifestação de notas pela API.\",\"type\":\"object\",\"properties\":{\"Manifestação\":{\"format\":\"int32\",\"enum\":[0,1,101101,101103,105102,105104,105105,110110,110111,110112,110113,110130,110131,110160,110170,203202,210200,210210,210220,210240,240130,240131,240140,240150,240160,240170,305103,310610,310611,310620,410300,440130,440140,440150,440160,510620,510630,610110,610130,610131,610501,610510,610511,610514,610515,610550,610552,610554,610600,610601,610614,610615,790700,990900,990910],\"type\":\"integer\"},\"CnpjDestinatario\":{\"type\":\"string\"},\"Justificativa\":{\"type\":\"string\"}}},\"ManifestationRequest\":{\"type\":\"object\",\"properties\":{\"Numero\":{\"format\":\"int32\",\"type\":\"integer\"},\"CnpjEmitente\":{\"type\":\"string\"},\"Serie\":{\"format\":\"int32\",\"type\":\"integer\"},\"Manifestação\":{\"format\":\"int32\",\"enum\":[0,1,101101,101103,105102,105104,105105,110110,110111,110112,110113,110130,110131,110160,110170,203202,210200,210210,210220,210240,240130,240131,240140,240150,240160,240170,305103,310610,310611,310620,410300,440130,440140,440150,440160,510620,510630,610110,610130,610131,610501,610510,610511,610514,610515,610550,610552,610554,610600,610601,610614,610615,790700,990900,990910],\"type\":\"integer\"},\"CnpjDestinatario\":{\"type\":\"string\"},\"Justificativa\":{\"type\":\"string\"}}},\"FileRequest\":{\"type\":\"object\",\"properties\":{\"ArquivoXml\":{\"type\":\"string\"}}},\"XmlReportsRequest\":{\"type\":\"object\",\"properties\":{\"Cnpj\":{\"type\":\"string\"},\"TypeXmlDownloadReport\":{\"format\":\"int32\",\"enum\":[0,1,2,3,4,5],\"type\":\"integer\"},\"XmlType\":{\"format\":\"int32\",\"enum\":[1,2,3,4,5,6,7,8,10,99,100],\"type\":\"integer\"},\"Month\":{\"format\":\"int32\",\"type\":\"integer\"},\"Year\":{\"format\":\"int32\",\"type\":\"integer\"}}},\"TagsRequest\":{\"type\":\"object\",\"properties\":{\"XmlKey\":{\"type\":\"string\"},\"NumeroXml\":{\"format\":\"int32\",\"type\":\"integer\"},\"XmlType\":{\"format\":\"int32\",\"enum\":[1,2,3,4,5,6,7,8,10,99,100],\"type\":\"integer\"},\"CnpjEmit\":{\"type\":\"string\"},\"CnpjDest\":{\"type\":\"string\"},\"ListTags\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}}}</pre></body></html>",
+    "httpStatus": 200,
+    "httpStatusText": "",
+    "title": "",
+    "url": "https://api.sieg.com/swagger/docs/ver",
+    "usage": {
+      "tokens": 8084
+    }
+  },
+  "meta": {
+    "usage": {
+      "tokens": 8084
+    }
+  },
+  "status": 20000
+}
