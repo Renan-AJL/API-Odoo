@@ -24,21 +24,24 @@ const { processPendingEmissions } = require('../services/sieg-odoo-emit');
 
 // === OAuth Callback ===
 // A SIEG redireciona aqui apos o usuario autorizar o acesso.
-// A URL deve estar configurada no cadastro do sistema externo na SIEG.
-// Ex: https://<seu-middleware>/callback/sieg?temporaryToken=xxx&state=xxx
+// O SIEG pode retornar o token temporario em varios query params.
 router.get('/callback/sieg', async (req, res) => {
   try {
-    var temporaryToken = req.query.temporaryToken || req.query.code || req.query.token;
+    // Tentar varios nomes de parametro que o SIEG pode usar
+    var temporaryToken = req.query.temporaryToken || req.query.tempToken ||
+                         req.query.code || req.query.token || req.query.accessToken ||
+                         req.query.AccessToken;
     var state = req.query.state;
+    var redirectUri = req.protocol + '://' + req.get('host') + '/callback/sieg';
     
     if (!temporaryToken) {
-      console.log('[SIEG-CALLBACK] Recebido callback SEM token. Query:', JSON.stringify(req.query));
-      return res.status(400).json({ erro: 'Token temporario nao fornecido no callback' });
+      console.log('[SIEG-CALLBACK] Callback recebido. Query:', JSON.stringify(req.query));
+      return res.status(400).json({ erro: 'Token temporario nao fornecido. Query params recebidos: ' + JSON.stringify(req.query) });
     }
     
-    console.log('[SIEG-CALLBACK] Token temporario recebido, trocando por definitivo... (state=' + state + ')');
+    console.log('[SIEG-CALLBACK] Token temporario recebido (' + temporaryToken.length + ' chars), trocando por definitivo... (state=' + state + ')');
     
-    var tokens = await exchangeTempToken(temporaryToken);
+    var tokens = await exchangeTempToken(temporaryToken, state, redirectUri);
     
     res.send(
       '<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#f0f4f8">' +

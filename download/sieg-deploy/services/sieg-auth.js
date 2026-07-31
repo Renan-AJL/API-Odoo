@@ -1,5 +1,5 @@
 /**
- * services/sieg-auth.js — SIEG Authentication v6.0
+ * services/sieg-auth.js — SIEG Authentication v7.0
  * 
  * Documentacao oficial SIEG (Sistemas Externos):
  *   https://integracoes.sieg.com/sistema-externo/docs
@@ -11,11 +11,13 @@
  *     Resposta: JWT string pura (24h validade)
  * 
  *   Nivel 2 - OAuth 2.0: Autoriza acesso a dados do cliente (empresa)
- *     1. Redirecionar usuario para: https://app.sieg.com/AuthorizeAccess.aspx
+ *     1. Usuario abre: https://app.sieg.com/AuthorizeAccess.aspx
  *        ?clientId={CLIENT_ID}&state={STATE}&accessLevel=write
  *     2. SIEG redireciona para callback com token temporario (10min)
- *     3. Trocar token temporario por token definitivo (30 dias)
- *     4. Refresh a cada 30 dias
+ *     3. POST /api/v1/oauth/generate-token (AccessToken + State + RedirectUri)
+ *        Headers: X-Client-Id + X-Secret-Key
+ *        Response: { IsSuccess, Data: { AccessToken definitive } }
+ *     4. Token definitivo: 30 dias, renovar via /api/v1/oauth/refresh
  * 
  * TODAS as requisicoes a API precisam:
  *   Authorization: Bearer {jwt_token}
@@ -25,18 +27,13 @@ const axios = require('axios');
 
 const SIEG_JWT_URL = 'https://api.sieg.com/api/v1/create-jwt';
 const SIEG_OAUTH_AUTHORIZE_URL = 'https://app.sieg.com/AuthorizeAccess.aspx';
+const SIEG_OAUTH_GENERATE = 'https://api.sieg.com/api/v1/oauth/generate-token';
+const SIEG_OAUTH_REFRESH = 'https://api.sieg.com/api/v1/oauth/refresh';
+const SIEG_OAUTH_REVOKE = 'https://api.sieg.com/api/v1/oauth/revoke';
 
 // In-memory cache
-var _jwtCache = {
-  token: null,
-  expiresAt: 0,
-};
-
-var _oauthCache = {
-  accessToken: null,
-  refreshToken: null,
-  expiresAt: 0,
-};
+var _jwtCache = { token: null, expiresAt: 0 };
+var _oauthCache = { accessToken: null, refreshToken: null, expiresAt: 0 };
 
 function getCredentials() {
   try {
@@ -58,6 +55,20 @@ function getCredentials() {
 }
 
 /**
+ * Headers base para autenticacao do sistema (Client ID + Secret Key)
+ * Usados nos endpoints de JWT e OAuth (generate-token, refresh, revoke)
+ */
+function getSystemHeaders() {
+  var creds = getCredentials();
+  return {
+    'X-Client-Id': creds.clientId,
+    'X-Secret-Key': creds.clientSecret,
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+  };
+}
+
+/**
  * Gerar JWT via headers X-Client-Id + X-Secret-Key
  * Resposta da SIEG: string JWT pura (NAO e um objeto JSON)
  */
@@ -70,31 +81,20 @@ async function createJwt() {
   console.log('[SIEG-AUTH] Gerando JWT... (Client: ***' + creds.clientId.slice(-4) + ')');
 
   var resp = await axios.post(SIEG_JWT_URL, null, {
-    headers: {
-      'X-Client-Id': creds.clientId,
-      'X-Secret-Key': creds.clientSecret,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      'Content-Length': '0',
-    },
+    headers: getSystemHeaders(),
     timeout: 15000,
   });
 
-  // A SIEG retorna o JWT como STRING PURA (nao como objeto JSON)
   var token = extractToken(resp.data);
-
   if (!token) {
     console.error('[SIEG-AUTH] Resposta sem token:', JSON.stringify(resp.data).slice(0, 300));
     throw new Error('[SIEG-AUTH] Resposta do create-jwt nao contem token');
   }
 
-  // Cache por 24h (menos 5 min de buffer)
   _jwtCache.token = token;
   _jwtCache.expiresAt = Date.now() + (24 * 60 * 60 * 1000) - (5 * 60 * 1000);
 
   console.log('[SIEG-AUTH] JWT obtido! Expira:', new Date(_jwtCache.expiresAt).toISOString());
-  console.log('[SIEG-AUTH] Token:', token.substring(0, 50) + '...');
-
   return { token: token };
 }
 
@@ -105,9 +105,7 @@ async function createJwt() {
  *   Authorization: Bearer {jwt}
  *   X-OAuth-Token: {oauth_token}
  */
-async function getAuthHeaders(options) {
-  options = options || {};
-
+async function getAuthHeaders() {
   // Garantir JWT valido
   if (!_jwtCache.token || Date.now() >= _jwtCache.expiresAt) {
     await createJwt();
@@ -119,12 +117,12 @@ async function getAuthHeaders(options) {
     'Accept': 'application/json',
   };
 
-  // Adicionar X-OAuth-Token (obrigatorio para acessar dados de cliente)
+  // X-OAuth-Token (obrigatorio para acessar dados de cliente)
   if (_oauthCache.accessToken) {
     headers['X-OAuth-Token'] = _oauthCache.accessToken;
   }
 
-  // Adicionar X-API-Key se configurado
+  // X-API-Key se configurado (alguns endpoints pedem)
   var creds = getCredentials();
   if (creds.apiKey) {
     headers['X-API-Key'] = creds.apiKey;
@@ -135,13 +133,10 @@ async function getAuthHeaders(options) {
 
 /**
  * Extrair token JWT da resposta
- * A SIEG pode retornar: string pura OU { Token: "..." } OU { token: "..." }
  */
 function extractToken(data) {
   if (!data) return null;
-  // Caso mais comum: resposta e string JWT pura
   if (typeof data === 'string' && data.length > 20) return data;
-  // Caso alternativo: objeto com campo Token
   if (typeof data === 'object') {
     return data.Token || data.token || data.jwt || data.access_token || data.accessToken || null;
   }
@@ -150,11 +145,8 @@ function extractToken(data) {
 
 /**
  * Gerar URL de autorizacao OAuth 2.0
- * O usuario deve visitar esta URL, fazer login na SIEG, e autorizar o acesso.
+ * O usuario deve visitar esta URL, fazer login na SIEG, e autorizar.
  * Apos autorizacao, a SIEG redireciona para callbackUrl com o token temporario.
- * 
- * @param {string} state - Identificador interno (para correlacionar o retorno)
- * @param {string} accessLevel - 'read' | 'write' | 'fullAccess'
  */
 function getOAuthAuthorizeUrl(state, accessLevel) {
   var creds = getCredentials();
@@ -166,91 +158,132 @@ function getOAuthAuthorizeUrl(state, accessLevel) {
     '&state=' + encodeURIComponent(state) +
     '&accessLevel=' + encodeURIComponent(accessLevel);
   
-  console.log('[SIEG-AUTH] URL OAuth:', url);
   return { url: url, state: state };
 }
 
 /**
  * Trocar token temporario por token definitivo
- * Chamado pelo callback OAuth quando o SIEG redireciona de volta
+ * 
+ * Endpoint: POST /api/v1/oauth/generate-token
+ * Headers: X-Client-Id + X-Secret-Key (NAO usa JWT Bearer!)
+ * Body: { AccessToken: <temp>, State: <state>, RedirectUri: <url> }
+ * Response: { IsSuccess, Data: { ... }, ... }
  * 
  * @param {string} tempToken - Token temporario recebido no callback
- * @returns {Object} { accessToken, refreshToken, expiresIn }
+ * @param {string} state - State usado na autorizacao
+ * @param {string} redirectUri - URL de callback configurada no SIEG
  */
-async function exchangeTempToken(tempToken) {
-  var headers = await getAuthHeaders({ skipOAuth: true });
-  
-  // TODO: endpoint exato do generate-token sera preenchido quando usuario enviar a doc
-  // Conforme documentacao: o token temporario (10min) deve ser trocado por definitivo (30 dias)
-  var generateTokenUrl = 'https://api.sieg.com/api/v1/generate-token';
-  
+async function exchangeTempToken(tempToken, state, redirectUri) {
   console.log('[SIEG-AUTH] Trocando token temporario por definitivo...');
   
-  var resp = await axios.post(generateTokenUrl, {
-    temporaryToken: tempToken,
-  }, { headers, timeout: 15000 });
+  var resp = await axios.post(SIEG_OAUTH_GENERATE, {
+    AccessToken: tempToken,
+    State: state || '',
+    RedirectUri: redirectUri || '',
+  }, {
+    headers: getSystemHeaders(),
+    timeout: 15000,
+  });
 
-  var data = resp.data;
-  console.log('[SIEG-AUTH] Resposta generate-token:', JSON.stringify(data).slice(0, 300));
+  var result = resp.data;
+  console.log('[SIEG-AUTH] Resposta generate-token:', JSON.stringify(result).slice(0, 500));
 
-  var accessToken = data.access_token || data.accessToken || data.token || data.Token;
-  var refreshToken = data.refresh_token || data.refreshToken;
-  var expiresIn = data.expires_in || data.expiresIn || (30 * 24 * 3600); // default 30 dias
-
-  if (!accessToken) {
-    throw new Error('[SIEG-AUTH] Resposta do generate-token nao contem access_token');
+  if (!result.IsSuccess) {
+    throw new Error('[SIEG-AUTH] generate-token falhou: ' + (result.ErrorMessage || 'erro desconhecido'));
   }
 
-  setOAuthToken(accessToken, refreshToken, expiresIn);
+  // O token definitivo esta dentro de result.Data
+  var data = result.Data || {};
+  var accessToken = data.AccessToken || data.accessToken || data.Token || data.token || 
+                   (typeof data === 'string' ? data : null);
+  var refreshToken = data.RefreshToken || data.refreshToken || null;
+
+  if (!accessToken) {
+    console.error('[SIEG-AUTH] Data completo:', JSON.stringify(data));
+    throw new Error('[SIEG-AUTH] Resposta do generate-token nao contem access_token em Data');
+  }
+
+  setOAuthToken(accessToken, refreshToken, 30 * 24 * 3600);
 
   return {
     accessToken: accessToken,
     refreshToken: refreshToken,
-    expiresIn: expiresIn,
+    expiresIn: 30 * 24 * 3600,
   };
 }
 
 /**
  * Renovar token OAuth definitivo (antes dos 30 dias)
+ * 
+ * Endpoint: POST /api/v1/oauth/refresh
+ * Headers: X-Client-Id + X-Secret-Key
+ * Body: { Token: <definitive_token> }
  */
 async function refreshOAuthToken() {
- if (!_oauthCache.refreshToken) {
-    throw new Error('[SIEG-AUTH] Nao ha refresh token. Faca o fluxo OAuth novamente.');
+  if (!_oauthCache.accessToken) {
+    throw new Error('[SIEG-AUTH] Nao ha OAuth token. Faca o fluxo OAuth novamente.');
   }
 
-  var headers = await getAuthHeaders({ skipOAuth: true });
-  
-  // TODO: endpoint exato do refresh sera preenchido quando usuario enviar a doc
-  var refreshUrl = 'https://api.sieg.com/api/v1/refresh';
-  
   console.log('[SIEG-AUTH] Renovando token OAuth...');
   
-  var resp = await axios.post(refreshUrl, {
-    refreshToken: _oauthCache.refreshToken,
-  }, { headers, timeout: 15000 });
+  var resp = await axios.post(SIEG_OAUTH_REFRESH, {
+    Token: _oauthCache.accessToken,
+  }, {
+    headers: getSystemHeaders(),
+    timeout: 15000,
+  });
 
-  var data = resp.data;
-  var accessToken = data.access_token || data.accessToken || data.token || data.Token;
-  var refreshToken = data.refresh_token || data.refreshToken || _oauthCache.refreshToken;
-  var expiresIn = data.expires_in || data.expiresIn || (30 * 24 * 3600);
+  var result = resp.data;
+  console.log('[SIEG-AUTH] Resposta refresh:', JSON.stringify(result).slice(0, 500));
 
-  if (!accessToken) {
-    throw new Error('[SIEG-AUTH] Resposta do refresh nao contem access_token');
+  if (!result.IsSuccess) {
+    throw new Error('[SIEG-AUTH] refresh falhou: ' + (result.ErrorMessage || 'erro desconhecido'));
   }
 
-  setOAuthToken(accessToken, refreshToken, expiresIn);
-  console.log('[SIEG-AUTH] Token OAuth renovado! Expira:', new Date(_oauthCache.expiresAt).toISOString());
+  var data = result.Data || {};
+  var accessToken = data.AccessToken || data.accessToken || data.Token || data.token ||
+                   (typeof data === 'string' ? data : null);
 
-  return { accessToken: accessToken, expiresIn: expiresIn };
+  if (!accessToken) {
+    throw new Error('[SIEG-AUTH] Resposta do refresh nao contem access_token em Data');
+  }
+
+  setOAuthToken(accessToken, null, 30 * 24 * 3600);
+  console.log('[SIEG-AUTH] Token OAuth renovado!');
+
+  return { accessToken: accessToken, expiresIn: 30 * 24 * 3600 };
 }
 
 /**
- * Configurar OAuth token manualmente (persistencia)
+ * Revogar token OAuth
+ */
+async function revokeOAuthToken() {
+  if (!_oauthCache.accessToken) return;
+
+  try {
+    await axios.post(SIEG_OAUTH_REVOKE, {
+      Token: _oauthCache.accessToken,
+    }, {
+      headers: getSystemHeaders(),
+      timeout: 15000,
+    });
+    console.log('[SIEG-AUTH] Token OAuth revogado.');
+  } catch (err) {
+    console.error('[SIEG-AUTH] Erro ao revogar:', err.message);
+  }
+
+  _oauthCache.accessToken = null;
+  _oauthCache.refreshToken = null;
+  _oauthCache.expiresAt = 0;
+}
+
+/**
+ * Configurar OAuth token manualmente (persistencia / restauracao)
  */
 function setOAuthToken(accessToken, refreshToken, expiresIn) {
   _oauthCache.accessToken = accessToken;
   _oauthCache.refreshToken = refreshToken || null;
-  _oauthCache.expiresAt = Date.now() + ((expiresIn || 2592000) * 1000) - 86400000; // 1 dia de buffer
+  _oauthCache.expiresAt = Date.now() + ((expiresIn || 2592000) * 1000) - 86400000;
   console.log('[SIEG-AUTH] OAuth token configurado. Expira:', new Date(_oauthCache.expiresAt).toISOString());
 }
 
@@ -269,7 +302,7 @@ function getTokenState() {
       hasToken: !!_oauthCache.accessToken,
       expiresAt: _oauthCache.expiresAt ? new Date(_oauthCache.expiresAt).toISOString() : null,
       isExpired: _oauthCache.expiresAt ? Date.now() >= _oauthCache.expiresAt : true,
-      hasRefreshToken: !!_oauthCache.refreshToken,
+      preview: _oauthCache.accessToken ? _oauthCache.accessToken.substring(0, 30) + '...' : null,
     },
   };
 }
@@ -282,9 +315,11 @@ function invalidateCache() {
 module.exports = {
   createJwt,
   getAuthHeaders,
+  getSystemHeaders,
   getOAuthAuthorizeUrl,
   exchangeTempToken,
   refreshOAuthToken,
+  revokeOAuthToken,
   setOAuthToken,
   getTokenState,
   invalidateCache,
