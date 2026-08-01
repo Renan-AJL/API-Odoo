@@ -232,8 +232,22 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
 
   // 9. Call SIEG API
   console.log('[SIEG-EMIT] Enviando ao SIEG...');
-  var resultado = await emitirNota(emitData);
-  console.log('[SIEG-EMIT] SIEG retornou - sucesso: ' + resultado.sucesso);
+  var resultado;
+  try {
+    resultado = await emitirNota(emitData);
+  } catch (siegErr) {
+    // Captura erros HTTP (ex: 409 com detalhes no body)
+    var siegDetail = siegErr.response && siegErr.response.data;
+    var errMsg = 'SIEG HTTP ' + (siegErr.response ? siegErr.response.status : 'erro') + ': ';
+    if (siegDetail) {
+      errMsg += typeof siegDetail === 'string' ? siegDetail : JSON.stringify(siegDetail).slice(0, 500);
+    } else {
+      errMsg += siegErr.message;
+    }
+    console.error('[SIEG-EMIT] Erro SIEG:', errMsg);
+    throw new Error(errMsg);
+  }
+  console.log('[SIEG-EMIT] SIEG retornou - sucesso: ' + resultado.sucesso + (resultado.httpStatus ? ' (HTTP ' + resultado.httpStatus + ')' : ''));
 
   // 10. Parse result
   var info = parseResult(resultado, tipo);
