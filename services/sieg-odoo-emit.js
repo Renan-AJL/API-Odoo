@@ -160,7 +160,17 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     'display_type', 'product_id', 'name', 'quantity', 'price_unit',
     'price_subtotal', 'tax_ids', 'discount',
   ]]);
-  var invoiceLines = rawLines.filter(function(l) { return !l.display_type; });
+  // Debug: log todas as linhas
+  rawLines.forEach(function(l) {
+    console.log('[SIEG-EMIT]   Line display_type=' + JSON.stringify(l.display_type) +
+      ' product=' + (l.product_id ? (Array.isArray(l.product_id) ? l.product_id[1] : l.product_id) : 'N/A') +
+      ' qty=' + l.quantity + ' price=' + l.price_unit + ' name=' + (l.name || '').substring(0, 60));
+  });
+  // Odoo 19 pode usar display_type='product'/'service' nas linhas de item
+  var invoiceLines = rawLines.filter(function(l) {
+    var dt = l.display_type;
+    return !dt || dt === 'product' || dt === 'service';
+  });
   if (!invoiceLines.length) throw new Error('Fatura sem linhas de produto/servico (total de linhas: ' + rawLines.length + ')');
   console.log('[SIEG-EMIT] Linhas de produto: ' + invoiceLines.length);
 
