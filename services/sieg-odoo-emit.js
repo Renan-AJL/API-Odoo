@@ -161,17 +161,22 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     'price_subtotal', 'tax_ids', 'discount',
   ]]);
   // Debug: log todas as linhas
-  rawLines.forEach(function(l) {
-    console.log('[SIEG-EMIT]   Line display_type=' + JSON.stringify(l.display_type) +
-      ' product=' + (l.product_id ? (Array.isArray(l.product_id) ? l.product_id[1] : l.product_id) : 'N/A') +
-      ' qty=' + l.quantity + ' price=' + l.price_unit + ' name=' + (l.name || '').substring(0, 60));
-  });
-  // Odoo 19 pode usar display_type='product'/'service' nas linhas de item
-  var invoiceLines = rawLines.filter(function(l) {
-    var dt = l.display_type;
-    return !dt || dt === 'product' || dt === 'service';
-  });
-  if (!invoiceLines.length) throw new Error('Fatura sem linhas de produto/servico (total de linhas: ' + rawLines.length + ')');
+  for (var li = 0; li < rawLines.length; li++) {
+    var l = rawLines[li];
+    var pName = 'N/A';
+    if (l.product_id) pName = Array.isArray(l.product_id) ? l.product_id[1] : String(l.product_id);
+    console.log('[SIEG-EMIT]   Line ' + li + ': display_type=' + JSON.stringify(l.display_type) + ' product=' + pName + ' qty=' + l.quantity + ' price=' + l.price_unit);
+  }
+  // Filtro principal: linhas com produto associado (mais confiavel que display_type)
+  var invoiceLines = rawLines.filter(function(l) { return l.product_id; });
+  // Fallback: se nenhuma tem product_id, tenta por display_type
+  if (!invoiceLines.length) {
+    invoiceLines = rawLines.filter(function(l) {
+      var dt = l.display_type;
+      return !dt || dt === 'product' || dt === 'service';
+    });
+  }
+  if (!invoiceLines.length) throw new Error('Fatura sem linhas de produto/servico (total: ' + rawLines.length + ', com product: 0)');
   console.log('[SIEG-EMIT] Linhas de produto: ' + invoiceLines.length);
 
   // 5. Get next NF number from company
