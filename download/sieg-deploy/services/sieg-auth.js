@@ -324,3 +324,23 @@ module.exports = {
   getTokenState,
   invalidateCache,
 };
+
+// === AUTO-INIT: Carregar OAuth token do config/env na startup ===
+(function initOAuthFromConfig() {
+  var creds = getCredentials();
+  if (creds.apiKey) {
+    console.log('[SIEG-AUTH] API Key configurada: ***' + creds.apiKey.slice(-4));
+  }
+  // Carregar OAuth token da env var (SIEG_OAUTH_TOKEN)
+  var oauthFromEnv = (function() {
+    try { return require('../config').sieg && require('../config').sieg.oauthToken; } catch(e) { return process.env.SIEG_OAUTH_TOKEN; }
+  })();
+  if (oauthFromEnv) {
+    _oauthCache.accessToken = oauthFromEnv;
+    _oauthCache.expiresAt = Date.now() + (29 * 24 * 3600 * 1000); // ~29 dias
+    console.log('[SIEG-AUTH] OAuth token carregado da config: ***' + oauthFromEnv.slice(-4));
+  }
+  if (creds.clientId) {
+    console.log('[SIEG-AUTH] Client ID configurado: ***' + creds.clientId.slice(-4));
+  }
+})();

@@ -35,9 +35,11 @@ function createClient(url) {
   var base = url.replace(/\/+$/, '');
   var host = base.replace('https://', '').replace('http://', '');
   var port = base.startsWith('https') ? 443 : 80;
+  var isSecure = base.startsWith('https');
+  var createFn = isSecure ? xmlrpc.createSecureClient : xmlrpc.createClient;
   return {
-    common: xmlrpc.createClient({ host: host, path: '/xmlrpc/2/common', port: port }),
-    models: xmlrpc.createClient({ host: host, path: '/xmlrpc/2/object', port: port }),
+    common: createFn({ host: host, path: '/xmlrpc/2/common', port: port }),
+    models: createFn({ host: host, path: '/xmlrpc/2/object', port: port }),
   };
 }
 
