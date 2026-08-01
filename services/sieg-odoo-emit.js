@@ -491,6 +491,18 @@ async function readPartner(client, db, uid, pwd, partnerId) {
   var cityRef = p.l10n_br_city_id || p.city_id;
   if (cityRef && Array.isArray(cityRef)) cityIbge = await readCityIbge(client, db, uid, pwd, cityRef[0]);
 
+  // Fallback 1: buscar res.city por nome + estado
+  if (!cityIbge && p.city && stateCode) {
+    cityIbge = await searchCityIbge(client, db, uid, pwd, p.city, stId);
+  }
+  // Fallback 2: tabela embutida de cidades principais
+  if (!cityIbge && p.city && stateCode) {
+    cityIbge = lookupIbgeFallback(p.city, stateCode);
+  }
+  if (!cityIbge) {
+    console.warn('[SIEG-EMIT] cMun vazio para parceiro ' + partnerId + ' (' + (p.name || '?') + '): cidade=' + (p.city || '?') + ' UF=' + (stateCode || '?'));
+  }
+
   return {
     cnpj_cpf: p.cnpj_cpf || p.vat || '',
     legal_name: p.legal_name || p.name || '',
@@ -556,6 +568,13 @@ async function buildLineData(client, db, uid, pwd, line) {
             } else {
               console.warn('[SIEG-EMIT] x_studio_ncm invalido (' + ncm.length + ' digitos): ' + pr2.x_studio_ncm);
               ncm = '';
+            }
+          }
+          // Fallback final: NCM padrao da env var (ex: SIEG_DEFAULT_NCM=84819000)
+          if (!ncm) {
+            ncm = process.env.SIEG_DEFAULT_NCM || '';
+            if (ncm) {
+              console.log('[SIEG-EMIT] NCM via SIEG_DEFAULT_NCM: ' + ncm);
             }
           }
           prodStudio = {
@@ -710,7 +729,7 @@ function parseResult(resultado, tipo) {
 }
 
 async function readCityIbge(client, db, uid, pwd, cityId) {
- try {
+  try {
     var c = await executeKw(client, db, uid, pwd, 'res.city', 'read', [[cityId], ['ibge_code']]);
     if (c && c[0] && c[0].ibge_code) return String(c[0].ibge_code);
   } catch (e) {}
@@ -719,6 +738,98 @@ async function readCityIbge(client, db, uid, pwd, cityId) {
     if (c2 && c2[0] && c2[0].ibge_code) return String(c2[0].ibge_code);
   } catch (e2) {}
   return '';
+}
+
+/**
+ * Busca IBGE de cidade pelo nome e estado_id no Odoo
+ */
+async function searchCityIbge(client, db, uid, pwd, cityName, stateId) {
+  if (!cityName || !stateId) return '';
+  try {
+    var domain = [['name', 'ilike', cityName]];
+    if (stateId) domain.push(['state_id', '=', stateId]);
+    var ids = await executeKw(client, db, uid, pwd, 'res.city', 'search', [domain, {limit: 5}]);
+    if (ids && ids.length > 0) {
+      // Ler ibge_code de todos os resultados encontrados
+      var cities = await executeKw(client, db, uid, pwd, 'res.city', 'read', [ids, ['name', 'ibge_code']]);
+      if (cities) {
+        for (var i = 0; i < cities.length; i++) {
+          if (cities[i].ibge_code) {
+            console.log('[SIEG-EMIT] IBGE encontrado por busca: ' + cities[i].name + ' = ' + cities[i].ibge_code);
+            return String(cities[i].ibge_code);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.log('[SIEG-EMIT] Busca res.city falhou: ' + e.message);
+  }
+  return '';
+}
+
+/**
+ * Tabela de fallback para cidades principais do BR
+ * Chave: 'CIDADE/UF' (normalizado) -> codigo IBGE 7 digitos
+ */
+var IBGE_FALLBACK = {
+  'CURITIBA/PR': '4106902',
+  'SAO PAULO/SP': '3550308',
+  'RIO DE JANEIRO/RJ': '3304557',
+  'BELO HORIZONTE/MG': '3106200',
+  'PORTO ALEGRE/RS': '4314902',
+  'SALVADOR/BA': '2927408',
+  'BRASILIA/DF': '5300108',
+  'FORTALEZA/CE': '2304400',
+  'RECIFE/PE': '2611606',
+  'CURITIBA/PR': '4106902',
+  'GUARULHOS/SP': '3518800',
+  'CAMPINAS/SP': '3509502',
+  'SAO BERNARDO DO CAMPO/SP': '3548708',
+  'SANTOS/SP': '3548500',
+  'RIBEIRAO PRETO/SP': '3543402',
+  'UBERLANDIA/MG': '3170206',
+  'LONDRINA/PR': '4113700',
+  'MARINGA/PR': '4115200',
+  'PONTA GROSSA/PR': '4119905',
+  'FOZ DO IGUACU/PR': '4108304',
+  'CAMPO MOURAO/PR': '4104803',
+  'CASCAVEL/PR': '4104808',
+  'JOINVILLE/SC': '4209102',
+  'FLORIANOPOLIS/SC': '4205407',
+  'BALNEARIO CAMBORIU/SC': '4202008',
+  'ITU/SP': '3523909',
+  'JUNDIAI/SP': '3525904',
+  'SOROCABA/SP': '3552205',
+  'SAO JOSE DOS CAMPOS/SP': '3549904',
+  'SANTO ANDRE/SP': '3548807',
+  'SAO JOSE DO RIO PRETO/SP': '3549805',
+  'MANAUS/AM': '1302603',
+  'BELEM/PA': '1501402',
+  'GOIANIA/GO': '5208707',
+  'VITORIA/ES': '3205309',
+  'VOLTA REDONDA/RJ': '3306305',
+  'NILOPOLIS/RJ': '3303203',
+  'MESQUITA/RJ': '3302858',
+  'DUQUE DE CAXIAS/RJ': '3301702',
+  'NOVA IGUACU/RJ': '3303500',
+  'SAO GONCALO/RJ': '3304904',
+  'MAUA/SP': '3529401',
+  'DIADEMA/SP': '3513801',
+  'OSASCO/SP': '3534401',
+  'CARAPICUIBA/SP': '3509502',
+  'MOGI DAS CRUZES/SP': '3530607',
+  'SUZANO/SP': '3552503',
+  'TABOAO DA SERRA/SP': '3552809',
+};
+
+function lookupIbgeFallback(cityName, stateCode) {
+  if (!cityName || !stateCode) return '';
+  var key = (cityName.toUpperCase().trim() + '/' + stateCode.toUpperCase().trim());
+  var code = IBGE_FALLBACK[key];
+  if (code) {
+    console.log('[SIEG-EMIT] IBGE via tabela fallback: ' + key + ' = ' + code);
+  }
+  return code || '';
 }
 
 function tupId(val) {
