@@ -533,17 +533,24 @@ async function buildLineData(client, db, uid, pwd, line) {
 
   if (productId) {
     try {
-      // Campos core do produto (sempre existem)
+      // Campos core do produto (sempre existem) — SEM detailed_type (pode nao existir no SaaS)
       var prods = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
-        'default_code', 'barcode', 'name', 'detailed_type', 'uom_id',
+        'default_code', 'barcode', 'name', 'uom_id',
       ]]);
       if (prods && prods[0]) {
         var pr = prods[0];
         defaultCode = pr.default_code || '';
         barcode = pr.barcode || '';
-        detailedType = pr.detailed_type || 'product';
         productName = pr.name || productName;
         if (pr.uom_id && Array.isArray(pr.uom_id)) uomName = pr.uom_id[1] || 'UN';
+      }
+
+      // Campo detailed_type (pode nao existir no Odoo 19 SaaS)
+      try {
+        var prodsDt = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['detailed_type']]);
+        if (prodsDt && prodsDt[0] && prodsDt[0].detailed_type) detailedType = prodsDt[0].detailed_type;
+      } catch (eDt) {
+        console.log('[SIEG-EMIT] detailed_type nao disponivel, usando product');
       }
 
       // Campos l10n_br + x_studio (podem nao existir)
@@ -570,7 +577,7 @@ async function buildLineData(client, db, uid, pwd, line) {
               ncm = '';
             }
           }
-          // Fallback final: NCM padrao da env var (ex: SIEG_DEFAULT_NCM=84819000)
+          // Fallback final: NCM padrao da env var (ex: SIEG_DEFAULT_NCM=73269000)
           if (!ncm) {
             ncm = process.env.SIEG_DEFAULT_NCM || '';
             if (ncm) {
