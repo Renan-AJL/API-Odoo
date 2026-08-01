@@ -132,10 +132,10 @@ async function processPendingEmissions() {
 async function processOne(client, db, uid, pwd, moveId, tipo) {
   console.log('[SIEG-EMIT] --- Fatura ID: ' + moveId + ' | Tipo: ' + tipo + ' ---');
 
-  // 1. Read account.move
+  // 1. Read account.move (sem invoice_line_ids — pode ser computed nao-stored no Odoo 19)
   var moves = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], [
     'name', 'partner_id', 'company_id', 'invoice_date', 'date',
-    'amount_total', 'narration', 'invoice_line_ids',
+    'amount_total', 'narration',
     'x_studio_nfe_status', 'x_studio_nfse_status', 'payment_state',
   ]]);
   if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
@@ -151,14 +151,18 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   if (!partnerId) throw new Error('Fatura sem parceiro');
   var partner = await readPartner(client, db, uid, pwd, partnerId);
 
-  // 4. Read invoice lines + product data
-  var lineIds = move.invoice_line_ids || [];
-  var rawLines = await executeKw(client, db, uid, pwd, 'account.move.line', 'read', [lineIds, [
+  // 4. Read invoice lines diretamente de account.move.line (evita computed field)
+  var allLineIds = await executeKw(client, db, uid, pwd, 'account.move.line', 'search', [[
+    ['move_id', '=', moveId],
+  ]], { order: 'id asc' });
+  console.log('[SIEG-EMIT] Linhas encontradas na fatura: ' + allLineIds.length);
+  var rawLines = await executeKw(client, db, uid, pwd, 'account.move.line', 'read', [allLineIds, [
     'display_type', 'product_id', 'name', 'quantity', 'price_unit',
     'price_subtotal', 'tax_ids', 'discount',
   ]]);
   var invoiceLines = rawLines.filter(function(l) { return !l.display_type; });
-  if (!invoiceLines.length) throw new Error('Fatura sem linhas de produto/servico');
+  if (!invoiceLines.length) throw new Error('Fatura sem linhas de produto/servico (total de linhas: ' + rawLines.length + ')');
+  console.log('[SIEG-EMIT] Linhas de produto: ' + invoiceLines.length);
 
   // 5. Get next NF number from company
   var serie, numField, nextNum;
