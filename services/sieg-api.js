@@ -49,7 +49,17 @@ async function enviarNFe(dadosOdoo) {
 
   const result = resp.data;
   const httpStatus = resp.status;
-  console.log('[SIEG-API] Resposta send-xml HTTP ' + httpStatus + ':', JSON.stringify(result).slice(0, 1000));
+  console.log('[SIEG-API] Resposta send-xml HTTP ' + httpStatus + ':', JSON.stringify(result).slice(0, 2000));
+
+  // Se 4xx (ex: 409), logar detalhes completos do erro SIEG
+  if (httpStatus >= 400 && httpStatus < 500) {
+    var errMsg = result.ErrorMessage || result.Message || result.message || '';
+    var errDetail = result.ModelState || result.Errors || result.errors || null;
+    console.error('[SIEG-API] *** ERRO SIEG HTTP ' + httpStatus + ' ***');
+    console.error('[SIEG-API] ErrorMessage: ' + errMsg);
+    if (errDetail) console.error('[SIEG-API] Detalhes: ' + JSON.stringify(errDetail).slice(0, 1000));
+    console.error('[SIEG-API] Resposta completa: ' + JSON.stringify(result).slice(0, 3000));
+  }
 
   // Verificar resultado no formato SIEG (PascalCase)
   var sucesso = !!(result.IsSuccess === true);
@@ -60,7 +70,7 @@ async function enviarNFe(dadosOdoo) {
     xmlEnviado: xml,
     resposta: result,
     data: result.Data || null,
-    erro: result.ErrorMessage || null,
+    erro: result.ErrorMessage || result.Message || null,
     statusCode: result.StatusCode || null,
   };
 }
@@ -87,7 +97,15 @@ async function emitirNFSe(dadosOdoo) {
 
   const result = resp.data;
   const httpStatus = resp.status;
-  console.log('[SIEG-API] Resposta send-xml NFS-e HTTP ' + httpStatus + ':', JSON.stringify(result).slice(0, 1000));
+  console.log('[SIEG-API] Resposta send-xml NFS-e HTTP ' + httpStatus + ':', JSON.stringify(result).slice(0, 2000));
+
+  // Se 4xx, logar detalhes completos
+  if (httpStatus >= 400 && httpStatus < 500) {
+    var errMsg = result.ErrorMessage || result.Message || result.message || '';
+    console.error('[SIEG-API] *** ERRO SIEG NFS-e HTTP ' + httpStatus + ' ***');
+    console.error('[SIEG-API] ErrorMessage: ' + errMsg);
+    console.error('[SIEG-API] Resposta completa: ' + JSON.stringify(result).slice(0, 3000));
+  }
 
   var sucesso = !!(result.IsSuccess === true);
 
@@ -97,7 +115,7 @@ async function emitirNFSe(dadosOdoo) {
     xmlEnviado: xml,
     resposta: result,
     data: result.Data || null,
-    erro: result.ErrorMessage || null,
+    erro: result.ErrorMessage || result.Message || null,
     statusCode: result.StatusCode || null,
   };
 }

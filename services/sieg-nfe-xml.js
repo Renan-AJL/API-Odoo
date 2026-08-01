@@ -189,7 +189,7 @@ function gerarXmlNFe(data) {
   const dup = data.duplicatas || [];
   const pag = data.pagamentos || [];
 
-  // === ide ===
+  // === Validacao de campos obrigatorios ===
   const cUF = company.state_ibge || '41';
   const cNF = randomCnf();
   const serie = cfg.serie || '100';
@@ -203,6 +203,23 @@ function gerarXmlNFe(data) {
   const indFinal = (partner.is_consumer || partner.indFinal) ? '1' : '0';
   const indPres = cfg.indPres || '0'; // 0=nao presencial
   const verProc = cfg.verProc || 'Odoo19-SIEG-1.0';
+
+  // Validar campos obrigatorios antes de gerar XML
+  var xmlWarnings = [];
+  if (!cMunFG) xmlWarnings.push('cMunFG vazio (empresa sem codigo IBGE da cidade)');
+  if (!company.cnpj_cpf) xmlWarnings.push('CNPJ emitente vazio');
+  if (!company.inscr_est) xmlWarnings.push('IE emitente vazia');
+  if (!company.street) xmlWarnings.push('Logradouro emitente vazio');
+  if (!partner.cnpj_cpf && !partner.xNome) xmlWarnings.push('Dados destinatario vazios');
+  lines.forEach(function(l, i) {
+    if (!l.ncm) xmlWarnings.push('NCM vazio no item ' + (i+1) + ' (' + (l.xProd || l.product_name || '?') + ')');
+  });
+  if (xmlWarnings.length > 0) {
+    console.warn('[NFE-XML] *** CAMPOS OBRIGATORIOS FALTANDO ***');
+    for (var w = 0; w < xmlWarnings.length; w++) {
+      console.warn('[NFE-XML]   - ' + xmlWarnings[w]);
+    }
+  }
 
   const ideId = `NFe${cUF}${dhEmi.slice(0,4)}${dhEmi.slice(5,7)}${company.cnpj_cpf}${String(cfg.mod || '55')}${serie.padStart(3,'0')}${nNF.padStart(9,'0')}${cNF}`;
   // Nota: o Id real inclui a chave de 44 digitos, calculada apos montagem completa

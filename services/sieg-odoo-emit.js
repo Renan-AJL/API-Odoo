@@ -240,7 +240,13 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     var siegDetail = siegErr.response && siegErr.response.data;
     var errMsg = 'SIEG HTTP ' + (siegErr.response ? siegErr.response.status : 'erro') + ': ';
     if (siegDetail) {
-      errMsg += typeof siegDetail === 'string' ? siegDetail : JSON.stringify(siegDetail).slice(0, 500);
+      // Tentar extrair ErrorMessage do formato SIEG (PascalCase)
+      var siegMsg = siegDetail.ErrorMessage || siegDetail.Message || siegDetail.message || '';
+      if (siegMsg) {
+        errMsg += siegMsg;
+      } else {
+        errMsg += typeof siegDetail === 'string' ? siegDetail : JSON.stringify(siegDetail).slice(0, 800);
+      }
     } else {
       errMsg += siegErr.message;
     }
@@ -248,6 +254,11 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     throw new Error(errMsg);
   }
   console.log('[SIEG-EMIT] SIEG retornou - sucesso: ' + resultado.sucesso + (resultado.httpStatus ? ' (HTTP ' + resultado.httpStatus + ')' : ''));
+
+  // Se SIEG retornou erro (IsSuccess=false), extrair mensagem detalhada
+  if (!resultado.sucesso && resultado.erro) {
+    console.error('[SIEG-EMIT] SIEG rejeitou o XML: ' + resultado.erro);
+  }
 
   // 10. Parse result
   var info = parseResult(resultado, tipo);
@@ -527,6 +538,7 @@ async function buildLineData(client, db, uid, pwd, line) {
       try {
         var prods2 = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
           'ncm_id', 'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code',
+          'x_studio_ncm',
         ]]);
         if (prods2 && prods2[0]) {
           var pr2 = prods2[0];
@@ -535,6 +547,16 @@ async function buildLineData(client, db, uid, pwd, line) {
               var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[pr2.ncm_id[0]], ['code']]);
               if (ncmRec && ncmRec[0]) ncm = ncmRec[0].code || '';
             } catch (e) {}
+          }
+          // Fallback: x_studio_ncm (campo customizado do usuario, pois l10n_br nao esta instalado)
+          if (!ncm && pr2.x_studio_ncm) {
+            ncm = String(pr2.x_studio_ncm).replace(/\D/g, '');
+            if (ncm.length === 8) {
+              console.log('[SIEG-EMIT] NCM lido de x_studio_ncm: ' + ncm);
+            } else {
+              console.warn('[SIEG-EMIT] x_studio_ncm invalido (' + ncm.length + ' digitos): ' + pr2.x_studio_ncm);
+              ncm = '';
+            }
           }
           prodStudio = {
             c_trib_nac: pr2.x_studio_c_trib_nac || '',
@@ -658,18 +680,29 @@ function parseResult(resultado, tipo) {
   var resp = resultado.resposta || {};
   var chave = '', protocolo = '', cStat = '', motivo = '', numero = '', sucesso = false;
 
+  // Se SIEG retornou HTTP 4xx, usar ErrorMessage diretamente como motivo
+  var siegErro = resultado.erro || '';
+  if (resultado.httpStatus && resultado.httpStatus >= 400 && resultado.httpStatus < 500) {
+    // Erro de validacao do XML — extrair mensagem do SIEG
+    motivo = siegErro || 'Erro HTTP ' + resultado.httpStatus;
+    if (tipo === 'nfe') {
+      cStat = String(resultado.statusCode || resp.cStat || resp.status || '');
+    }
+    return { sucesso: false, chave: chave, protocolo: protocolo, cStat: cStat, motivo: motivo, numero: numero };
+  }
+
   if (tipo === 'nfe') {
     chave = resp.chNFe || resp.chave || resp.ChaveXml || '';
     protocolo = resp.nProt || resp.protocolo || '';
     cStat = String(resp.cStat || resp.status || '');
-    motivo = resp.xMotivo || resp.motivo || 'Processado';
+    motivo = resp.xMotivo || resp.motivo || (siegErro || 'Processado');
     sucesso = (cStat === '100' || cStat === '104' || cStat === '150');
   } else {
     chave = resp.Chave || resp.chave || '';
     protocolo = resp.Protocolo || resp.protocolo || '';
     numero = resp.NumeroNfse || resp.nDFSe || resp.numero || '';
     cStat = String(resp.CodigoVerificacao || resp.codigo || '');
-    motivo = resp.Motivo || resp.motivo || (resultado.sucesso ? 'Autorizada' : 'Erro na emissao');
+    motivo = resp.Motivo || resp.motivo || siegErro || (resultado.sucesso ? 'Autorizada' : 'Erro na emissao');
     sucesso = resultado.sucesso;
   }
 
