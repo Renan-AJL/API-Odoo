@@ -356,12 +356,9 @@ async function readCompany(client, db, uid, pwd, companyId) {
   var pId = tupId(c.partner_id);
   var p = {};
   if (pId) {
-    var pRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[pId], [
-      'cnpj_cpf', 'inscr_est', 'legal_name', 'street', 'street2', 'number',
-      'city', 'state_id', 'zip', 'phone', 'email',
-      'city_id', 'l10n_br_city_id', 'district',
-    ]]);
-    if (pRecs && pRecs[0]) p = pRecs[0];
+    try { p = await readPartnerSafe(client, db, uid, pwd, pId); } catch (e) {
+      console.warn('[SIEG-EMIT] Erro ao ler partner da empresa:', e.message);
+    }
   }
 
   var stateCode = '', stateIbge = '';
@@ -401,16 +398,41 @@ async function readCompany(client, db, uid, pwd, companyId) {
 }
 
 // ============================================================
-// Read Partner
+// Read Partner (safe for Odoo 19 SaaS — l10n_br fields may not exist)
 // ============================================================
-async function readPartner(client, db, uid, pwd, partnerId) {
-  var recs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], [
-    'name', 'legal_name', 'cnpj_cpf', 'inscr_est',
-    'street', 'street2', 'number', 'city', 'state_id', 'zip',
-    'phone', 'email', 'is_company', 'city_id', 'l10n_br_city_id', 'district',
-  ]]);
+var PARTNER_SAFE_FIELDS = [
+  'name', 'vat', 'street', 'street2', 'city', 'state_id', 'zip',
+  'phone', 'email', 'is_company', 'city_id', 'country_id',
+];
+var PARTNER_BR_FIELDS = ['cnpj_cpf', 'inscr_est', 'legal_name', 'number', 'l10n_br_city_id', 'district'];
+
+/**
+ * Leitura segura de res.partner: campos core + l10n_br opcionais.
+ * No Odoo 19 SaaS, campos como cnpj_cpf, inscr_est, legal_name, number,
+ * l10n_br_city_id, district podem nao existir. Fazemos duas leituras:
+ *   1. Campos core (sempre existem)
+ *   2. Campos l10n_br (try/catch, ignora se falhar)
+ */
+async function readPartnerSafe(client, db, uid, pwd, partnerId, extraFields) {
+  var fields = PARTNER_SAFE_FIELDS.slice();
+  if (extraFields) fields = fields.concat(extraFields);
+  var recs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], fields]);
   if (!recs || !recs.length) throw new Error('Parceiro ' + partnerId + ' nao encontrado');
   var p = recs[0];
+  // Try Brazilian fields separately
+  try {
+    var brRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], PARTNER_BR_FIELDS]);
+    if (brRecs && brRecs[0]) {
+      for (var k in brRecs[0]) { if (brRecs[0][k] !== undefined) p[k] = brRecs[0][k]; }
+    }
+  } catch (e) {
+    console.log('[SIEG-EMIT] Campos l10n_br nao disponiveis, usando vat como CNPJ/CPF');
+  }
+  return p;
+}
+
+async function readPartner(client, db, uid, pwd, partnerId) {
+  var p = await readPartnerSafe(client, db, uid, pwd, partnerId);
 
   var stateCode = '';
   var stId = tupId(p.state_id);
@@ -426,7 +448,7 @@ async function readPartner(client, db, uid, pwd, partnerId) {
   if (cityRef && Array.isArray(cityRef)) cityIbge = await readCityIbge(client, db, uid, pwd, cityRef[0]);
 
   return {
-    cnpj_cpf: p.cnpj_cpf || '',
+    cnpj_cpf: p.cnpj_cpf || p.vat || '',
     legal_name: p.legal_name || p.name || '',
     xNome: p.name || '',
     inscr_est: p.inscr_est || '',
@@ -455,9 +477,9 @@ async function buildLineData(client, db, uid, pwd, line) {
 
   if (productId) {
     try {
+      // Campos core do produto (sempre existem)
       var prods = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
-        'default_code', 'barcode', 'name', 'detailed_type', 'ncm_id', 'uom_id',
-        'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code',
+        'default_code', 'barcode', 'name', 'detailed_type', 'uom_id',
       ]]);
       if (prods && prods[0]) {
         var pr = prods[0];
@@ -465,25 +487,31 @@ async function buildLineData(client, db, uid, pwd, line) {
         barcode = pr.barcode || '';
         detailedType = pr.detailed_type || 'product';
         productName = pr.name || productName;
-
-        // NCM
-        if (pr.ncm_id && Array.isArray(pr.ncm_id)) {
-          try {
-            var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[pr.ncm_id[0]], ['code']]);
-            if (ncmRec && ncmRec[0]) ncm = ncmRec[0].code || '';
-          } catch (e) {}
-        }
-
-        // UoM
         if (pr.uom_id && Array.isArray(pr.uom_id)) uomName = pr.uom_id[1] || 'UN';
+      }
 
-        // x_studio_ fields from product (for NFS-e)
-        prodStudio = {
-          c_trib_nac: pr.x_studio_c_trib_nac || '',
-          c_nbs: pr.x_studio_c_nbs || '',
-          aliquota_iss: pr.x_studio_aliquota_iss || '',
-          ibge_code: pr.x_studio_ibge_code || '',
-        };
+      // Campos l10n_br + x_studio (podem nao existir)
+      try {
+        var prods2 = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
+          'ncm_id', 'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code',
+        ]]);
+        if (prods2 && prods2[0]) {
+          var pr2 = prods2[0];
+          if (pr2.ncm_id && Array.isArray(pr2.ncm_id)) {
+            try {
+              var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[pr2.ncm_id[0]], ['code']]);
+              if (ncmRec && ncmRec[0]) ncm = ncmRec[0].code || '';
+            } catch (e) {}
+          }
+          prodStudio = {
+            c_trib_nac: pr2.x_studio_c_trib_nac || '',
+            c_nbs: pr2.x_studio_c_nbs || '',
+            aliquota_iss: pr2.x_studio_aliquota_iss || '',
+            ibge_code: pr2.x_studio_ibge_code || '',
+          };
+        }
+      } catch (e2) {
+        console.log('[SIEG-EMIT] Campos l10n_br/x_studio do produto nao disponiveis');
       }
     } catch (e) { console.warn('[SIEG-EMIT] Erro ao ler produto ' + productId + ':', e.message); }
   }
