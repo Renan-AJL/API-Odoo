@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <!-- ==================== PARÂMETROS DO SISTEMA ==================== -->
+        <record id="config_parameter_middleware_url" model="ir.config_parameter">
+            <field name="key">cnpja.middleware.url</field>
+            <field name="value">http://localhost:3000</field>
+        </record>
+
+        <record id="config_parameter_middleware_api_key" model="ir.config_parameter">
+            <field name="key">cnpja.middleware.api_key</field>
+            <field name="value">cnpja-odoo-secret-key-change-me</field>
+        </record>
+
+    </data>
+</odoo>

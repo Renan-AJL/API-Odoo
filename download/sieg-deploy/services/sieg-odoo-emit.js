@@ -145,11 +145,13 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   // 2. Read company
   var companyId = tupId(move.company_id);
   var company = await readCompany(client, db, uid, pwd, companyId);
+  console.log('[SIEG-EMIT] [EMITENTE] CNPJ=' + company.cnpj_cpf + ' IE=' + company.inscr_est + ' cMun=' + company.city_ibge_code + ' xMun=' + company.city + ' UF=' + company.state + ' xLgr=' + company.street + ' nro=' + company.number);
 
   // 3. Read partner
   var partnerId = tupId(move.partner_id);
   if (!partnerId) throw new Error('Fatura sem parceiro');
   var partner = await readPartner(client, db, uid, pwd, partnerId);
+  console.log('[SIEG-EMIT] [DESTINATARIO] CNPJ=' + partner.cnpj_cpf + ' xNome=' + partner.xNome + ' cMun=' + partner.city_ibge_code + ' xMun=' + partner.city + ' UF=' + partner.state + ' xLgr=' + partner.street + ' nro=' + partner.number);
 
   // 4. Read invoice lines diretamente de account.move.line (evita computed field)
   var allLineIds = await executeKw(client, db, uid, pwd, 'account.move.line', 'search', [[
@@ -568,26 +570,60 @@ async function buildLineData(client, db, uid, pwd, line) {
         console.log('[SIEG-EMIT] detailed_type nao disponivel, usando product');
       }
 
-      // NCM do produto (campo l10n_br — pode estar separado dos x_studio)
+      // NCM do produto — campo ncm_id (many2one para l10n_br_fiscal.ncm)
+      // No Odoo 19 SaaS o campo EXISTE mas o modelo relacionado pode nao ser legivel.
+      // Estrategia: ler ncm_id e extrair o codigo do display_name (ncm_id[1]).
       if (!ncm) {
         try {
+          console.log('[SIEG-EMIT-NCM] Tentando ler ncm_id do produto ' + productId + '...');
           var prodsNcm = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['ncm_id']]);
+          console.log('[SIEG-EMIT-NCM] ncm_id bruto: ' + JSON.stringify(prodsNcm && prodsNcm[0] ? prodsNcm[0].ncm_id : 'N/A'));
           if (prodsNcm && prodsNcm[0] && prodsNcm[0].ncm_id) {
             var ncmRef = prodsNcm[0].ncm_id;
-            // Pode vir como array [id, code] ou objeto com code
-            if (Array.isArray(ncmRef) && ncmRef.length >= 2) {
-              ncm = String(ncmRef[1] || '').replace(/\D/g, '');
-            } else if (Array.isArray(ncmRef) && ncmRef.length === 1) {
-              // So o ID, precisa ler o registro
+            // ncm_id vem como array [id, display_name] via XML-RPC
+            // display_name geralmente: "7308.90.90" ou "7308.90.90 - Descricao..."
+            if (Array.isArray(ncmRef)) {
+              var ncmDisplay = String(ncmRef[1] || ncmRef[0] || '');
+              console.log('[SIEG-EMIT-NCM] display_name do ncm_id: "' + ncmDisplay + '"');
+              // Extrair NCM no formato NNNN.NN.NN do display_name
+              var ncmMatch = ncmDisplay.match(/(\d{4})\.(\d{2})\.(\d{2})/);
+              if (ncmMatch) {
+                ncm = ncmMatch[1] + ncmMatch[2] + ncmMatch[3]; // "7308.90.90" -> "73089090"
+                console.log('[SIEG-EMIT-NCM] NCM extraido via regex: ' + ncm);
+              } else {
+                // Fallback: remover todos os nao-digitos
+                ncm = ncmDisplay.replace(/\D/g, '');
+                if (ncm.length === 8) {
+                  console.log('[SIEG-EMIT-NCM] NCM extraido via replace: ' + ncm);
+                } else {
+                  console.warn('[SIEG-EMIT-NCM] NCM extraido tem ' + ncm.length + ' digitos (esperado 8): "' + ncm + '"');
+                  ncm = '';
+                }
+              }
+            } else if (typeof ncmRef === 'number') {
+              // So o ID — tentar ler o registro (pode falhar no SaaS)
+              console.log('[SIEG-EMIT-NCM] ncm_id so tem ID ' + ncmRef + ', tentando ler l10n_br_fiscal.ncm...');
               try {
-                var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[ncmRef[0]], ['code']]);
-                if (ncmRec && ncmRec[0]) ncm = String(ncmRec[0].code || '').replace(/\D/g, '');
-              } catch (eNcm) {}
+                var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[ncmRef], ['code', 'name']]);
+                console.log('[SIEG-EMIT-NCM] l10n_br_fiscal.ncm retorno: ' + JSON.stringify(ncmRec));
+                if (ncmRec && ncmRec[0]) {
+                  var ncmCode = String(ncmRec[0].code || ncmRec[0].name || '');
+                  var m2 = ncmCode.match(/(\d{4})\.(\d{2})\.(\d{2})/);
+                  ncm = m2 ? (m2[1]+m2[2]+m2[3]) : ncmCode.replace(/\D/g, '');
+                  if (ncm) console.log('[SIEG-EMIT-NCM] NCM via l10n_br_fiscal.ncm: ' + ncm);
+                }
+              } catch (eNcm) {
+                console.warn('[SIEG-EMIT-NCM] l10n_br_fiscal.ncm nao acessivel: ' + eNcm.message);
+              }
+            } else {
+              console.warn('[SIEG-EMIT-NCM] ncm_id em formato inesperado: ' + typeof ncmRef + ' = ' + JSON.stringify(ncmRef));
             }
-            if (ncm) console.log('[SIEG-EMIT] NCM do produto: ' + ncm);
+            if (ncm) console.log('[SIEG-EMIT-NCM] *** NCM FINAL do produto: ' + ncm + ' ***');
+          } else {
+            console.warn('[SIEG-EMIT-NCM] ncm_id veio vazio/nulo no produto ' + productId);
           }
         } catch (eNcm2) {
-          console.log('[SIEG-EMIT] ncm_id nao disponivel no produto');
+          console.error('[SIEG-EMIT-NCM] ERRO ao ler ncm_id: ' + eNcm2.message);
         }
       }
 
@@ -599,15 +635,12 @@ async function buildLineData(client, db, uid, pwd, line) {
         ]]);
         if (prods2 && prods2[0]) {
           var pr2 = prods2[0];
+          console.log('[SIEG-EMIT-NCM] x_studio_ncm: ' + JSON.stringify(pr2.x_studio_ncm));
           if (!ncm && pr2.x_studio_ncm) {
             ncm = String(pr2.x_studio_ncm).replace(/\D/g, '');
             if (ncm.length === 8) {
-              console.log('[SIEG-EMIT] NCM lido de x_studio_ncm: ' + ncm);
+              console.log('[SIEG-EMIT-NCM] NCM lido de x_studio_ncm: ' + ncm);
             } else { ncm = ''; }
-          }
-          if (!ncm) {
-            ncm = process.env.SIEG_DEFAULT_NCM || '';
-            if (ncm) console.log('[SIEG-EMIT] NCM via SIEG_DEFAULT_NCM: ' + ncm);
           }
           prodStudio = {
             c_trib_nac: pr2.x_studio_c_trib_nac || '',
@@ -617,12 +650,16 @@ async function buildLineData(client, db, uid, pwd, line) {
           };
         }
       } catch (e2) {
-        console.log('[SIEG-EMIT] Campos x_studio do produto nao disponiveis');
-        // Aplicar fallback NCM mesmo sem x_studio
-        if (!ncm) {
-          ncm = process.env.SIEG_DEFAULT_NCM || '';
-          if (ncm) console.log('[SIEG-EMIT] NCM via SIEG_DEFAULT_NCM (sem x_studio): ' + ncm);
-        }
+        console.log('[SIEG-EMIT] Campos x_studio do produto nao disponiveis: ' + e2.message);
+      }
+      // Fallback final: NCM do env var (se configurado)
+      if (!ncm && process.env.SIEG_DEFAULT_NCM) {
+        ncm = String(process.env.SIEG_DEFAULT_NCM).replace(/\D/g, '');
+        console.log('[SIEG-EMIT-NCM] NCM via SIEG_DEFAULT_NCM env: ' + ncm);
+      }
+      // ALERTA se NCM ainda vazio
+      if (!ncm) {
+        console.error('[SIEG-EMIT-NCM] *** NCM VAZIO para produto ' + productId + ' (' + productName + ') — XML sera invalido ***');
       }
     } catch (e) { console.warn('[SIEG-EMIT] Erro ao ler produto ' + productId + ':', e.message); }
   }
@@ -630,7 +667,7 @@ async function buildLineData(client, db, uid, pwd, line) {
   // Tax extraction
   var tax = await extractTaxes(client, db, uid, pwd, line);
 
-  return {
+  var lineData = {
     cProd: defaultCode, barcode: barcode,
     product_name: productName, xProd: productName,
     ncm: ncm, cfop: '5102', uom: uomName,
@@ -650,6 +687,28 @@ async function buildLineData(client, db, uid, pwd, line) {
     x_studio_aliquota_iss: prodStudio.aliquota_iss,
     x_studio_ibge_code: prodStudio.ibge_code,
   };
+
+  // === LOG DETALHADO POR CAMPO (para debug de XML invalido) ===
+  console.log('[SIEG-EMIT-LINE] === Dados da linha (product ' + productId + ') ===');
+  console.log('[SIEG-EMIT-LINE]   cProd:      ' + JSON.stringify(lineData.cProd) + (lineData.cProd ? '' : ' *** VAZIO ***'));
+  console.log('[SIEG-EMIT-LINE]   xProd:      ' + JSON.stringify(lineData.xProd));
+  console.log('[SIEG-EMIT-LINE]   NCM:        ' + JSON.stringify(lineData.ncm) + (lineData.ncm ? '' : ' *** VAZIO ***'));
+  console.log('[SIEG-EMIT-LINE]   CFOP:       ' + JSON.stringify(lineData.cfop));
+  console.log('[SIEG-EMIT-LINE]   uCom:       ' + JSON.stringify(lineData.uom));
+  console.log('[SIEG-EMIT-LINE]   qCom:       ' + lineData.qty);
+  console.log('[SIEG-EMIT-LINE]   vUnCom:     ' + lineData.price_unit);
+  console.log('[SIEG-EMIT-LINE]   vProd:      ' + lineData.price_subtotal);
+  console.log('[SIEG-EMIT-LINE]   CSOSN:      ' + JSON.stringify(lineData.csosn));
+  console.log('[SIEG-EMIT-LINE]   CST_ICMS:   ' + JSON.stringify(lineData.cst_icms));
+  console.log('[SIEG-EMIT-LINE]   vBC_ICMS:   ' + lineData.vbc_icms);
+  console.log('[SIEG-EMIT-LINE]   vICMS:      ' + lineData.vicms);
+  console.log('[SIEG-EMIT-LINE]   pICMS:      ' + lineData.picms);
+  console.log('[SIEG-EMIT-LINE]   CST_PIS:    ' + JSON.stringify(lineData.cst_pis));
+  console.log('[SIEG-EMIT-LINE]   vPIS:       ' + lineData.vpis);
+  console.log('[SIEG-EMIT-LINE]   CST_COFINS: ' + JSON.stringify(lineData.cst_cofins));
+  console.log('[SIEG-EMIT-LINE]   vCOFINS:    ' + lineData.vcofins);
+
+  return lineData;
 }
 
 // ============================================================

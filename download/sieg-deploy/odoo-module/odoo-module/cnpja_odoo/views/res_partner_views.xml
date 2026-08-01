@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ==================== RES.PARTNER - FORMULÁRIO ==================== -->
+
+    <!-- Botão "Consultar CNPJ" via server action -->
+    <record id="action_consultar_cnpj_partner" model="ir.actions.server">
+        <field name="name">Consultar CNPJ via CNP Já</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="binding_model_id" ref="base.model_res_partner"/>
+        <field name="binding_view_types">form</field>
+        <field name="groups_id" eval="[(4, ref('sales_team.group_sale_user'))]"/>
+        <field name="state">code</field>
+        <field name="code">
+            action = records.action_consultar_cnpj()
+        </field>
+    </record>
+
+    <!-- Herança do formulário do parceiro -->
+    <record id="view_partner_form_cnpja" model="ir.ui.view">
+        <field name="name">res.partner.form.cnpja</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_form"/>
+        <field name="arch" type="xml">
+
+            <!-- Botões de consulta no topo do formulário -->
+            <xpath expr="//field[@name='name']" position="before">
+                <div class="oe_button_box" name="cnpja_button_box" style="margin-bottom: 8px;">
+                    <button class="oe_stat_button btn-success"
+                            name="action_consultar_cnpj"
+                            type="object"
+                            icon="fa-search"
+                            string="Consultar CNPJ"/>
+                    <button class="oe_stat_button"
+                            name="action_consultar_cnpj"
+                            type="object"
+                            icon="fa-refresh"
+                            string="Reconsultar"
+                            attrs="{'invisible': [('cnpja_consulted', '=', False)]}"/>
+                </div>
+            </xpath>
+
+            <!-- Aba CNP Já com campos nativos l10n_br -->
+            <xpath expr="//page[@name='sales_purchases']" position="after">
+                <page name="cnpja_data" string="CNPJá - Dados Cadastrais">
+
+                    <!-- ---- DADOS PRINCIPAIS: campos nativos l10n_br ---- -->
+                    <group name="cnpja_main" string="Dados Principais (l10n_br)">
+                        <group>
+                            <field name="vat" placeholder="CNPJ do parceiro"/>
+                            <field name="l10n_br_ie_code" placeholder="Inscrição Estadual"/>
+                            <field name="l10n_br_taxpayer"/>
+                            <field name="has_ie"/>
+                        </group>
+                        <group>
+                            <field name="l10n_br_tax_regime"/>
+                            <field name="is_mei"/>
+                            <field name="cnpj_consulted" invisible="1"/>
+                            <field name="cnpja_consulted_at"/>
+                        </group>
+                    </group>
+
+                    <!-- ---- REGRA DE IMPOSTO ---- -->
+                    <group name="cnpja_imposto" string="REGRA DE IMPOSTO (EXTREMA IMPORTÂNCIA)">
+                        <group>
+                            <field name="aliquota_icms" widget="radio"/>
+                        </group>
+                        <group>
+                            <div class="alert" role="alert" style="background-color: #fff3cd; border: 1px solid #ffc107; padding: 10px; margin-top: 15px;">
+                                <strong>Regra de Imposto:</strong><br/>
+                                <span attrs="{'invisible': [('has_ie', '=', True)]}">
+                                    • Sem IE → <b>19%</b> (Nao contribuinte / Isento)
+                                </span>
+                                <span attrs="{'invisible': [('has_ie', '=', False)]}">
+                                    • Com IE → <b>12%</b> (Contribuinte do ICMS)
+                                </span><br/>
+                                <small>Definido automaticamente pela consulta CNP Já.</small>
+                            </div>
+                        </group>
+                    </group>
+
+                    <!-- ---- DADOS COMPLEMENTARES ---- -->
+                    <group name="cnpja_complemento" string="Dados Complementares">
+                        <group>
+                            <field name="natureza_juridica" readonly="1"/>
+                            <field name="porte_empresa" readonly="1"/>
+                            <field name="data_abertura" readonly="1"/>
+                            <field name="situacao_cadastral" readonly="1"/>
+                        </group>
+                        <group>
+                            <field name="cnae" readonly="1"/>
+                            <field name="suframa" readonly="1"/>
+                        </group>
+                    </group>
+
+                    <!-- ---- IE Detalhes ---- -->
+                    <group name="cnpja_ie_details" string="Detalhes das Inscricoes Estaduais"
+                           attrs="{'invisible': [('has_ie', '=', False)]}">
+                        <field name="ie_details" nolabel="1" readonly="1"
+                               placeholder="Detalhes de todas as IEs..."/>
+                    </group>
+
+                    <!-- ---- CNAEs Secundários ---- -->
+                    <group name="cnpja_cnaes" string="CNAEs Secundarios">
+                        <field name="cnaes_secundarios" nolabel="1" readonly="1"
+                               placeholder="CNAEs secundarios..."/>
+                    </group>
+
+                    <!-- ---- Quadro Societário ---- -->
+                    <group name="cnpja_socios" string="Quadro Societario">
+                        <field name="socio_ids" nolabel="1">
+                            <tree editable="bottom">
+                                <field name="name"/>
+                                <field name="role"/>
+                                <field name="since"/>
+                            </tree>
+                            <form>
+                                <group>
+                                    <field name="name"/>
+                                    <field name="role"/>
+                                    <field name="since"/>
+                                </group>
+                            </form>
+                        </field>
+                    </group>
+                </page>
+            </xpath>
+
+        </field>
+    </record>
+
+    <!-- Visão de lista - Coluna alíquota (usa vat nativo) -->
+    <record id="view_partner_tree_cnpja" model="ir.ui.view">
+        <field name="name">res.partner.tree.cnpja</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_tree"/>
+        <field name="arch" type="xml">
+            <field name="country_id" position="after">
+                <field name="vat" optional="show"/>
+                <field name="l10n_br_ie_code" optional="show"/>
+                <field name="aliquota_icms" widget="badge"
+                       decoration-success="aliquota_icms == '12'"
+                       decoration-danger="aliquota_icms == '19'"
+                       optional="show"/>
+                <field name="l10n_br_taxpayer" optional="show"/>
+            </field>
+        </field>
+    </record>
+
+    <!-- Pesquisa - usa campos nativos -->
+    <record id="view_partner_search_cnpja" model="ir.ui.view">
+        <field name="name">res.partner.search.cnpja</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_res_partner_filter"/>
+        <field name="arch" type="xml">
+            <field name="name" position="after">
+                <field name="vat"/>
+                <field name="l10n_br_ie_code"/>
+            </field>
+            <xpath expr="//filter" position="inside">
+                <filter name="possui_ie" string="Possui IE" domain="[('has_ie', '=', True)]"/>
+                <filter name="sem_ie" string="Sem IE (19%)" domain="[('has_ie', '=', False)]"/>
+                <separator/>
+                <filter name="aliq_12" string="ICMS 12%" domain="[('aliquota_icms', '=', '12')]"/>
+                <filter name="aliq_19" string="ICMS 19%" domain="[('aliquota_icms', '=', '19')]"/>
+                <separator/>
+                <filter name="contribuinte_icms" string="Contribuinte ICMS"
+                        domain="[('l10n_br_taxpayer', '=', '1')]"/>
+                <filter name="nao_contribuinte" string="Nao Contribuinte"
+                        domain="[('l10n_br_taxpayer', '=', '3')]"/>
+                <separator/>
+                <filter name="consultado_cnpja" string="Consultados CNP Já"
+                        domain="[('cnpja_consulted', '=', True)]"/>
+                <filter name="mei" string="MEI" domain="[('is_mei', '=', True)]"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Agrupamentos -->
+    <record id="view_partner_search_cnpja_group" model="ir.ui.view">
+        <field name="name">res.partner.search.cnpja.group</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="view_partner_search_cnpja"/>
+        <field name="arch" type="xml">
+            <xpath expr="//group" position="inside">
+                <filter name="group_aliquota" string="Aliquota ICMS"
+                        context="{'group_by': 'aliquota_icms'}"/>
+                <filter name="group_taxpayer" string="Tipo Contribuinte"
+                        context="{'group_by': 'l10n_br_taxpayer'}"/>
+                <filter name="group_tax_regime" string="Regime Tributario"
+                        context="{'group_by': 'l10n_br_tax_regime'}"/>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

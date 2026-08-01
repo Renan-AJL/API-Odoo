@@ -1,0 +1,24 @@
+{
+  "name": "odoo-middleware-unified",
+  "version": "1.0.0",
+  "description": "Middleware unificado Odoo - Itau (Boleto/PIX) + CNP Ja - AJL Ferro e Aco",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "bwip-js": "^4.1.0",
+    "cors": "^2.8.5",
+    "dayjs": "^1.11.10",
+    "dotenv": "^16.3.1",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "pdfkit": "^0.15.0",
+    "uuid": "^9.0.0",
+    "xmlrpc": "^1.3.2"
+  }
+}
