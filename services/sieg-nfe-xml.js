@@ -321,6 +321,11 @@ function gerarXmlNFe(data) {
   });
 
   // --- Totais / Pagamento ---
+  // Calcular vProdTotal antes da validacao (usado nos logs)
+  var vProdTotal = 0;
+  for (var vi = 0; vi < lines.length; vi++) {
+    vProdTotal += parseFloat(lines[vi].price_subtotal || (lines[vi].qty * lines[vi].price_unit));
+  }
   console.log('[NFE-XML] [TOTAIS]');
   logField('vNF', order.amount_total || vProdTotal);
   logField('vProd', vProdTotal);
@@ -407,7 +412,6 @@ ${xmlEndereco(partner, 'enderDest')}
     </dest>`;
 
   // === det (items) ===
-  let vProdTotal = 0;
   lines.forEach((line, idx) => {
     const nItem = String(idx + 1);
     const vProd = num(line.price_subtotal || (line.qty * line.price_unit));
