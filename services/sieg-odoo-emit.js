@@ -135,7 +135,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   // 1. Read account.move
   var moves = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], [
     'name', 'partner_id', 'company_id', 'invoice_date', 'date',
-    'amount_total', 'amount_untaxed', 'note', 'invoice_line_ids',
+    'amount_total', 'narration', 'invoice_line_ids',
     'x_studio_nfe_status', 'x_studio_nfse_status', 'payment_state',
   ]]);
   if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
@@ -188,7 +188,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       number: String(nextNum),
       date_order: move.invoice_date || move.date,
       amount_total: move.amount_total,
-      note: move.note || '',
+      note: move.narration || '',
     },
     lines: linesData,
     config: {
@@ -332,7 +332,6 @@ async function postChatterResult(client, db, uid, pwd, moveId, moveName, tipo, i
       res_id: moveId,
       body: body,
       message_type: 'comment',
-      subtype_xmlid: 'mail.mt_note',
     };
     if (attachIds.length > 0) {
       msgVals.attachment_ids = [[6, 0, attachIds]];
@@ -523,7 +522,7 @@ function buildServiceBlock(linesData, move) {
   var cNBS = '999999999';
   var pAliq = '2.00';
   var cIntContrib = '';
-  var xDescServ = move.note || 'Servico prestado conforme contrato';
+  var xDescServ = move.narration || 'Servico prestado conforme contrato';
 
   for (var i = 0; i < linesData.length; i++) {
     var l = linesData[i];
@@ -643,7 +642,7 @@ async function safeUpdateError(client, db, uid, pwd, moveId, tipo, errMsg) {
     await executeKw(client, db, uid, pwd, 'mail.message', 'create', [{
       model: 'account.move', res_id: moveId,
       body: '<b>Erro na Emissao de ' + (tipo === 'nfe' ? 'NF-e' : 'NFS-e') + '</b><br/>' + errMsg.substring(0, 500),
-      message_type: 'comment', subtype_xmlid: 'mail.mt_note',
+      message_type: 'comment',
     }]);
   } catch (e) { console.error('[SIEG-EMIT] Falha ao registrar erro:', e.message); }
 }
