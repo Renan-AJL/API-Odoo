@@ -3,7 +3,7 @@
   <infNFe versao="4.00">
     <ide>
       <cUF>41</cUF>
-      <cNF>19303007</cNF>
+      <cNF>90595260</cNF>
       <natOp>Venda de Mercadoria</natOp>
       <mod>55</mod>
       <serie>100</serie>
@@ -63,17 +63,17 @@
     </dest>
     <det nItem="1">
       <prod>
-        <cProd></cProd>
+        <cProd>1036</cProd>
         <cEAN>SEM GTIN</cEAN>
-        <xProd>[1036] 1036 - Contra Peso 180x3000 1,25 (Padrão - KG)</xProd>
-        <NCM></NCM>
+        <xProd>1036 - Contra Peso 180x3000 1,25 (Padrão - KG)</xProd>
+        <NCM>73269000</NCM>
         <CFOP>5102</CFOP>
-        <uCom>UN</uCom>
+        <uCom>KG</uCom>
         <qCom>1.00</qCom>
         <vUnCom>7.90</vUnCom>
         <vProd>7.90</vProd>
         <cEANTrib>SEM GTIN</cEANTrib>
-        <uTrib>UN</uTrib>
+        <uTrib>KG</uTrib>
         <qTrib>1.00</qTrib>
         <vUnTrib>7.90</vUnTrib>
         <indTot>1</indTot>

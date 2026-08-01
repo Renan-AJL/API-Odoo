@@ -290,7 +290,7 @@ ${xmlEndereco(partner, 'enderDest')}
         <cProd>${esc(String(line.default_code || line.cProd || ''))}</cProd>
         <cEAN>${line.barcode || 'SEM GTIN'}</cEAN>
         <xProd>${esc(line.product_name || line.xProd || '')}</xProd>
-        <NCM>${esc(String(line.ncm || line.NCM || process.env.SIEG_DEFAULT_NCM || '73269000'))}</NCM>
+        <NCM>${esc(String(line.ncm || line.NCM || process.env.SIEG_DEFAULT_NCM || ''))}</NCM>
         <CFOP>${esc(String(line.cfop || '5102'))}</CFOP>
         <uCom>${esc(line.uom || 'UN')}</uCom>
         <qCom>${num(line.qty)}</qCom>
@@ -385,9 +385,10 @@ ${xmlEndereco(partner, 'enderDest')}
   }
 
   // === infAdic ===
-  if (order.note || order.infCpl) {
+  var infCplText = stripHtml(order.note || order.infCpl || '');
+  if (infCplText) {
     xml += `\n    <infAdic>
-      <infCpl>${esc(order.note || order.infCpl || '')}</infCpl>
+      <infCpl>${esc(infCplText.substring(0, 2000))}</infCpl>
     </infAdic>`;
   }
 
@@ -396,6 +397,11 @@ ${xmlEndereco(partner, 'enderDest')}
 }
 
 // === Helper functions ===
+
+function stripHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').trim();
+}
 
 function esc(s) {
   if (!s) return '';
