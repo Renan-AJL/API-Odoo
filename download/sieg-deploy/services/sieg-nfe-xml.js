@@ -290,7 +290,7 @@ ${xmlEndereco(partner, 'enderDest')}
         <cProd>${esc(String(line.default_code || line.cProd || ''))}</cProd>
         <cEAN>${line.barcode || 'SEM GTIN'}</cEAN>
         <xProd>${esc(line.product_name || line.xProd || '')}</xProd>
-        <NCM>${esc(String(line.ncm || line.NCM || ''))}</NCM>
+        <NCM>${esc(String(line.ncm || line.NCM || process.env.SIEG_DEFAULT_NCM || ''))}</NCM>
         <CFOP>${esc(String(line.cfop || '5102'))}</CFOP>
         <uCom>${esc(line.uom || 'UN')}</uCom>
         <qCom>${num(line.qty)}</qCom>
