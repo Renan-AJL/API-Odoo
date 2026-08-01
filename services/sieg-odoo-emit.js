@@ -145,11 +145,13 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   // 2. Read company
   var companyId = tupId(move.company_id);
   var company = await readCompany(client, db, uid, pwd, companyId);
+  console.log('[SIEG-EMIT] [EMITENTE] CNPJ=' + company.cnpj_cpf + ' IE=' + company.inscr_est + ' cMun=' + company.city_ibge_code + ' xMun=' + company.city + ' UF=' + company.state + ' xLgr=' + company.street + ' nro=' + company.number);
 
   // 3. Read partner
   var partnerId = tupId(move.partner_id);
   if (!partnerId) throw new Error('Fatura sem parceiro');
   var partner = await readPartner(client, db, uid, pwd, partnerId);
+  console.log('[SIEG-EMIT] [DESTINATARIO] CNPJ=' + partner.cnpj_cpf + ' xNome=' + partner.xNome + ' cMun=' + partner.city_ibge_code + ' xMun=' + partner.city + ' UF=' + partner.state + ' xLgr=' + partner.street + ' nro=' + partner.number);
 
   // 4. Read invoice lines diretamente de account.move.line (evita computed field)
   var allLineIds = await executeKw(client, db, uid, pwd, 'account.move.line', 'search', [[
@@ -538,6 +540,33 @@ async function readPartner(client, db, uid, pwd, partnerId) {
 }
 
 // ============================================================
+// NCM Extraction Helper
+// ============================================================
+/**
+ * Extrai codigo NCM (8 digitos) de um valor many2one do Odoo.
+ * Aceita: [id, "7308.90.90"], [id, "7308.90.90 - Descricao"], string pura, numero
+ */
+function extractNcmFromRef(ref) {
+  if (!ref) return '';
+  var str = '';
+  if (Array.isArray(ref)) {
+    str = String(ref[1] || ref[0] || '');
+  } else if (typeof ref === 'string') {
+    str = ref;
+  } else if (typeof ref === 'number') {
+    return String(ref).length === 8 ? String(ref) : '';
+  } else {
+    str = String(ref);
+  }
+  // Tentar regex NNNN.NN.NN
+  var m = str.match(/(\d{4})\.(\d{2})\.(\d{2})/);
+  if (m) return m[1] + m[2] + m[3];
+  // Fallback: so digitos
+  var digits = str.replace(/\D/g, '');
+  return digits.length === 8 ? digits : '';
+}
+
+// ============================================================
 // Build Line Data (with product x_studio_ fields for NFS-e)
 // ============================================================
 async function buildLineData(client, db, uid, pwd, line) {
@@ -568,26 +597,80 @@ async function buildLineData(client, db, uid, pwd, line) {
         console.log('[SIEG-EMIT] detailed_type nao disponivel, usando product');
       }
 
-      // NCM do produto (campo l10n_br — pode estar separado dos x_studio)
+      // NCM do produto
+      // Campo correto no Odoo 19 SaaS com l10n_br: l10n_br_ncm_code_id (many2one -> l10n_br.ncm.code)
+      // Este campo esta em product.template (nao product.product)
+      // Estrategia:
+      //   T1: Ler product_tmpl_id + l10n_br_ncm_code_id do template
+      //   T2: Tentar ncm_id em product.product (l10n_br_fiscal — pode nao existir)
+      //   T3: fields_get para descobrir campo NCM alternativo
+
+      // === T1: Ler l10n_br_ncm_code_id do product.template ===
+      try {
+        console.log('[SIEG-EMIT-NCM] [T1] Lendo product_tmpl_id + l10n_br_ncm_code_id...');
+        var prodsTmpl = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['product_tmpl_id']]);
+        if (prodsTmpl && prodsTmpl[0] && prodsTmpl[0].product_tmpl_id) {
+          var tmplId = tupId(prodsTmpl[0].product_tmpl_id);
+          console.log('[SIEG-EMIT-NCM] [T1] product_tmpl_id: ' + tmplId);
+          var tmplNcm = await executeKw(client, db, uid, pwd, 'product.template', 'read', [[tmplId], ['l10n_br_ncm_code_id']]);
+          console.log('[SIEG-EMIT-NCM] [T1] l10n_br_ncm_code_id bruto: ' + JSON.stringify(tmplNcm && tmplNcm[0] ? tmplNcm[0].l10n_br_ncm_code_id : 'N/A'));
+          if (tmplNcm && tmplNcm[0] && tmplNcm[0].l10n_br_ncm_code_id) {
+            ncm = extractNcmFromRef(tmplNcm[0].l10n_br_ncm_code_id);
+            if (ncm) console.log('[SIEG-EMIT-NCM] [T1] *** NCM ENCONTRADO: ' + ncm + ' ***');
+          } else {
+            console.warn('[SIEG-EMIT-NCM] [T1] l10n_br_ncm_code_id vazio no template ' + tmplId);
+          }
+        } else {
+          console.warn('[SIEG-EMIT-NCM] [T1] product_tmpl_id vazio para produto ' + productId);
+        }
+      } catch (eT1) {
+        console.error('[SIEG-EMIT-NCM] [T1] FALHOU: ' + eT1.message);
+      }
+
+      // === T2: Tentar ncm_id em product.product (l10n_br_fiscal) ===
       if (!ncm) {
         try {
+          console.log('[SIEG-EMIT-NCM] [T2] Tentando ncm_id em product.product...');
           var prodsNcm = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['ncm_id']]);
           if (prodsNcm && prodsNcm[0] && prodsNcm[0].ncm_id) {
-            var ncmRef = prodsNcm[0].ncm_id;
-            // Pode vir como array [id, code] ou objeto com code
-            if (Array.isArray(ncmRef) && ncmRef.length >= 2) {
-              ncm = String(ncmRef[1] || '').replace(/\D/g, '');
-            } else if (Array.isArray(ncmRef) && ncmRef.length === 1) {
-              // So o ID, precisa ler o registro
-              try {
-                var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[ncmRef[0]], ['code']]);
-                if (ncmRec && ncmRec[0]) ncm = String(ncmRec[0].code || '').replace(/\D/g, '');
-              } catch (eNcm) {}
-            }
-            if (ncm) console.log('[SIEG-EMIT] NCM do produto: ' + ncm);
+            ncm = extractNcmFromRef(prodsNcm[0].ncm_id);
+            if (ncm) console.log('[SIEG-EMIT-NCM] [T2] NCM via ncm_id: ' + ncm);
           }
-        } catch (eNcm2) {
-          console.log('[SIEG-EMIT] ncm_id nao disponivel no produto');
+        } catch (eT2) {
+          console.log('[SIEG-EMIT-NCM] [T2] ncm_id nao disponivel: ' + eT2.message);
+        }
+      }
+
+      // === T3: Descobrir campos NCM via fields_get ===
+      if (!ncm) {
+        try {
+          console.log('[SIEG-EMIT-NCM] [T3] Buscando campos NCM via fields_get...');
+          var fieldsInfo = await executeKw(client, db, uid, pwd, 'product.template', 'fields_get', [
+            ['l10n_br_ncm_code_id', 'ncm_id', 'l10n_br_ncm_id', 'ncm_code_id'],
+            ['type', 'relation', 'string']
+          ]);
+          console.log('[SIEG-EMIT-NCM] [T3] fields_get: ' + JSON.stringify(fieldsInfo));
+          var fieldNames = Object.keys(fieldsInfo || {});
+          for (var fi = 0; fi < fieldNames.length; fi++) {
+            var fname = fieldNames[fi];
+            if (fieldsInfo[fname].type === 'many2one') {
+              try {
+                var fv = await executeKw(client, db, uid, pwd, 'product.template', 'read', [[tmplId], [fname]]);
+                if (fv && fv[0] && fv[0][fname]) {
+                  var extracted = extractNcmFromRef(fv[0][fname]);
+                  if (extracted) {
+                    ncm = extracted;
+                    console.log('[SIEG-EMIT-NCM] [T3] NCM via ' + fname + ': ' + ncm);
+                    break;
+                  }
+                }
+              } catch (ef3) {
+                console.log('[SIEG-EMIT-NCM] [T3] ' + fname + ' falhou: ' + ef3.message);
+              }
+            }
+          }
+        } catch (eT3) {
+          console.error('[SIEG-EMIT-NCM] [T3] FALHOU: ' + eT3.message);
         }
       }
 
@@ -599,15 +682,12 @@ async function buildLineData(client, db, uid, pwd, line) {
         ]]);
         if (prods2 && prods2[0]) {
           var pr2 = prods2[0];
+          console.log('[SIEG-EMIT-NCM] x_studio_ncm: ' + JSON.stringify(pr2.x_studio_ncm));
           if (!ncm && pr2.x_studio_ncm) {
             ncm = String(pr2.x_studio_ncm).replace(/\D/g, '');
             if (ncm.length === 8) {
-              console.log('[SIEG-EMIT] NCM lido de x_studio_ncm: ' + ncm);
+              console.log('[SIEG-EMIT-NCM] NCM lido de x_studio_ncm: ' + ncm);
             } else { ncm = ''; }
-          }
-          if (!ncm) {
-            ncm = process.env.SIEG_DEFAULT_NCM || '';
-            if (ncm) console.log('[SIEG-EMIT] NCM via SIEG_DEFAULT_NCM: ' + ncm);
           }
           prodStudio = {
             c_trib_nac: pr2.x_studio_c_trib_nac || '',
@@ -617,12 +697,16 @@ async function buildLineData(client, db, uid, pwd, line) {
           };
         }
       } catch (e2) {
-        console.log('[SIEG-EMIT] Campos x_studio do produto nao disponiveis');
-        // Aplicar fallback NCM mesmo sem x_studio
-        if (!ncm) {
-          ncm = process.env.SIEG_DEFAULT_NCM || '';
-          if (ncm) console.log('[SIEG-EMIT] NCM via SIEG_DEFAULT_NCM (sem x_studio): ' + ncm);
-        }
+        console.log('[SIEG-EMIT] Campos x_studio do produto nao disponiveis: ' + e2.message);
+      }
+      // Fallback final: NCM do env var (se configurado)
+      if (!ncm && process.env.SIEG_DEFAULT_NCM) {
+        ncm = String(process.env.SIEG_DEFAULT_NCM).replace(/\D/g, '');
+        console.log('[SIEG-EMIT-NCM] NCM via SIEG_DEFAULT_NCM env: ' + ncm);
+      }
+      // ALERTA se NCM ainda vazio
+      if (!ncm) {
+        console.error('[SIEG-EMIT-NCM] *** NCM VAZIO para produto ' + productId + ' (' + productName + ') — XML sera invalido ***');
       }
     } catch (e) { console.warn('[SIEG-EMIT] Erro ao ler produto ' + productId + ':', e.message); }
   }
@@ -630,7 +714,7 @@ async function buildLineData(client, db, uid, pwd, line) {
   // Tax extraction
   var tax = await extractTaxes(client, db, uid, pwd, line);
 
-  return {
+  var lineData = {
     cProd: defaultCode, barcode: barcode,
     product_name: productName, xProd: productName,
     ncm: ncm, cfop: '5102', uom: uomName,
@@ -640,9 +724,9 @@ async function buildLineData(client, db, uid, pwd, line) {
     csosn: tax.csosn || '103', orig: '0',
     cst_icms: tax.cst_icms || '',
     vbc_icms: String(tax.vbc || 0), vicms: String(tax.vicms || 0), picms: String(tax.picms || 0),
-    cst_pis: tax.cst_pis || '99',
+    cst_pis: tax.cst_pis || (tax.csosn ? '49' : '01'),
     vbc_pis: String(tax.vbc_pis || 0), ppis: String(tax.ppis || 0), vpis: String(tax.vpis || 0),
-    cst_cofins: tax.cst_cofins || '99',
+    cst_cofins: tax.cst_cofins || (tax.csosn ? '49' : '01'),
     vbc_cofins: String(tax.vbc_cofins || 0), pcofins: String(tax.pcofins || 0), vcofins: String(tax.vcofins || 0),
     // NFS-e fields from product
     x_studio_c_trib_nac: prodStudio.c_trib_nac,
@@ -650,6 +734,28 @@ async function buildLineData(client, db, uid, pwd, line) {
     x_studio_aliquota_iss: prodStudio.aliquota_iss,
     x_studio_ibge_code: prodStudio.ibge_code,
   };
+
+  // === LOG DETALHADO POR CAMPO (para debug de XML invalido) ===
+  console.log('[SIEG-EMIT-LINE] === Dados da linha (product ' + productId + ') ===');
+  console.log('[SIEG-EMIT-LINE]   cProd:      ' + JSON.stringify(lineData.cProd) + (lineData.cProd ? '' : ' *** VAZIO ***'));
+  console.log('[SIEG-EMIT-LINE]   xProd:      ' + JSON.stringify(lineData.xProd));
+  console.log('[SIEG-EMIT-LINE]   NCM:        ' + JSON.stringify(lineData.ncm) + (lineData.ncm ? '' : ' *** VAZIO ***'));
+  console.log('[SIEG-EMIT-LINE]   CFOP:       ' + JSON.stringify(lineData.cfop));
+  console.log('[SIEG-EMIT-LINE]   uCom:       ' + JSON.stringify(lineData.uom));
+  console.log('[SIEG-EMIT-LINE]   qCom:       ' + lineData.qty);
+  console.log('[SIEG-EMIT-LINE]   vUnCom:     ' + lineData.price_unit);
+  console.log('[SIEG-EMIT-LINE]   vProd:      ' + lineData.price_subtotal);
+  console.log('[SIEG-EMIT-LINE]   CSOSN:      ' + JSON.stringify(lineData.csosn));
+  console.log('[SIEG-EMIT-LINE]   CST_ICMS:   ' + JSON.stringify(lineData.cst_icms));
+  console.log('[SIEG-EMIT-LINE]   vBC_ICMS:   ' + lineData.vbc_icms);
+  console.log('[SIEG-EMIT-LINE]   vICMS:      ' + lineData.vicms);
+  console.log('[SIEG-EMIT-LINE]   pICMS:      ' + lineData.picms);
+  console.log('[SIEG-EMIT-LINE]   CST_PIS:    ' + JSON.stringify(lineData.cst_pis));
+  console.log('[SIEG-EMIT-LINE]   vPIS:       ' + lineData.vpis);
+  console.log('[SIEG-EMIT-LINE]   CST_COFINS: ' + JSON.stringify(lineData.cst_cofins));
+  console.log('[SIEG-EMIT-LINE]   vCOFINS:    ' + lineData.vcofins);
+
+  return lineData;
 }
 
 // ============================================================

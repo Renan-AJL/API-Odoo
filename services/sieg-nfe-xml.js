@@ -10,14 +10,43 @@
 const NFE_NS = 'http://www.portalfiscal.inf.br/nfe';
 
 /**
+ * Extrai numero do logradouro quando o campo 'number' esta vazio/S/N.
+ * Odoo frequentemente armazena o endereco completo no campo 'street':
+ *   "Avenida Juscelino Kubitschek de Oliveira, 7525"
+ *   "Rua Bom Jesus, 212"
+ *   "Rua Augusta, 1200 Sala 53"
+ * Retorna { street, number }
+ */
+function parseStreetNumber(street, number) {
+  if (!street) return { street: '', number: number || 'S/N' };
+  // Se ja tem numero valido, retorna como esta
+  if (number && number !== 'S/N' && String(number).trim() !== '') {
+    return { street: street, number: String(number) };
+  }
+  // Padrão 1: "Logradouro, NNNN" (virgula + espaco + numero)
+  var m = street.match(/^(.+?),\s*(\d+[\w]?(?:\s*[A-Za-zÀ-ÿ]+)?)\s*$/);
+  if (m) return { street: m[1].trim(), number: m[2].trim() };
+  // Padrao 2: "Logradouro, NNNN complemento" (virgula + numero + complemento)
+  m = street.match(/^(.+?),\s*(\d+)\s+(.+)$/);
+  if (m) return { street: m[1].trim(), number: m[2].trim() };
+  // Padrao 3: "Logradouro NNNN" (espaco + numero no final, sem virgula)
+  m = street.match(/^(.+?)\s+(\d+)\s*$/);
+  if (m) return { street: m[1].trim(), number: m[2].trim() };
+  // Nenhum padrao encontrado
+  return { street: street, number: number || 'S/N' };
+}
+
+/**
  * Preenche campos de endereço comuns (emit/dest)
  */
 function xmlEndereco(end, tagPrefix) {
   if (!end) return '';
+  // Separar logradouro e numero
+  var parsed = parseStreetNumber(end.street || end.xLgr || '', end.number || end.nro);
   const parts = [];
   parts.push(`    <${tagPrefix}>`);
-  parts.push(`      <xLgr>${esc(end.street || end.xLgr || '')}</xLgr>`);
-  parts.push(`      <nro>${esc(String(end.number || end.nro || 'S/N'))}</nro>`);
+  parts.push(`      <xLgr>${esc(parsed.street)}</xLgr>`);
+  parts.push(`      <nro>${esc(parsed.number)}</nro>`);
   if (end.street2 || end.xBairro) {
     parts.push(`      <xBairro>${esc(end.street2 || end.xBairro || '')}</xBairro>`);
   }
@@ -46,11 +75,11 @@ function xmlImpostoItem(line) {
   const vBC    = num(line.vbc_icms  || line.vbc  || '0.00');
   const vICMS  = num(line.vicms || '0.00');
   const pICMS  = num(line.picms || '0.00');
-  const cstPis   = line.cst_pis   || '01';
+  const cstPis   = line.cst_pis   || '49';
   const vBCPis   = num(line.vbc_pis   || line.vbc || '0.00');
   const pPis     = num(line.ppis      || line.pis_aliquota || '0.00');
   const vPIS     = num(line.vpis      || '0.00');
-  const cstCof   = line.cst_cofins || '01';
+  const cstCof   = line.cst_cofins || '49';
   const vBCCof   = num(line.vbc_cofins || line.vbc || '0.00');
   const pCofins  = num(line.pcofins    || line.cofins_aliquota || '0.00');
   const vCOFINS  = num(line.vcofins    || '0.00');
@@ -204,22 +233,122 @@ function gerarXmlNFe(data) {
   const indPres = cfg.indPres || '0'; // 0=nao presencial
   const verProc = cfg.verProc || 'Odoo19-SIEG-1.0';
 
-  // Validar campos obrigatorios antes de gerar XML
+  // === VALIDACAO DETALHADA POR CAMPO ===
+  var xmlErrors = [];
   var xmlWarnings = [];
-  if (!cMunFG) xmlWarnings.push('cMunFG vazio (empresa sem codigo IBGE da cidade)');
-  if (!company.cnpj_cpf) xmlWarnings.push('CNPJ emitente vazio');
-  if (!company.inscr_est) xmlWarnings.push('IE emitente vazia');
-  if (!company.street) xmlWarnings.push('Logradouro emitente vazio');
-  if (!partner.cnpj_cpf && !partner.xNome) xmlWarnings.push('Dados destinatario vazios');
+
+  console.log('[NFE-XML] ========== VALIDACAO CAMPOS XML ==========');
+
+  // --- Emitente ---
+  console.log('[NFE-XML] [EMITENTE]');
+  logField('cUF', cUF);
+  logField('CNPJ', onlyNum(company.cnpj_cpf), !onlyNum(company.cnpj_cpf));
+  logField('xNome', company.legal_name || company.xNome, !(company.legal_name || company.xNome));
+  logField('xFant', company.name || company.xFant);
+  logField('xLgr', company.street, !company.street);
+  logField('nro', company.number || 'S/N');
+  logField('xBairro', company.street2, !company.street2);
+  logField('cMun', company.city_ibge_code, !company.city_ibge_code);
+  logField('xMun', company.city, !company.city);
+  logField('UF', company.state, !company.state);
+  logField('CEP', company.zip, !company.zip);
+  logField('fone', company.phone);
+  logField('IE', company.inscr_est, !company.inscr_est);
+  logField('CRT', company.crt || '1');
+
+  if (!onlyNum(company.cnpj_cpf)) xmlErrors.push('CNPJ emitente vazio');
+  if (!company.inscr_est) xmlErrors.push('IE emitente vazia');
+  if (!company.street) xmlErrors.push('Logradouro emitente vazio');
+  if (!company.city_ibge_code) xmlErrors.push('cMunFG/cMun emitente vazio');
+  if (!company.city) xmlWarnings.push('xMun emitente vazio');
+  if (!company.state) xmlErrors.push('UF emitente vazia');
+
+  // --- Destinatario ---
+  console.log('[NFE-XML] [DESTINATARIO]');
+  var docDest2 = onlyNum(partner.cnpj_cpf || '');
+  logField('CNPJ/CPF', docDest2, !docDest2);
+  logField('xNome', partner.legal_name || partner.xNome, !(partner.legal_name || partner.xNome));
+  logField('xLgr', partner.street, !partner.street);
+  logField('nro', partner.number || 'S/N');
+  logField('xBairro', partner.street2, !partner.street2);
+  logField('cMun', partner.city_ibge_code, !partner.city_ibge_code);
+  logField('xMun', partner.city, !partner.city);
+  logField('UF', partner.state, !partner.state);
+  logField('CEP', partner.zip, !partner.zip);
+  logField('fone', partner.phone);
+  logField('email', partner.email);
+
+  if (!docDest2) xmlErrors.push('CNPJ/CPF destinatario vazio');
+  if (!(partner.legal_name || partner.xNome)) xmlErrors.push('Nome destinatario vazio');
+  if (!partner.street) xmlErrors.push('Logradouro destinatario vazio');
+  if (!partner.city_ibge_code) xmlErrors.push('cMun destinatario vazio');
+  if (!partner.city) xmlWarnings.push('xMun destinatario vazio');
+  if (!partner.state) xmlErrors.push('UF destinatario vazia');
+
+  // --- IDE ---
+  console.log('[NFE-XML] [IDE]');
+  logField('cMunFG', cMunFG, !cMunFG);
+  logField('natOp', cfg.natOp || 'Venda de Mercadoria');
+  logField('serie', serie);
+  logField('nNF', nNF);
+  logField('dhEmi', dhEmi);
+  logField('tpAmb', tpAmb);
+  logField('mod', cfg.mod || '55');
+
+  if (!cMunFG) xmlErrors.push('cMunFG vazio (empresa sem codigo IBGE da cidade)');
+
+  // --- Itens (linhas) ---
   lines.forEach(function(l, i) {
-    if (!l.ncm) xmlWarnings.push('NCM vazio no item ' + (i+1) + ' (' + (l.xProd || l.product_name || '?') + ')');
+    console.log('[NFE-XML] [ITEM ' + (i+1) + ']');
+    logField('  cProd', l.cProd || l.default_code, !(l.cProd || l.default_code));
+    logField('  xProd', l.xProd || l.product_name);
+    logField('  NCM', l.ncm || l.NCM, !(l.ncm || l.NCM));
+    logField('  CFOP', l.cfop || '5102');
+    logField('  uCom', l.uom || 'UN');
+    logField('  qCom', l.qty);
+    logField('  vUnCom', l.price_unit);
+    logField('  vProd', l.price_subtotal || (l.qty * l.price_unit));
+    logField('  CSOSN', l.csosn || '103');
+    logField('  CST_ICMS', l.cst_icms || '(vazio - usara CSOSN)');
+    logField('  vICMS', l.vicms || '0.00');
+    logField('  CST_PIS', l.cst_pis || '49');
+    logField('  vPIS', l.vpis || '0.00');
+    logField('  CST_COFINS', l.cst_cofins || '49');
+    logField('  vCOFINS', l.vcofins || '0.00');
+
+    if (!(l.ncm || l.NCM)) xmlErrors.push('NCM vazio no item ' + (i+1) + ' (' + (l.xProd || l.product_name || '?') + ')');
+    if (!(l.cProd || l.default_code)) xmlWarnings.push('cProd vazio no item ' + (i+1) + ' (codigo interno do produto)');
   });
-  if (xmlWarnings.length > 0) {
-    console.warn('[NFE-XML] *** CAMPOS OBRIGATORIOS FALTANDO ***');
-    for (var w = 0; w < xmlWarnings.length; w++) {
-      console.warn('[NFE-XML]   - ' + xmlWarnings[w]);
+
+  // --- Totais / Pagamento ---
+  console.log('[NFE-XML] [TOTAIS]');
+  logField('vNF', order.amount_total || vProdTotal);
+  logField('vProd', vProdTotal);
+  if (pag.length > 0) {
+    logField('tPag', pag[0].tPag || '15');
+    logField('vPag', pag[0].vPag);
+  } else {
+    xmlWarnings.push('Nenhum pagamento informado (bloco <pag> vazio)');
+  }
+
+  // --- Resumo da validacao ---
+  console.log('[NFE-XML] ========== RESUMO VALIDACAO ==========');
+  if (xmlErrors.length > 0) {
+    console.error('[NFE-XML] *** ERROS (' + xmlErrors.length + ') — XML provavelmente sera REJEITADO ***');
+    for (var e = 0; e < xmlErrors.length; e++) {
+      console.error('[NFE-XML]   ERRO: ' + xmlErrors[e]);
     }
   }
+  if (xmlWarnings.length > 0) {
+    console.warn('[NFE-XML] *** AVISOS (' + xmlWarnings.length + ') ***');
+    for (var w = 0; w < xmlWarnings.length; w++) {
+      console.warn('[NFE-XML]   AVISO: ' + xmlWarnings[w]);
+    }
+  }
+  if (xmlErrors.length === 0 && xmlWarnings.length === 0) {
+    console.log('[NFE-XML] Todos os campos validados com sucesso!');
+  }
+  console.log('[NFE-XML] ========================================');
 
   const ideId = `NFe${cUF}${dhEmi.slice(0,4)}${dhEmi.slice(5,7)}${company.cnpj_cpf}${String(cfg.mod || '55')}${serie.padStart(3,'0')}${nNF.padStart(9,'0')}${cNF}`;
   // Nota: o Id real inclui a chave de 44 digitos, calculada apos montagem completa
@@ -290,7 +419,7 @@ ${xmlEndereco(partner, 'enderDest')}
         <cProd>${esc(String(line.default_code || line.cProd || ''))}</cProd>
         <cEAN>${line.barcode || 'SEM GTIN'}</cEAN>
         <xProd>${esc(line.product_name || line.xProd || '')}</xProd>
-        <NCM>${esc(String(line.ncm || line.NCM || process.env.SIEG_DEFAULT_NCM || ''))}</NCM>
+        <NCM>${esc(String(line.ncm || line.NCM || ''))}</NCM>
         <CFOP>${esc(String(line.cfop || '5102'))}</CFOP>
         <uCom>${esc(line.uom || 'UN')}</uCom>
         <qCom>${num(line.qty)}</qCom>
@@ -462,6 +591,15 @@ function calcIndIEDest(partner) {
   const uf = partner.state || partner.UF || '';
   if (!ie || onlyNum(ie) === 'ISENTO' || onlyNum(ie) === '') return '9';
   return '1'; // contribuinte ICMS
+}
+
+function logField(fieldName, value, isError) {
+  var displayVal = value === undefined || value === null ? '(undefined)' : JSON.stringify(value);
+  if (isError) {
+    console.error('[NFE-XML]   ' + fieldName + ': ' + displayVal + ' *** VAZIO/INVALIDO ***');
+  } else {
+    console.log('[NFE-XML]   ' + fieldName + ': ' + displayVal);
+  }
 }
 
 module.exports = { gerarXmlNFe };
