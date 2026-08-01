@@ -132,10 +132,10 @@ async function processPendingEmissions() {
 async function processOne(client, db, uid, pwd, moveId, tipo) {
   console.log('[SIEG-EMIT] --- Fatura ID: ' + moveId + ' | Tipo: ' + tipo + ' ---');
 
-  // 1. Read account.move
+  // 1. Read account.move (sem invoice_line_ids — pode ser computed nao-stored no Odoo 19)
   var moves = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], [
     'name', 'partner_id', 'company_id', 'invoice_date', 'date',
-    'amount_total', 'amount_untaxed', 'note', 'invoice_line_ids',
+    'amount_total', 'narration',
     'x_studio_nfe_status', 'x_studio_nfse_status', 'payment_state',
   ]]);
   if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
@@ -151,14 +151,33 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   if (!partnerId) throw new Error('Fatura sem parceiro');
   var partner = await readPartner(client, db, uid, pwd, partnerId);
 
-  // 4. Read invoice lines + product data
-  var lineIds = move.invoice_line_ids || [];
-  var rawLines = await executeKw(client, db, uid, pwd, 'account.move.line', 'read', [lineIds, [
+  // 4. Read invoice lines diretamente de account.move.line (evita computed field)
+  var allLineIds = await executeKw(client, db, uid, pwd, 'account.move.line', 'search', [[
+    ['move_id', '=', moveId],
+  ]], { order: 'id asc' });
+  console.log('[SIEG-EMIT] Linhas encontradas na fatura: ' + allLineIds.length);
+  var rawLines = await executeKw(client, db, uid, pwd, 'account.move.line', 'read', [allLineIds, [
     'display_type', 'product_id', 'name', 'quantity', 'price_unit',
     'price_subtotal', 'tax_ids', 'discount',
   ]]);
-  var invoiceLines = rawLines.filter(function(l) { return !l.display_type; });
-  if (!invoiceLines.length) throw new Error('Fatura sem linhas de produto/servico');
+  // Debug: log todas as linhas
+  for (var li = 0; li < rawLines.length; li++) {
+    var l = rawLines[li];
+    var pName = 'N/A';
+    if (l.product_id) pName = Array.isArray(l.product_id) ? l.product_id[1] : String(l.product_id);
+    console.log('[SIEG-EMIT]   Line ' + li + ': display_type=' + JSON.stringify(l.display_type) + ' product=' + pName + ' qty=' + l.quantity + ' price=' + l.price_unit);
+  }
+  // Filtro principal: linhas com produto associado (mais confiavel que display_type)
+  var invoiceLines = rawLines.filter(function(l) { return l.product_id; });
+  // Fallback: se nenhuma tem product_id, tenta por display_type
+  if (!invoiceLines.length) {
+    invoiceLines = rawLines.filter(function(l) {
+      var dt = l.display_type;
+      return !dt || dt === 'product' || dt === 'service';
+    });
+  }
+  if (!invoiceLines.length) throw new Error('Fatura sem linhas de produto/servico (total: ' + rawLines.length + ', com product: 0)');
+  console.log('[SIEG-EMIT] Linhas de produto: ' + invoiceLines.length);
 
   // 5. Get next NF number from company
   var serie, numField, nextNum;
@@ -188,7 +207,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       number: String(nextNum),
       date_order: move.invoice_date || move.date,
       amount_total: move.amount_total,
-      note: move.note || '',
+      note: move.narration || '',
     },
     lines: linesData,
     config: {
@@ -213,8 +232,33 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
 
   // 9. Call SIEG API
   console.log('[SIEG-EMIT] Enviando ao SIEG...');
-  var resultado = await emitirNota(emitData);
-  console.log('[SIEG-EMIT] SIEG retornou - sucesso: ' + resultado.sucesso);
+  var resultado;
+  try {
+    resultado = await emitirNota(emitData);
+  } catch (siegErr) {
+    // Captura erros HTTP (ex: 409 com detalhes no body)
+    var siegDetail = siegErr.response && siegErr.response.data;
+    var errMsg = 'SIEG HTTP ' + (siegErr.response ? siegErr.response.status : 'erro') + ': ';
+    if (siegDetail) {
+      // Tentar extrair ErrorMessage do formato SIEG (PascalCase)
+      var siegMsg = siegDetail.ErrorMessage || siegDetail.Message || siegDetail.message || '';
+      if (siegMsg) {
+        errMsg += siegMsg;
+      } else {
+        errMsg += typeof siegDetail === 'string' ? siegDetail : JSON.stringify(siegDetail).slice(0, 800);
+      }
+    } else {
+      errMsg += siegErr.message;
+    }
+    console.error('[SIEG-EMIT] Erro SIEG:', errMsg);
+    throw new Error(errMsg);
+  }
+  console.log('[SIEG-EMIT] SIEG retornou - sucesso: ' + resultado.sucesso + (resultado.httpStatus ? ' (HTTP ' + resultado.httpStatus + ')' : ''));
+
+  // Se SIEG retornou erro (IsSuccess=false), extrair mensagem detalhada
+  if (!resultado.sucesso && resultado.erro) {
+    console.error('[SIEG-EMIT] SIEG rejeitou o XML: ' + resultado.erro);
+  }
 
   // 10. Parse result
   var info = parseResult(resultado, tipo);
@@ -332,7 +376,6 @@ async function postChatterResult(client, db, uid, pwd, moveId, moveName, tipo, i
       res_id: moveId,
       body: body,
       message_type: 'comment',
-      subtype_xmlid: 'mail.mt_note',
     };
     if (attachIds.length > 0) {
       msgVals.attachment_ids = [[6, 0, attachIds]];
@@ -357,12 +400,9 @@ async function readCompany(client, db, uid, pwd, companyId) {
   var pId = tupId(c.partner_id);
   var p = {};
   if (pId) {
-    var pRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[pId], [
-      'cnpj_cpf', 'inscr_est', 'legal_name', 'street', 'street2', 'number',
-      'city', 'state_id', 'zip', 'phone', 'email',
-      'city_id', 'l10n_br_city_id', 'district',
-    ]]);
-    if (pRecs && pRecs[0]) p = pRecs[0];
+    try { p = await readPartnerSafe(client, db, uid, pwd, pId); } catch (e) {
+      console.warn('[SIEG-EMIT] Erro ao ler partner da empresa:', e.message);
+    }
   }
 
   var stateCode = '', stateIbge = '';
@@ -402,16 +442,41 @@ async function readCompany(client, db, uid, pwd, companyId) {
 }
 
 // ============================================================
-// Read Partner
+// Read Partner (safe for Odoo 19 SaaS — l10n_br fields may not exist)
 // ============================================================
-async function readPartner(client, db, uid, pwd, partnerId) {
-  var recs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], [
-    'name', 'legal_name', 'cnpj_cpf', 'inscr_est',
-    'street', 'street2', 'number', 'city', 'state_id', 'zip',
-    'phone', 'email', 'is_company', 'city_id', 'l10n_br_city_id', 'district',
-  ]]);
+var PARTNER_SAFE_FIELDS = [
+  'name', 'vat', 'street', 'street2', 'city', 'state_id', 'zip',
+  'phone', 'email', 'is_company', 'city_id', 'country_id',
+];
+var PARTNER_BR_FIELDS = ['cnpj_cpf', 'inscr_est', 'legal_name', 'number', 'l10n_br_city_id', 'district'];
+
+/**
+ * Leitura segura de res.partner: campos core + l10n_br opcionais.
+ * No Odoo 19 SaaS, campos como cnpj_cpf, inscr_est, legal_name, number,
+ * l10n_br_city_id, district podem nao existir. Fazemos duas leituras:
+ *   1. Campos core (sempre existem)
+ *   2. Campos l10n_br (try/catch, ignora se falhar)
+ */
+async function readPartnerSafe(client, db, uid, pwd, partnerId, extraFields) {
+  var fields = PARTNER_SAFE_FIELDS.slice();
+  if (extraFields) fields = fields.concat(extraFields);
+  var recs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], fields]);
   if (!recs || !recs.length) throw new Error('Parceiro ' + partnerId + ' nao encontrado');
   var p = recs[0];
+  // Try Brazilian fields separately
+  try {
+    var brRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], PARTNER_BR_FIELDS]);
+    if (brRecs && brRecs[0]) {
+      for (var k in brRecs[0]) { if (brRecs[0][k] !== undefined) p[k] = brRecs[0][k]; }
+    }
+  } catch (e) {
+    console.log('[SIEG-EMIT] Campos l10n_br nao disponiveis, usando vat como CNPJ/CPF');
+  }
+  return p;
+}
+
+async function readPartner(client, db, uid, pwd, partnerId) {
+  var p = await readPartnerSafe(client, db, uid, pwd, partnerId);
 
   var stateCode = '';
   var stId = tupId(p.state_id);
@@ -427,7 +492,7 @@ async function readPartner(client, db, uid, pwd, partnerId) {
   if (cityRef && Array.isArray(cityRef)) cityIbge = await readCityIbge(client, db, uid, pwd, cityRef[0]);
 
   return {
-    cnpj_cpf: p.cnpj_cpf || '',
+    cnpj_cpf: p.cnpj_cpf || p.vat || '',
     legal_name: p.legal_name || p.name || '',
     xNome: p.name || '',
     inscr_est: p.inscr_est || '',
@@ -456,9 +521,9 @@ async function buildLineData(client, db, uid, pwd, line) {
 
   if (productId) {
     try {
+      // Campos core do produto (sempre existem)
       var prods = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
-        'default_code', 'barcode', 'name', 'detailed_type', 'ncm_id', 'uom_id',
-        'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code',
+        'default_code', 'barcode', 'name', 'detailed_type', 'uom_id',
       ]]);
       if (prods && prods[0]) {
         var pr = prods[0];
@@ -466,25 +531,42 @@ async function buildLineData(client, db, uid, pwd, line) {
         barcode = pr.barcode || '';
         detailedType = pr.detailed_type || 'product';
         productName = pr.name || productName;
-
-        // NCM
-        if (pr.ncm_id && Array.isArray(pr.ncm_id)) {
-          try {
-            var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[pr.ncm_id[0]], ['code']]);
-            if (ncmRec && ncmRec[0]) ncm = ncmRec[0].code || '';
-          } catch (e) {}
-        }
-
-        // UoM
         if (pr.uom_id && Array.isArray(pr.uom_id)) uomName = pr.uom_id[1] || 'UN';
+      }
 
-        // x_studio_ fields from product (for NFS-e)
-        prodStudio = {
-          c_trib_nac: pr.x_studio_c_trib_nac || '',
-          c_nbs: pr.x_studio_c_nbs || '',
-          aliquota_iss: pr.x_studio_aliquota_iss || '',
-          ibge_code: pr.x_studio_ibge_code || '',
-        };
+      // Campos l10n_br + x_studio (podem nao existir)
+      try {
+        var prods2 = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
+          'ncm_id', 'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code',
+          'x_studio_ncm',
+        ]]);
+        if (prods2 && prods2[0]) {
+          var pr2 = prods2[0];
+          if (pr2.ncm_id && Array.isArray(pr2.ncm_id)) {
+            try {
+              var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[pr2.ncm_id[0]], ['code']]);
+              if (ncmRec && ncmRec[0]) ncm = ncmRec[0].code || '';
+            } catch (e) {}
+          }
+          // Fallback: x_studio_ncm (campo customizado do usuario, pois l10n_br nao esta instalado)
+          if (!ncm && pr2.x_studio_ncm) {
+            ncm = String(pr2.x_studio_ncm).replace(/\D/g, '');
+            if (ncm.length === 8) {
+              console.log('[SIEG-EMIT] NCM lido de x_studio_ncm: ' + ncm);
+            } else {
+              console.warn('[SIEG-EMIT] x_studio_ncm invalido (' + ncm.length + ' digitos): ' + pr2.x_studio_ncm);
+              ncm = '';
+            }
+          }
+          prodStudio = {
+            c_trib_nac: pr2.x_studio_c_trib_nac || '',
+            c_nbs: pr2.x_studio_c_nbs || '',
+            aliquota_iss: pr2.x_studio_aliquota_iss || '',
+            ibge_code: pr2.x_studio_ibge_code || '',
+          };
+        }
+      } catch (e2) {
+        console.log('[SIEG-EMIT] Campos l10n_br/x_studio do produto nao disponiveis');
       }
     } catch (e) { console.warn('[SIEG-EMIT] Erro ao ler produto ' + productId + ':', e.message); }
   }
@@ -523,7 +605,7 @@ function buildServiceBlock(linesData, move) {
   var cNBS = '999999999';
   var pAliq = '2.00';
   var cIntContrib = '';
-  var xDescServ = move.note || 'Servico prestado conforme contrato';
+  var xDescServ = move.narration || 'Servico prestado conforme contrato';
 
   for (var i = 0; i < linesData.length; i++) {
     var l = linesData[i];
@@ -598,18 +680,29 @@ function parseResult(resultado, tipo) {
   var resp = resultado.resposta || {};
   var chave = '', protocolo = '', cStat = '', motivo = '', numero = '', sucesso = false;
 
+  // Se SIEG retornou HTTP 4xx, usar ErrorMessage diretamente como motivo
+  var siegErro = resultado.erro || '';
+  if (resultado.httpStatus && resultado.httpStatus >= 400 && resultado.httpStatus < 500) {
+    // Erro de validacao do XML — extrair mensagem do SIEG
+    motivo = siegErro || 'Erro HTTP ' + resultado.httpStatus;
+    if (tipo === 'nfe') {
+      cStat = String(resultado.statusCode || resp.cStat || resp.status || '');
+    }
+    return { sucesso: false, chave: chave, protocolo: protocolo, cStat: cStat, motivo: motivo, numero: numero };
+  }
+
   if (tipo === 'nfe') {
     chave = resp.chNFe || resp.chave || resp.ChaveXml || '';
     protocolo = resp.nProt || resp.protocolo || '';
     cStat = String(resp.cStat || resp.status || '');
-    motivo = resp.xMotivo || resp.motivo || 'Processado';
+    motivo = resp.xMotivo || resp.motivo || (siegErro || 'Processado');
     sucesso = (cStat === '100' || cStat === '104' || cStat === '150');
   } else {
     chave = resp.Chave || resp.chave || '';
     protocolo = resp.Protocolo || resp.protocolo || '';
     numero = resp.NumeroNfse || resp.nDFSe || resp.numero || '';
     cStat = String(resp.CodigoVerificacao || resp.codigo || '');
-    motivo = resp.Motivo || resp.motivo || (resultado.sucesso ? 'Autorizada' : 'Erro na emissao');
+    motivo = resp.Motivo || resp.motivo || siegErro || (resultado.sucesso ? 'Autorizada' : 'Erro na emissao');
     sucesso = resultado.sucesso;
   }
 
@@ -643,7 +736,7 @@ async function safeUpdateError(client, db, uid, pwd, moveId, tipo, errMsg) {
     await executeKw(client, db, uid, pwd, 'mail.message', 'create', [{
       model: 'account.move', res_id: moveId,
       body: '<b>Erro na Emissao de ' + (tipo === 'nfe' ? 'NF-e' : 'NFS-e') + '</b><br/>' + errMsg.substring(0, 500),
-      message_type: 'comment', subtype_xmlid: 'mail.mt_note',
+      message_type: 'comment',
     }]);
   } catch (e) { console.error('[SIEG-EMIT] Falha ao registrar erro:', e.message); }
 }

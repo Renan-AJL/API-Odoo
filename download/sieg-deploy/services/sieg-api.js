@@ -34,24 +34,43 @@ const SIEG_BASE = 'https://api.sieg.com';
 async function enviarNFe(dadosOdoo) {
   const xml = gerarXmlNFe(dadosOdoo);
   console.log('[SIEG-API] Enviando NF-e XML (' + xml.length + ' chars)');
+  console.log('[SIEG-API] XML gerado (primeiros 2000 chars):\n' + xml.substring(0, 2000));
 
   const headers = await getAuthHeaders();
-  const resp = await axios.post(SIEG_BASE + '/api/v1/send-xml', {
-    Xml: Buffer.from(xml, 'utf-8').toString('base64'),
-  }, { headers, timeout: 60000 });
+  let resp;
+  try {
+    resp = await axios.post(SIEG_BASE + '/api/v1/send-xml', {
+      Xml: Buffer.from(xml, 'utf-8').toString('base64'),
+    }, { headers, timeout: 60000, validateStatus: function(s) { return s < 500; } });
+  } catch (err) {
+    console.error('[SIEG-API] Erro de conexao SIEG:', err.message);
+    throw err;
+  }
 
   const result = resp.data;
-  console.log('[SIEG-API] Resposta send-xml:', JSON.stringify(result).slice(0, 500));
+  const httpStatus = resp.status;
+  console.log('[SIEG-API] Resposta send-xml HTTP ' + httpStatus + ':', JSON.stringify(result).slice(0, 2000));
+
+  // Se 4xx (ex: 409), logar detalhes completos do erro SIEG
+  if (httpStatus >= 400 && httpStatus < 500) {
+    var errMsg = result.ErrorMessage || result.Message || result.message || '';
+    var errDetail = result.ModelState || result.Errors || result.errors || null;
+    console.error('[SIEG-API] *** ERRO SIEG HTTP ' + httpStatus + ' ***');
+    console.error('[SIEG-API] ErrorMessage: ' + errMsg);
+    if (errDetail) console.error('[SIEG-API] Detalhes: ' + JSON.stringify(errDetail).slice(0, 1000));
+    console.error('[SIEG-API] Resposta completa: ' + JSON.stringify(result).slice(0, 3000));
+  }
 
   // Verificar resultado no formato SIEG (PascalCase)
   var sucesso = !!(result.IsSuccess === true);
 
   return {
     sucesso: sucesso,
+    httpStatus: httpStatus,
     xmlEnviado: xml,
     resposta: result,
     data: result.Data || null,
-    erro: result.ErrorMessage || null,
+    erro: result.ErrorMessage || result.Message || null,
     statusCode: result.StatusCode || null,
   };
 }
@@ -63,24 +82,40 @@ async function enviarNFe(dadosOdoo) {
 async function emitirNFSe(dadosOdoo) {
   const xml = gerarXmlDPS(dadosOdoo);
   console.log('[SIEG-API] Emitindo NFS-e DPS (' + xml.length + ' chars)');
+  console.log('[SIEG-API] DPS XML gerado (primeiros 2000 chars):\n' + xml.substring(0, 2000));
 
   const headers = await getAuthHeaders();
-  const resp = await axios.post(SIEG_BASE + '/api/v1/send-xml', {
-    Xml: Buffer.from(xml, 'utf-8').toString('base64'),
-  }, { headers, timeout: 60000 });
+  let resp;
+  try {
+    resp = await axios.post(SIEG_BASE + '/api/v1/send-xml', {
+      Xml: Buffer.from(xml, 'utf-8').toString('base64'),
+    }, { headers, timeout: 60000, validateStatus: function(s) { return s < 500; } });
+  } catch (err) {
+    console.error('[SIEG-API] Erro de conexao SIEG:', err.message);
+    throw err;
+  }
 
   const result = resp.data;
-  console.log('[SIEG-API] Resposta send-xml NFS-e:', JSON.stringify(result).slice(0, 500));
+  const httpStatus = resp.status;
+  console.log('[SIEG-API] Resposta send-xml NFS-e HTTP ' + httpStatus + ':', JSON.stringify(result).slice(0, 2000));
 
-  // Verificar resultado no formato SIEG (PascalCase)
+  // Se 4xx, logar detalhes completos
+  if (httpStatus >= 400 && httpStatus < 500) {
+    var errMsg = result.ErrorMessage || result.Message || result.message || '';
+    console.error('[SIEG-API] *** ERRO SIEG NFS-e HTTP ' + httpStatus + ' ***');
+    console.error('[SIEG-API] ErrorMessage: ' + errMsg);
+    console.error('[SIEG-API] Resposta completa: ' + JSON.stringify(result).slice(0, 3000));
+  }
+
   var sucesso = !!(result.IsSuccess === true);
 
   return {
     sucesso: sucesso,
+    httpStatus: httpStatus,
     xmlEnviado: xml,
     resposta: result,
     data: result.Data || null,
-    erro: result.ErrorMessage || null,
+    erro: result.ErrorMessage || result.Message || null,
     statusCode: result.StatusCode || null,
   };
 }
