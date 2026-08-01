@@ -199,6 +199,20 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   }
 
   // 7. Build emission payload
+  // Nota: usar amount_untaxed (sem impostos) para NF-e com CSOSN 103
+  // pois vNF deve ser igual a soma dos componentes (vProd + vICMS + ...)
+  // e para CSOSN 103 o ICMS e 0, entao vNF = vProd
+  var vProdSum = 0;
+  for (var li = 0; li < linesData.length; li++) {
+    vProdSum += parseFloat(linesData[li].price_subtotal) || 0;
+  }
+
+  // Pagamentos: NF-e 4.00 exige <pag> — usar valor total da fatura
+  var pagamentos = [{
+    tPag: '15', // PIX
+    vPag: String(vProdSum.toFixed(2)),
+  }];
+
   var emitData = {
     company: company,
     partner: partner,
@@ -206,10 +220,11 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       name: move.name,
       number: String(nextNum),
       date_order: move.invoice_date || move.date,
-      amount_total: move.amount_total,
+      amount_total: vProdSum, // usar soma dos vProd (consistente com XML)
       note: move.narration || '',
     },
     lines: linesData,
+    pagamentos: pagamentos,
     config: {
       serie: serie,
       tpAmb: process.env.SIEG_TP_AMB || config.sieg.tpAmb || '2',
@@ -553,36 +568,46 @@ async function buildLineData(client, db, uid, pwd, line) {
         console.log('[SIEG-EMIT] detailed_type nao disponivel, usando product');
       }
 
-      // Campos l10n_br + x_studio (podem nao existir)
+      // NCM do produto (campo l10n_br — pode estar separado dos x_studio)
+      if (!ncm) {
+        try {
+          var prodsNcm = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['ncm_id']]);
+          if (prodsNcm && prodsNcm[0] && prodsNcm[0].ncm_id) {
+            var ncmRef = prodsNcm[0].ncm_id;
+            // Pode vir como array [id, code] ou objeto com code
+            if (Array.isArray(ncmRef) && ncmRef.length >= 2) {
+              ncm = String(ncmRef[1] || '').replace(/\D/g, '');
+            } else if (Array.isArray(ncmRef) && ncmRef.length === 1) {
+              // So o ID, precisa ler o registro
+              try {
+                var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[ncmRef[0]], ['code']]);
+                if (ncmRec && ncmRec[0]) ncm = String(ncmRec[0].code || '').replace(/\D/g, '');
+              } catch (eNcm) {}
+            }
+            if (ncm) console.log('[SIEG-EMIT] NCM do produto: ' + ncm);
+          }
+        } catch (eNcm2) {
+          console.log('[SIEG-EMIT] ncm_id nao disponivel no produto');
+        }
+      }
+
+      // x_studio fields (NFS-e e customizacoes — podem nao existir)
       try {
         var prods2 = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
-          'ncm_id', 'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code',
+          'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code',
           'x_studio_ncm',
         ]]);
         if (prods2 && prods2[0]) {
           var pr2 = prods2[0];
-          if (pr2.ncm_id && Array.isArray(pr2.ncm_id)) {
-            try {
-              var ncmRec = await executeKw(client, db, uid, pwd, 'l10n_br_fiscal.ncm', 'read', [[pr2.ncm_id[0]], ['code']]);
-              if (ncmRec && ncmRec[0]) ncm = ncmRec[0].code || '';
-            } catch (e) {}
-          }
-          // Fallback: x_studio_ncm (campo customizado do usuario, pois l10n_br nao esta instalado)
           if (!ncm && pr2.x_studio_ncm) {
             ncm = String(pr2.x_studio_ncm).replace(/\D/g, '');
             if (ncm.length === 8) {
               console.log('[SIEG-EMIT] NCM lido de x_studio_ncm: ' + ncm);
-            } else {
-              console.warn('[SIEG-EMIT] x_studio_ncm invalido (' + ncm.length + ' digitos): ' + pr2.x_studio_ncm);
-              ncm = '';
-            }
+            } else { ncm = ''; }
           }
-          // Fallback final: NCM padrao da env var (ex: SIEG_DEFAULT_NCM=73269000)
           if (!ncm) {
             ncm = process.env.SIEG_DEFAULT_NCM || '';
-            if (ncm) {
-              console.log('[SIEG-EMIT] NCM via SIEG_DEFAULT_NCM: ' + ncm);
-            }
+            if (ncm) console.log('[SIEG-EMIT] NCM via SIEG_DEFAULT_NCM: ' + ncm);
           }
           prodStudio = {
             c_trib_nac: pr2.x_studio_c_trib_nac || '',
@@ -592,7 +617,12 @@ async function buildLineData(client, db, uid, pwd, line) {
           };
         }
       } catch (e2) {
-        console.log('[SIEG-EMIT] Campos l10n_br/x_studio do produto nao disponiveis');
+        console.log('[SIEG-EMIT] Campos x_studio do produto nao disponiveis');
+        // Aplicar fallback NCM mesmo sem x_studio
+        if (!ncm) {
+          ncm = process.env.SIEG_DEFAULT_NCM || '';
+          if (ncm) console.log('[SIEG-EMIT] NCM via SIEG_DEFAULT_NCM (sem x_studio): ' + ncm);
+        }
       }
     } catch (e) { console.warn('[SIEG-EMIT] Erro ao ler produto ' + productId + ':', e.message); }
   }
