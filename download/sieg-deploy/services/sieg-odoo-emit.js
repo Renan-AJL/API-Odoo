@@ -597,81 +597,75 @@ async function buildLineData(client, db, uid, pwd, line) {
         console.log('[SIEG-EMIT] detailed_type nao disponivel, usando product');
       }
 
-      // NCM do produto — campo ncm_id (many2one para l10n_br_fiscal.ncm)
-      // No Odoo 19 SaaS o campo EXISTE na UI mas a leitura via XML-RPC pode falhar.
-      // Estrategia multi-tentativa:
-      //   1. Ler ncm_id diretamente (pode falhar por acesso ao modelo relacionado)
-      //   2. Descobrir campos do produto que contenham 'ncm' via fields_get
-      //   3. Tentar search_read em l10n_br_fiscal.ncm com domain product_tmpl_id
-      //   4. Tentar ler via product.template (pai do product.product)
+      // NCM do produto
+      // Campo correto no Odoo 19 SaaS com l10n_br: l10n_br_ncm_code_id (many2one -> l10n_br.ncm.code)
+      // Este campo esta em product.template (nao product.product)
+      // Estrategia:
+      //   T1: Ler product_tmpl_id + l10n_br_ncm_code_id do template
+      //   T2: Tentar ncm_id em product.product (l10n_br_fiscal — pode nao existir)
+      //   T3: fields_get para descobrir campo NCM alternativo
+
+      // === T1: Ler l10n_br_ncm_code_id do product.template ===
+      try {
+        console.log('[SIEG-EMIT-NCM] [T1] Lendo product_tmpl_id + l10n_br_ncm_code_id...');
+        var prodsTmpl = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['product_tmpl_id']]);
+        if (prodsTmpl && prodsTmpl[0] && prodsTmpl[0].product_tmpl_id) {
+          var tmplId = tupId(prodsTmpl[0].product_tmpl_id);
+          console.log('[SIEG-EMIT-NCM] [T1] product_tmpl_id: ' + tmplId);
+          var tmplNcm = await executeKw(client, db, uid, pwd, 'product.template', 'read', [[tmplId], ['l10n_br_ncm_code_id']]);
+          console.log('[SIEG-EMIT-NCM] [T1] l10n_br_ncm_code_id bruto: ' + JSON.stringify(tmplNcm && tmplNcm[0] ? tmplNcm[0].l10n_br_ncm_code_id : 'N/A'));
+          if (tmplNcm && tmplNcm[0] && tmplNcm[0].l10n_br_ncm_code_id) {
+            ncm = extractNcmFromRef(tmplNcm[0].l10n_br_ncm_code_id);
+            if (ncm) console.log('[SIEG-EMIT-NCM] [T1] *** NCM ENCONTRADO: ' + ncm + ' ***');
+          } else {
+            console.warn('[SIEG-EMIT-NCM] [T1] l10n_br_ncm_code_id vazio no template ' + tmplId);
+          }
+        } else {
+          console.warn('[SIEG-EMIT-NCM] [T1] product_tmpl_id vazio para produto ' + productId);
+        }
+      } catch (eT1) {
+        console.error('[SIEG-EMIT-NCM] [T1] FALHOU: ' + eT1.message);
+      }
+
+      // === T2: Tentar ncm_id em product.product (l10n_br_fiscal) ===
       if (!ncm) {
-        // === TENTATIVA 1: Ler ncm_id diretamente ===
         try {
-          console.log('[SIEG-EMIT-NCM] [T1] Lendo ncm_id do produto ' + productId + '...');
+          console.log('[SIEG-EMIT-NCM] [T2] Tentando ncm_id em product.product...');
           var prodsNcm = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['ncm_id']]);
-          console.log('[SIEG-EMIT-NCM] [T1] ncm_id bruto: ' + JSON.stringify(prodsNcm && prodsNcm[0] ? prodsNcm[0].ncm_id : 'N/A'));
           if (prodsNcm && prodsNcm[0] && prodsNcm[0].ncm_id) {
             ncm = extractNcmFromRef(prodsNcm[0].ncm_id);
-            if (ncm) console.log('[SIEG-EMIT-NCM] [T1] NCM extraido: ' + ncm);
+            if (ncm) console.log('[SIEG-EMIT-NCM] [T2] NCM via ncm_id: ' + ncm);
           }
-        } catch (eT1) {
-          console.error('[SIEG-EMIT-NCM] [T1] FALHOU: ' + eT1.message);
+        } catch (eT2) {
+          console.log('[SIEG-EMIT-NCM] [T2] ncm_id nao disponivel: ' + eT2.message);
         }
       }
 
-      // === TENTATIVA 2: Descobrir campos com 'ncm' via fields_get ===
+      // === T3: Descobrir campos NCM via fields_get ===
+      if (!ncm) {
         try {
-          console.log('[SIEG-EMIT-NCM] [T2] Descobrindo campos com ncm via fields_get...');
-          var fieldsInfo = await executeKw(client, db, uid, pwd, 'product.product', 'fields_get', [['ncm_id', 'l10n_br_ncm_id', 'ncm', 'x_studio_ncm']], ['type', 'string', 'relation', 'help']]);
-          console.log('[SIEG-EMIT-NCM] [T2] fields_get retorno: ' + JSON.stringify(fieldsInfo));
-          // Tentar ler cada campo descoberto
+          console.log('[SIEG-EMIT-NCM] [T3] Buscando campos NCM via fields_get...');
+          var fieldsInfo = await executeKw(client, db, uid, pwd, 'product.template', 'fields_get', [
+            ['l10n_br_ncm_code_id', 'ncm_id', 'l10n_br_ncm_id', 'ncm_code_id'],
+            ['type', 'relation', 'string']
+          ]);
+          console.log('[SIEG-EMIT-NCM] [T3] fields_get: ' + JSON.stringify(fieldsInfo));
           var fieldNames = Object.keys(fieldsInfo || {});
           for (var fi = 0; fi < fieldNames.length; fi++) {
             var fname = fieldNames[fi];
-            try {
-              var fv = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [fname]]);
-              console.log('[SIEG-EMIT-NCM] [T2] ' + fname + ' = ' + JSON.stringify(fv && fv[0] ? fv[0][fname] : 'vazio'));
-              if (fv && fv[0] && fv[0][fname]) {
-                var extracted = extractNcmFromRef(fv[0][fname]);
-                if (extracted) {
-                  ncm = extracted;
-                  console.log('[SIEG-EMIT-NCM] [T2] NCM extraido de ' + fname + ': ' + ncm);
-                  break;
-                }
-              }
-            } catch (ef2) {
-              console.log('[SIEG-EMIT-NCM] [T2] Campo ' + fname + ' falhou: ' + ef2.message);
-            }
-          }
-        } catch (eT2) {
-          console.error('[SIEG-EMIT-NCM] [T2] FALHOU: ' + eT2.message);
-        }
-      }
-
-      // === TENTATIVA 3: Ler via product.template (modelo pai) ===
-        try {
-          console.log('[SIEG-EMIT-NCM] [T3] Tentando via product.template...');
-          // Primeiro descobrir o product_tmpl_id
-          var prodsTmpl = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['product_tmpl_id']]);
-          if (prodsTmpl && prodsTmpl[0] && prodsTmpl[0].product_tmpl_id) {
-            var tmplId = tupId(prodsTmpl[0].product_tmpl_id);
-            console.log('[SIEG-EMIT-NCM] [T3] product_tmpl_id: ' + tmplId);
-            // Tentar ler ncm_id do template
-            try {
-              var tmplNcm = await executeKw(client, db, uid, pwd, 'product.template', 'read', [[tmplId], ['ncm_id']]);
-              console.log('[SIEG-EMIT-NCM] [T3] template ncm_id: ' + JSON.stringify(tmplNcm && tmplNcm[0] ? tmplNcm[0].ncm_id : 'N/A'));
-              if (tmplNcm && tmplNcm[0] && tmplNcm[0].ncm_id) {
-                ncm = extractNcmFromRef(tmplNcm[0].ncm_id);
-                if (ncm) console.log('[SIEG-EMIT-NCM] [T3] NCM extraido do template: ' + ncm);
-              }
-            } catch (eTmpl) {
-              console.error('[SIEG-EMIT-NCM] [T3] template ncm_id falhou: ' + eTmpl.message);
-              // Tentar fields_get no template
+            if (fieldsInfo[fname].type === 'many2one') {
               try {
-                var tmplFields = await executeKw(client, db, uid, pwd, 'product.template', 'fields_get', [['ncm_id', 'l10n_br_ncm_id']], ['type', 'relation']]);
-                console.log('[SIEG-EMIT-NCM] [T3] template fields_get: ' + JSON.stringify(tmplFields));
-              } catch (eTf) {
-                console.log('[SIEG-EMIT-NCM] [T3] template fields_get falhou: ' + eTf.message);
+                var fv = await executeKw(client, db, uid, pwd, 'product.template', 'read', [[tmplId], [fname]]);
+                if (fv && fv[0] && fv[0][fname]) {
+                  var extracted = extractNcmFromRef(fv[0][fname]);
+                  if (extracted) {
+                    ncm = extracted;
+                    console.log('[SIEG-EMIT-NCM] [T3] NCM via ' + fname + ': ' + ncm);
+                    break;
+                  }
+                }
+              } catch (ef3) {
+                console.log('[SIEG-EMIT-NCM] [T3] ' + fname + ' falhou: ' + ef3.message);
               }
             }
           }
