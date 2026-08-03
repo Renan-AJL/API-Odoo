@@ -85,26 +85,29 @@ function xmlImpostoItem(line) {
   const vCOFINS  = num(line.vcofins    || '0.00');
 
   // --- ICMS ---
+  // Mapeamento CSOSN → Grupo XSD (NT 2024.001 / NF-e 4.00):
+  //   CSOSN 101 → ICMSSN101
+  //   CSOSN 102,103,300,400 → ICMSSN102
+  //   CSOSN 201 → ICMSSN201
+  //   CSOSN 202,203 → ICMSSN202
+  //   CSOSN 500 → ICMSSN500
+  //   CSOSN 900 → ICMSSN900
   let icmsBlock = '';
   if (csosn) {
-    // Simples Nacional: CSOSN 101-500
     const csosnNum = csosn.replace(/\D/g, '');
-    // CSOSN 101,102,103 → ICMSSN101,102,103  |  201,202,203 → ICMSSN201..  |  900 → ICMSSN900
-    let tag = 'ICMSSN' + csosnNum;
-    if (csosnNum === '900') {
-      tag = 'ICMSSN900';
-    } else if (['101','102','103'].includes(csosnNum)) {
-      tag = 'ICMSSN' + csosnNum;
-    } else if (['201','202','203'].includes(csosnNum)) {
-      tag = 'ICMSSN' + csosnNum;
-    } else if (csosnNum === '300') {
-      tag = 'ICMSSN300';
-    } else if (csosnNum === '400') {
-      tag = 'ICMSSN400';
+    let tag = 'ICMSSN102'; // fallback
+    if (csosnNum === '101') {
+      tag = 'ICMSSN101';
+    } else if (['102','103','300','400'].includes(csosnNum)) {
+      tag = 'ICMSSN102';
+    } else if (csosnNum === '201') {
+      tag = 'ICMSSN201';
+    } else if (['202','203'].includes(csosnNum)) {
+      tag = 'ICMSSN202';
     } else if (csosnNum === '500') {
       tag = 'ICMSSN500';
-    } else {
-      tag = 'ICMSSN102';
+    } else if (csosnNum === '900') {
+      tag = 'ICMSSN900';
     }
 
     if (csosnNum === '900') {
