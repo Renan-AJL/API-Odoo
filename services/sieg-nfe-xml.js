@@ -156,6 +156,7 @@ function xmlImpostoItem(line) {
   }
 
   // --- PIS ---
+  // PISAliq: CST 01,02,03 | PISNT: CST 04,05,06,07,08,09 | PISOutr: CST 49,50,51,52,53,54,55,56,60-75,98,99
   let pisBlock = '';
   const pisCstNum = String(cstPis).replace(/\D/g, '');
   if (['04','05','06','07','08','09'].includes(pisCstNum)) {
@@ -165,8 +166,8 @@ function xmlImpostoItem(line) {
               <CST>${cstPis}</CST>
             </PISNT>
           </PIS>`;
-  } else {
-    // PIS Aliq (CST 01,02,03,49,50,51,52,53,54,55,56,60,61,62,63,64,65,66,67,70,71,72,73,74,75,98,99)
+  } else if (['01','02','03'].includes(pisCstNum)) {
+    // PIS tributado por aliquota (CST 01,02,03)
     pisBlock = `          <PIS>
             <PISAliq>
               <CST>${cstPis}</CST>
@@ -175,9 +176,20 @@ function xmlImpostoItem(line) {
               <vPIS>${vPIS}</vPIS>
             </PISAliq>
           </PIS>`;
+  } else {
+    // PISOutr: CST 49,50,51,52,53,54,55,56,60,61,62,63,64,65,66,67,70,71,72,73,74,75,98,99
+    pisBlock = `          <PIS>
+            <PISOutr>
+              <CST>${cstPis}</CST>
+              <vBC>${vBCPis}</vBC>
+              <pPIS>${pPis}</pPIS>
+              <vPIS>${vPIS}</vPIS>
+            </PISOutr>
+          </PIS>`;
   }
 
   // --- COFINS ---
+  // COFINSAliq: CST 01,02,03 | COFINSNT: CST 04,05,06,07,08,09 | COFINSOutr: CST 49,50,51,52,53,54,55,56,60-75,98,99
   let cofinsBlock = '';
   const cofCstNum = String(cstCof).replace(/\D/g, '');
   if (['04','05','06','07','08','09'].includes(cofCstNum)) {
@@ -186,7 +198,8 @@ function xmlImpostoItem(line) {
               <CST>${cstCof}</CST>
             </COFINSNT>
           </COFINS>`;
-  } else {
+  } else if (['01','02','03'].includes(cofCstNum)) {
+    // COFINS tributado por aliquota (CST 01,02,03)
     cofinsBlock = `          <COFINS>
             <COFINSAliq>
               <CST>${cstCof}</CST>
@@ -194,6 +207,16 @@ function xmlImpostoItem(line) {
               <pCOFINS>${pCofins}</pCOFINS>
               <vCOFINS>${vCOFINS}</vCOFINS>
             </COFINSAliq>
+          </COFINS>`;
+  } else {
+    // COFINSOutr: CST 49,50,51,52,53,54,55,56,60,61,62,63,64,65,66,67,70,71,72,73,74,75,98,99
+    cofinsBlock = `          <COFINS>
+            <COFINSOutr>
+              <CST>${cstCof}</CST>
+              <vBC>${vBCCof}</vBC>
+              <pCOFINS>${pCofins}</pCOFINS>
+              <vCOFINS>${vCOFINS}</vCOFINS>
+            </COFINSOutr>
           </COFINS>`;
   }
 
@@ -355,7 +378,7 @@ function gerarXmlNFe(data) {
   }
   console.log('[NFE-XML] ========================================');
 
-  // Calcular cDV para o bloco <ide> (o SIEG adiciona o Id/chave na assinatura)
+  // Calcular cDV e adicionar Id na infNFe (obrigatorio pelo schema NF-e 4.00)
   var tpEmis = '1';
   var accessKey = calcAccessKey(cUF, dhEmi, company.cnpj_cpf, '55', serie, nNF, tpEmis, cNF);
   var cDV = accessKey[43];
@@ -363,7 +386,7 @@ function gerarXmlNFe(data) {
 
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <NFe xmlns="${NFE_NS}">
-  <infNFe versao="4.00">
+  <infNFe versao="4.00" Id="NFe${accessKey}">
     <ide>
       <cUF>${cUF}</cUF>
       <cNF>${cNF}</cNF>
