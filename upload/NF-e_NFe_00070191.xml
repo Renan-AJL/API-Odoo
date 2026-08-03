@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
-  <infNFe versao="4.00" Id="NFe41260722603750000190551000000701901395612599">
+  <infNFe versao="4.00">
     <ide>
       <cUF>41</cUF>
-      <cNF>39561259</cNF>
+      <cNF>90722743</cNF>
       <natOp>Venda de Mercadoria</natOp>
       <mod>55</mod>
       <serie>100</serie>
@@ -131,7 +131,6 @@
     </transp>
     <pag>
       <detPag>
-        <indPag>1</indPag>
         <tPag>15</tPag>
         <vPag>7.90</vPag>
       </detPag>
