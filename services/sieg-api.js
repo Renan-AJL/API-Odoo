@@ -34,7 +34,7 @@ const SIEG_BASE = 'https://api.sieg.com';
 async function enviarNFe(dadosOdoo) {
   const xml = gerarXmlNFe(dadosOdoo);
   console.log('[SIEG-API] Enviando NF-e XML (' + xml.length + ' chars)');
-  console.log('[SIEG-API] XML gerado (primeiros 2000 chars):\n' + xml.substring(0, 2000));
+  console.log('[SIEG-API] XML COMPLETO GERADO:\n' + xml);
 
   const headers = await getAuthHeaders();
   let resp;

@@ -355,13 +355,15 @@ function gerarXmlNFe(data) {
   }
   console.log('[NFE-XML] ========================================');
 
-  const ideId = `NFe${cUF}${dhEmi.slice(0,4)}${dhEmi.slice(5,7)}${company.cnpj_cpf}${String(cfg.mod || '55')}${serie.padStart(3,'0')}${nNF.padStart(9,'0')}${cNF}`;
-  // Nota: o Id real inclui a chave de 44 digitos, calculada apos montagem completa
-  // Por enquanto usamos placeholder — a SIEG ira processar e assinar
+  // Calcular chave de acesso NF-e (44 digitos)
+  var tpEmis = '1'; // emissao normal
+  var accessKey = calcAccessKey(cUF, dhEmi, company.cnpj_cpf, '55', serie, nNF, tpEmis, cNF);
+  var cDV = accessKey[43]; // ultimo digito = DV
+  console.log('[NFE-XML] Chave de acesso: ' + accessKey + ' (cDV=' + cDV + ')');
 
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <NFe xmlns="${NFE_NS}">
-  <infNFe versao="4.00">
+  <infNFe versao="4.00" Id="NFe${accessKey}">
     <ide>
       <cUF>${cUF}</cUF>
       <cNF>${cNF}</cNF>
@@ -375,8 +377,8 @@ function gerarXmlNFe(data) {
       <idDest>${idDest}</idDest>
       <cMunFG>${cMunFG}</cMunFG>
       <tpImp>1</tpImp>
-      <tpEmis>1</tpEmis>
-      <cDV>0</cDV>
+      <tpEmis>${tpEmis}</tpEmis>
+      <cDV>${cDV}</cDV>
       <tpAmb>${tpAmb}</tpAmb>
       <finNFe>${finNFe}</finNFe>
       <indFinal>${indFinal}</indFinal>
@@ -604,6 +606,33 @@ function logField(fieldName, value, isError) {
   } else {
     console.log('[NFE-XML]   ' + fieldName + ': ' + displayVal);
   }
+}
+
+/**
+ * Calcula a chave de acesso da NF-e (44 digitos) com DV.
+ * Formato: cUF(2) + AAMM(4) + CNPJ(14) + mod(2) + serie(3) + nNF(9) + tpEmis(1) + cNF(8) + cDV(1) = 44
+ */
+function calcAccessKey(cUF, dhEmi, cnpj, mod, serie, nNF, tpEmis, cNF) {
+  var aamm = dhEmi.slice(0, 4) + dhEmi.slice(5, 7);
+  var key =
+    String(cUF).padStart(2, '0') +
+    aamm +
+    onlyNum(cnpj).padStart(14, '0') +
+    String(mod).padStart(2, '0') +
+    String(serie).padStart(3, '0') +
+    String(nNF).padStart(9, '0') +
+    String(tpEmis) +
+    String(cNF).padStart(8, '0');
+  // DV = modulo 11 dos 43 digitos, pesos 2-9 ciclicos do direita para esquerda
+  var weights = [2,3,4,5,6,7,8,9,2,3,4,5,6,7,8,9,2,3,4,5,6,7,8,9,2,3,4,5,6,7,8,9,2,3,4,5,6,7,8,9,2,3,4];
+  var sum = 0;
+  for (var i = 0; i < 43; i++) {
+    sum += parseInt(key[i]) * weights[i];
+  }
+  var remainder = sum % 11;
+  var cDV = 11 - remainder;
+  if (cDV === 10 || cDV === 11) cDV = 0;
+  return key + String(cDV);
 }
 
 module.exports = { gerarXmlNFe };
