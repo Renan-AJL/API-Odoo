@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
-  <infNFe versao="4.00">
+  <infNFe versao="4.00" Id="NFe4120260722603750000190551000000701901653222132">
     <ide>
       <cUF>41</cUF>
-      <cNF>90595260</cNF>
+      <cNF>65322213</cNF>
       <natOp>Venda de Mercadoria</natOp>
       <mod>55</mod>
       <serie>100</serie>
@@ -15,7 +15,7 @@
       <cMunFG>4106902</cMunFG>
       <tpImp>1</tpImp>
       <tpEmis>1</tpEmis>
-      <cDV>0</cDV>
+      <cDV>1</cDV>
       <tpAmb>2</tpAmb>
       <finNFe>1</finNFe>
       <indFinal>0</indFinal>
@@ -28,8 +28,8 @@
       <xNome>AJL COMERCIO ATACADISTA DE FERRAGENS E FERRAMENTAS LTDA</xNome>
       <xFant>AJL COMERCIO ATACADISTA DE FERRAGENS E FERRAMENTAS LTDA</xFant>
     <enderEmit>
-      <xLgr>Avenida Juscelino Kubitschek de Oliveira, 7525</xLgr>
-      <nro>S/N</nro>
+      <xLgr>Avenida Juscelino Kubitschek de Oliveira</xLgr>
+      <nro>7525</nro>
       <xBairro>Cidade Industrial</xBairro>
       <cMun>4106902</cMun>
       <xMun>Curitiba</xMun>
@@ -46,8 +46,8 @@
       <CNPJ>63820783000170</CNPJ>
       <xNome>NYTRO LTDA</xNome>
     <enderDest>
-      <xLgr>Rua Bom Jesus, 212</xLgr>
-      <nro>S/N</nro>
+      <xLgr>Rua Bom Jesus</xLgr>
+      <nro>212</nro>
       <xBairro>Juvevê</xBairro>
       <cMun>4106902</cMun>
       <xMun>Curitiba</xMun>
@@ -66,7 +66,7 @@
         <cProd>1036</cProd>
         <cEAN>SEM GTIN</cEAN>
         <xProd>1036 - Contra Peso 180x3000 1,25 (Padrão - KG)</xProd>
-        <NCM>73269000</NCM>
+        <NCM>73089090</NCM>
         <CFOP>5102</CFOP>
         <uCom>KG</uCom>
         <qCom>1.00</qCom>
@@ -112,7 +112,7 @@
         <vST>0.00</vST>
         <vFCPST>0.00</vFCPST>
         <vFCPSTRet>0.00</vFCPSTRet>
-        <vProd>7.90</vProd>
+        <vProd>15.80</vProd>
         <vFrete>0.00</vFrete>
         <vSeg>0.00</vSeg>
         <vDesc>0.00</vDesc>
@@ -122,15 +122,22 @@
         <vPIS>0.00</vPIS>
         <vCOFINS>0.00</vCOFINS>
         <vOutro>0.00</vOutro>
-        <vNF>8.49</vNF>
+        <vNF>7.90</vNF>
         <vTotTrib>0.00</vTotTrib>
       </ICMSTot>
     </total>
     <transp>
       <modFrete>9</modFrete>
     </transp>
+    <pag>
+      <detPag>
+        <indPag>1</indPag>
+        <tPag>15</tPag>
+        <vPag>7.90</vPag>
+      </detPag>
+    </pag>
     <infAdic>
-      <infCpl>&lt;p&gt;Termos e condições: &lt;a href=&quot;https://ajlferroeaco.odoo.com/terms&quot; target=&quot;_blank&quot; rel=&quot;noreferrer noopener&quot;&gt;https://ajlferroeaco.odoo.com/terms&lt;/a&gt;&lt;/p&gt;</infCpl>
+      <infCpl>Termos e condições: https://ajlferroeaco.odoo.com/terms</infCpl>
     </infAdic>
   </infNFe>
 </NFe>
