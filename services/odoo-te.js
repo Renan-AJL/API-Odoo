@@ -535,7 +535,7 @@ async function findPickingByTeId(teOrderId) {
     var pickings = await safeReadCustom('stock.picking', ids, PICKING_FIELDS, PICKING_CUSTOM_FIELDS);
     return pickings ? pickings[0] : null;
   } catch (err) {
-    if (err.message && err.message.indexOf('Invalid field') !== -1) return null;
+    if (err.message && (err.message.indexOf('Invalid field') !== -1 || err.message.indexOf('invalid item in domain') !== -1)) return null;
     throw err;
   }
 }
