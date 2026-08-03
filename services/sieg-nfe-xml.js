@@ -75,11 +75,11 @@ function xmlImpostoItem(line) {
   const vBC    = num(line.vbc_icms  || line.vbc  || '0.00');
   const vICMS  = num(line.vicms || '0.00');
   const pICMS  = num(line.picms || '0.00');
-  const cstPis   = line.cst_pis   || '49';
+  const cstPis   = line.cst_pis   || '01';
   const vBCPis   = num(line.vbc_pis   || line.vbc || '0.00');
   const pPis     = num(line.ppis      || line.pis_aliquota || '0.00');
   const vPIS     = num(line.vpis      || '0.00');
-  const cstCof   = line.cst_cofins || '49';
+  const cstCof   = line.cst_cofins || '01';
   const vBCCof   = num(line.vbc_cofins || line.vbc || '0.00');
   const pCofins  = num(line.pcofins    || line.cofins_aliquota || '0.00');
   const vCOFINS  = num(line.vcofins    || '0.00');
