@@ -723,12 +723,19 @@ async function buildLineData(client, db, uid, pwd, line) {
     detailed_type: detailedType,
     csosn: tax.csosn || '103', orig: '0',
     cst_icms: tax.cst_icms || '',
-    vbc_icms: String(tax.vbc || 0), vicms: String(tax.vicms || 0), picms: String(tax.picms || 0),
-    // Simples Nacional: PIS/COFINS CST 01 + vBC 0.00 (prova: XML aceito SIEG 29/07 usa exatamente isso)
+    // Simples Nacional: ICMS isento (ICMSSN102), vBC/pICMS/vICMS = 0
+    vbc_icms: tax.csosn ? '0' : String(tax.vbc || 0),
+    vicms: tax.csosn ? '0' : String(tax.vicms || 0),
+    picms: tax.csosn ? '0' : String(tax.picms || 0),
+    // Simples Nacional: PIS/COFINS CST 01 com aliquotas reais (prova: XML aceito SIEG 29/07 usa pPIS=1.65, pCOFINS=7.60, vBC=0.00)
     cst_pis: tax.csosn ? '01' : (tax.cst_pis || '01'),
-    vbc_pis: tax.csosn ? '0' : String(tax.vbc_pis || 0), ppis: tax.csosn ? '0' : String(tax.ppis || 0), vpis: tax.csosn ? '0' : String(tax.vpis || 0),
+    vbc_pis: tax.csosn ? '0' : String(tax.vbc_pis || 0),
+    ppis: tax.csosn ? '1.65' : String(tax.ppis || 0),
+    vpis: tax.csosn ? '0' : String(tax.vpis || 0),
     cst_cofins: tax.csosn ? '01' : (tax.cst_cofins || '01'),
-    vbc_cofins: tax.csosn ? '0' : String(tax.vbc_cofins || 0), pcofins: tax.csosn ? '0' : String(tax.pcofins || 0), vcofins: tax.csosn ? '0' : String(tax.vcofins || 0),
+    vbc_cofins: tax.csosn ? '0' : String(tax.vbc_cofins || 0),
+    pcofins: tax.csosn ? '7.60' : String(tax.pcofins || 0),
+    vcofins: tax.csosn ? '0' : String(tax.vcofins || 0),
     // NFS-e fields from product
     x_studio_c_trib_nac: prodStudio.c_trib_nac,
     x_studio_c_nbs: prodStudio.c_nbs,
@@ -800,8 +807,8 @@ function buildServiceBlock(linesData, move) {
 async function extractTaxes(client, db, uid, pwd, line) {
   var result = {
     csosn: '103', cst_icms: '', vbc: 0, vicms: 0, picms: 0,
-    cst_pis: '01', vbc_pis: 0, ppis: 0, vpis: 0,
-    cst_cofins: '01', vbc_cofins: 0, pcofins: 0, vcofins: 0,
+    cst_pis: '01', vbc_pis: 0, ppis: 1.65, vpis: 0,
+    cst_cofins: '01', vbc_cofins: 0, pcofins: 7.60, vcofins: 0,
   };
 
   var taxIds = (line.tax_ids || []).map(function(t) { return Array.isArray(t) ? t[0] : t; }).filter(Boolean);

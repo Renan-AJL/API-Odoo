@@ -111,23 +111,9 @@ function xmlImpostoItem(line) {
     }
 
     if (csosnNum === '900') {
-      // CSOSN 900 precisa de mais campos
-      icmsBlock = `          <ICMS>
-            <${tag}>
-              <orig>${orig}</orig>
-              <CSOSN>${csosn}</CSOSN>
-              <vICMS>${vICMS}</vICMS>
-              <vBC>${vBC}</vBC>
-              <pICMS>${pICMS}</pICMS>
-            </${tag}>
-          </ICMS>`;
+      icmsBlock = `<ICMS><${tag}><orig>${orig}</orig><CSOSN>${csosn}</CSOSN><vICMS>${vICMS}</vICMS><vBC>${vBC}</vBC><pICMS>${pICMS}</pICMS></${tag}></ICMS>`;
     } else {
-      icmsBlock = `          <ICMS>
-            <${tag}>
-              <orig>${orig}</orig>
-              <CSOSN>${csosn}</CSOSN>
-            </${tag}>
-          </ICMS>`;
+      icmsBlock = `<ICMS><${tag}><orig>${orig}</orig><CSOSN>${csosn}</CSOSN></${tag}></ICMS>`;
     }
   } else if (cstIcms) {
     // Regime Normal: CST 00-90
@@ -138,24 +124,10 @@ function xmlImpostoItem(line) {
     } else {
       tag = 'ICMS00';
     }
-    icmsBlock = `          <ICMS>
-            <${tag}>
-              <orig>${orig}</orig>
-              <CST>${cstIcms}</CST>
-              <modBC>${modBC || '0'}</modBC>
-              <vBC>${vBC}</vBC>
-              <pICMS>${pICMS}</pICMS>
-              <vICMS>${vICMS}</vICMS>
-            </${tag}>
-          </ICMS>`;
+    icmsBlock = `<ICMS><${tag}><orig>${orig}</orig><CST>${cstIcms}</CST><modBC>${modBC || '0'}</modBC><vBC>${vBC}</vBC><pICMS>${pICMS}</pICMS><vICMS>${vICMS}</vICMS></${tag}></ICMS>`;
   } else {
     // Fallback CSOSN 103
-    icmsBlock = `          <ICMS>
-            <ICMSSN102>
-              <orig>${orig}</orig>
-              <CSOSN>103</CSOSN>
-            </ICMSSN102>
-          </ICMS>`;
+    icmsBlock = `<ICMS><ICMSSN102><orig>${orig}</orig><CSOSN>103</CSOSN></ICMSSN102></ICMS>`;
   }
 
   // --- PIS ---
@@ -163,32 +135,11 @@ function xmlImpostoItem(line) {
   let pisBlock = '';
   const pisCstNum = String(cstPis).replace(/\D/g, '');
   if (['04','05','06','07','08','09'].includes(pisCstNum)) {
-    // PIS nao tributado
-    pisBlock = `          <PIS>
-            <PISNT>
-              <CST>${cstPis}</CST>
-            </PISNT>
-          </PIS>`;
+    pisBlock = `<PIS><PISNT><CST>${cstPis}</CST></PISNT></PIS>`;
   } else if (['01','02','03'].includes(pisCstNum)) {
-    // PIS tributado por aliquota (CST 01,02,03)
-    pisBlock = `          <PIS>
-            <PISAliq>
-              <CST>${cstPis}</CST>
-              <vBC>${vBCPis}</vBC>
-              <pPIS>${pPis}</pPIS>
-              <vPIS>${vPIS}</vPIS>
-            </PISAliq>
-          </PIS>`;
+    pisBlock = `<PIS><PISAliq><CST>${cstPis}</CST><vBC>${vBCPis}</vBC><pPIS>${pPis}</pPIS><vPIS>${vPIS}</vPIS></PISAliq></PIS>`;
   } else {
-    // PISOutr: CST 49,50,51,52,53,54,55,56,60,61,62,63,64,65,66,67,70,71,72,73,74,75,98,99
-    pisBlock = `          <PIS>
-            <PISOutr>
-              <CST>${cstPis}</CST>
-              <vBC>${vBCPis}</vBC>
-              <pPIS>${pPis}</pPIS>
-              <vPIS>${vPIS}</vPIS>
-            </PISOutr>
-          </PIS>`;
+    pisBlock = `<PIS><PISOutr><CST>${cstPis}</CST><vBC>${vBCPis}</vBC><pPIS>${pPis}</pPIS><vPIS>${vPIS}</vPIS></PISOutr></PIS>`;
   }
 
   // --- COFINS ---
@@ -196,34 +147,14 @@ function xmlImpostoItem(line) {
   let cofinsBlock = '';
   const cofCstNum = String(cstCof).replace(/\D/g, '');
   if (['04','05','06','07','08','09'].includes(cofCstNum)) {
-    cofinsBlock = `          <COFINS>
-            <COFINSNT>
-              <CST>${cstCof}</CST>
-            </COFINSNT>
-          </COFINS>`;
+    cofinsBlock = `<COFINS><COFINSNT><CST>${cstCof}</CST></COFINSNT></COFINS>`;
   } else if (['01','02','03'].includes(cofCstNum)) {
-    // COFINS tributado por aliquota (CST 01,02,03)
-    cofinsBlock = `          <COFINS>
-            <COFINSAliq>
-              <CST>${cstCof}</CST>
-              <vBC>${vBCCof}</vBC>
-              <pCOFINS>${pCofins}</pCOFINS>
-              <vCOFINS>${vCOFINS}</vCOFINS>
-            </COFINSAliq>
-          </COFINS>`;
+    cofinsBlock = `<COFINS><COFINSAliq><CST>${cstCof}</CST><vBC>${vBCCof}</vBC><pCOFINS>${pCofins}</pCOFINS><vCOFINS>${vCOFINS}</vCOFINS></COFINSAliq></COFINS>`;
   } else {
-    // COFINSOutr: CST 49,50,51,52,53,54,55,56,60,61,62,63,64,65,66,67,70,71,72,73,74,75,98,99
-    cofinsBlock = `          <COFINS>
-            <COFINSOutr>
-              <CST>${cstCof}</CST>
-              <vBC>${vBCCof}</vBC>
-              <pCOFINS>${pCofins}</pCOFINS>
-              <vCOFINS>${vCOFINS}</vCOFINS>
-            </COFINSOutr>
-          </COFINS>`;
+    cofinsBlock = `<COFINS><COFINSOutr><CST>${cstCof}</CST><vBC>${vBCCof}</vBC><pCOFINS>${pCofins}</pCOFINS><vCOFINS>${vCOFINS}</vCOFINS></COFINSOutr></COFINS>`;
   }
 
-  return `\n        <imposto>${icmsBlock}${pisBlock}${cofinsBlock}\n        </imposto>`;
+  return `<imposto>${icmsBlock}${pisBlock}${cofinsBlock}</imposto>`;
 }
 
 /**
@@ -337,9 +268,9 @@ function gerarXmlNFe(data) {
     logField('  CSOSN', l.csosn || '103');
     logField('  CST_ICMS', l.cst_icms || '(vazio - usara CSOSN)');
     logField('  vICMS', l.vicms || '0.00');
-    logField('  CST_PIS', l.cst_pis || '49');
+    logField('  CST_PIS', l.cst_pis || '01');
     logField('  vPIS', l.vpis || '0.00');
-    logField('  CST_COFINS', l.cst_cofins || '49');
+    logField('  CST_COFINS', l.cst_cofins || '01');
     logField('  vCOFINS', l.vcofins || '0.00');
 
     if (!(l.ncm || l.NCM)) xmlErrors.push('NCM vazio no item ' + (i+1) + ' (' + (l.xProd || l.product_name || '?') + ')');
@@ -434,9 +365,9 @@ ${xmlEndereco(company, 'enderEmit')}
       ${destTag ? `<${destTag}>${docDest}</${destTag}>` : '<CPF>00000000000</CPF>'}
       <xNome>${esc(partner.legal_name || partner.xNome || '')}</xNome>
 ${xmlEndereco(partner, 'enderDest')}
-      <indIEDest>${indIEDest}</indIEDest>
-      ${partner.inscr_est ? `<IE>${onlyNum(partner.inscr_est)}</IE>` : ''}
-      ${partner.email ? `<email>${esc(partner.email)}</email>` : ''}
+      <indIEDest>${indIEDest}</indIEDest>${partner.inscr_est ? `
+      <IE>${onlyNum(partner.inscr_est)}</IE>` : ''}${partner.email ? `
+      <email>${esc(partner.email)}</email>` : ''}
     </dest>`;
 
   // === det (items) ===
@@ -537,6 +468,7 @@ ${xmlEndereco(partner, 'enderDest')}
     pag.forEach(p => {
       xml += `
       <detPag>
+        <indPag>1</indPag>
         <tPag>${p.tPag || '15'}</tPag>
         <vPag>${num(p.vPag)}</vPag>
       </detPag>`;
