@@ -724,9 +724,9 @@ async function buildLineData(client, db, uid, pwd, line) {
     csosn: tax.csosn || '103', orig: '0',
     cst_icms: tax.cst_icms || '',
     vbc_icms: String(tax.vbc || 0), vicms: String(tax.vicms || 0), picms: String(tax.picms || 0),
-    cst_pis: tax.cst_pis || (tax.csosn ? '49' : '01'),
+    cst_pis: tax.csosn ? '49' : (tax.cst_pis || '01'),
     vbc_pis: String(tax.vbc_pis || 0), ppis: String(tax.ppis || 0), vpis: String(tax.vpis || 0),
-    cst_cofins: tax.cst_cofins || (tax.csosn ? '49' : '01'),
+    cst_cofins: tax.csosn ? '49' : (tax.cst_cofins || '01'),
     vbc_cofins: String(tax.vbc_cofins || 0), pcofins: String(tax.pcofins || 0), vcofins: String(tax.vcofins || 0),
     // NFS-e fields from product
     x_studio_c_trib_nac: prodStudio.c_trib_nac,

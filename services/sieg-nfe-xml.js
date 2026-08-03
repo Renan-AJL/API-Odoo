@@ -417,7 +417,7 @@ ${xmlEndereco(partner, 'enderDest')}
   lines.forEach((line, idx) => {
     const nItem = String(idx + 1);
     const vProd = num(line.price_subtotal || (line.qty * line.price_unit));
-    vProdTotal += parseFloat(vProd);
+    // vProdTotal ja foi calculado no bloco de validacao acima
 
     xml += `
     <det nItem="${nItem}">
@@ -613,7 +613,7 @@ function logField(fieldName, value, isError) {
  * Formato: cUF(2) + AAMM(4) + CNPJ(14) + mod(2) + serie(3) + nNF(9) + tpEmis(1) + cNF(8) + cDV(1) = 44
  */
 function calcAccessKey(cUF, dhEmi, cnpj, mod, serie, nNF, tpEmis, cNF) {
-  var aamm = dhEmi.slice(0, 4) + dhEmi.slice(5, 7);
+  var aamm = dhEmi.slice(2, 4) + dhEmi.slice(5, 7);
   var key =
     String(cUF).padStart(2, '0') +
     aamm +
