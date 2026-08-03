@@ -355,15 +355,15 @@ function gerarXmlNFe(data) {
   }
   console.log('[NFE-XML] ========================================');
 
-  // Calcular chave de acesso NF-e (44 digitos)
-  var tpEmis = '1'; // emissao normal
+  // Calcular cDV para o bloco <ide> (o SIEG adiciona o Id/chave na assinatura)
+  var tpEmis = '1';
   var accessKey = calcAccessKey(cUF, dhEmi, company.cnpj_cpf, '55', serie, nNF, tpEmis, cNF);
-  var cDV = accessKey[43]; // ultimo digito = DV
-  console.log('[NFE-XML] Chave de acesso: ' + accessKey + ' (cDV=' + cDV + ')');
+  var cDV = accessKey[43];
+  console.log('[NFE-XML] cDV calculado: ' + cDV + ' (chave sem DV: ' + accessKey.slice(0, 43) + ')');
 
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <NFe xmlns="${NFE_NS}">
-  <infNFe versao="4.00" Id="NFe${accessKey}">
+  <infNFe versao="4.00">
     <ide>
       <cUF>${cUF}</cUF>
       <cNF>${cNF}</cNF>
@@ -511,7 +511,6 @@ ${xmlEndereco(partner, 'enderDest')}
     pag.forEach(p => {
       xml += `
       <detPag>
-        <indPag>1</indPag>
         <tPag>${p.tPag || '15'}</tPag>
         <vPag>${num(p.vPag)}</vPag>
       </detPag>`;
@@ -623,11 +622,13 @@ function calcAccessKey(cUF, dhEmi, cnpj, mod, serie, nNF, tpEmis, cNF) {
     String(nNF).padStart(9, '0') +
     String(tpEmis) +
     String(cNF).padStart(8, '0');
-  // DV = modulo 11 dos 43 digitos, pesos 2-9 ciclicos do direita para esquerda
-  var weights = [2,3,4,5,6,7,8,9,2,3,4,5,6,7,8,9,2,3,4,5,6,7,8,9,2,3,4,5,6,7,8,9,2,3,4,5,6,7,8,9,2,3,4];
+  // DV = modulo 11 dos 43 digitos, pesos 2-9 ciclicos do DIREITA para ESQUERDA
+  // Para iterar da esquerda, o peso do digito i (0=esquerda, 42=direita) e:
+  //   pesos_ciclicos[(42 - i) % 8]
+  var cycle = [2,3,4,5,6,7,8,9];
   var sum = 0;
   for (var i = 0; i < 43; i++) {
-    sum += parseInt(key[i]) * weights[i];
+    sum += parseInt(key[i]) * cycle[(42 - i) % 8];
   }
   var remainder = sum % 11;
   var cDV = 11 - remainder;
