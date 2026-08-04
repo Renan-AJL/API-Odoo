@@ -36,11 +36,16 @@ async function enviarNFe(dadosOdoo) {
   console.log('[SIEG-API] Enviando NF-e XML (' + xml.length + ' chars)');
   console.log('[SIEG-API] XML COMPLETO GERADO:\n' + xml);
 
+  // Minificar XML: remover whitespace entre tags (o SIEG exige formato compacto)
+  // Preserva espaços dentro de texto de tags (xNome, xLgr, infCpl, etc.)
+  const xmlMin = xml.replace(/>\s+</g, '><');
+  console.log('[SIEG-API] XML minificado: ' + xmlMin.length + ' chars (economia: ' + (xml.length - xmlMin.length) + ')');
+
   const headers = await getAuthHeaders();
   let resp;
   try {
     resp = await axios.post(SIEG_BASE + '/api/v1/send-xml', {
-      Xml: Buffer.from(xml, 'utf-8').toString('base64'),
+      Xml: Buffer.from(xmlMin, 'utf-8').toString('base64'),
     }, { headers, timeout: 60000, validateStatus: function(s) { return s < 500; } });
   } catch (err) {
     console.error('[SIEG-API] Erro de conexao SIEG:', err.message);
