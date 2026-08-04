@@ -265,7 +265,7 @@ function gerarXmlNFe(data) {
     logField('  qCom', l.qty);
     logField('  vUnCom', l.price_unit);
     logField('  vProd', l.price_subtotal || (l.qty * l.price_unit));
-    logField('  CSOSN', l.csosn || '103');
+    logField('  CSOSN', l.csosn || '');
     logField('  CST_ICMS', l.cst_icms || '(vazio - usara CSOSN)');
     logField('  vICMS', l.vicms || '0.00');
     logField('  CST_PIS', l.cst_pis || '01');
@@ -406,6 +406,14 @@ ${xmlEndereco(partner, 'enderDest')}
     vCOFINS_total += parseFloat(line.vcofins || 0);
   });
 
+  // vTotTrib: soma dos tributos estimados por linha (ICMS + PIS + COFINS)
+  var vTotTrib = 0;
+  for (var vt = 0; vt < lines.length; vt++) {
+    vTotTrib += parseFloat(lines[vt].vicms || 0);
+    vTotTrib += parseFloat(lines[vt].vpis || 0);
+    vTotTrib += parseFloat(lines[vt].vcofins || 0);
+  }
+
   const vNF = num(order.amount_total || vProdTotal);
   xml += `
     <total>
@@ -431,7 +439,7 @@ ${xmlEndereco(partner, 'enderDest')}
         <vCOFINS>${num(vCOFINS_total)}</vCOFINS>
         <vOutro>0.00</vOutro>
         <vNF>${vNF}</vNF>
-        <vTotTrib>0.00</vTotTrib>
+        <vTotTrib>${num(vTotTrib)}</vTotTrib>
       </ICMSTot>
     </total>`;
 
@@ -468,7 +476,6 @@ ${xmlEndereco(partner, 'enderDest')}
     pag.forEach(p => {
       xml += `
       <detPag>
-        <indPag>1</indPag>
         <tPag>${p.tPag || '15'}</tPag>
         <vPag>${num(p.vPag)}</vPag>
       </detPag>`;
