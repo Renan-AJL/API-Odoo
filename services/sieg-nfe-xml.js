@@ -385,13 +385,13 @@ ${xmlEndereco(partner, 'enderDest')}
         <NCM>${esc(String(line.ncm || line.NCM || ''))}</NCM>
         <CFOP>${esc(String(line.cfop || '5102'))}</CFOP>
         <uCom>${esc(line.uom || 'UN')}</uCom>
-        <qCom>${num(line.qty)}</qCom>
-        <vUnCom>${num(line.price_unit)}</vUnCom>
+        <qCom>${num3(line.qty)}</qCom>
+        <vUnCom>${num3(line.price_unit)}</vUnCom>
         <vProd>${vProd}</vProd>
         <cEANTrib>SEM GTIN</cEANTrib>
         <uTrib>${esc(line.uom || 'UN')}</uTrib>
-        <qTrib>${num(line.qty)}</qTrib>
-        <vUnTrib>${num(line.price_unit)}</vUnTrib>
+        <qTrib>${num3(line.qty)}</qTrib>
+        <vUnTrib>${num3(line.price_unit)}</vUnTrib>
         <indTot>1</indTot>
       </prod>${xmlImpostoItem(line)}
     </det>`;
@@ -505,10 +505,15 @@ function esc(s) {
     .replace(/'/g, '&apos;');
 }
 
-function num(v) {
+function num(v, decimals) {
   if (v === null || v === undefined) return '0.00';
   const n = parseFloat(String(v).replace(',', '.'));
-  return isNaN(n) ? '0.00' : n.toFixed(2);
+  if (isNaN(n)) return decimals === 3 ? '0.000' : '0.00';
+  return n.toFixed(decimals || 2);
+}
+
+function num3(v) {
+  return num(v, 3);
 }
 
 function onlyNum(s) {
