@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://www.projetoacbr.com.br/forum/topic/66745-xml-nf-e-4-casas-decimais",
+    "name": "XML NF-e 4 casas decimais",
+    "snippet": "Apr 1, 2022 — Estou realizando a transmissão de uma nota fiscal eletrônica modelo 4.0 , na qual no XML de transmissão do ACBR, nas tags \" qCom - Quantidade ...",
+    "host_name": "www.projetoacbr.com.br",
+    "rank": 0,
+    "date": "Apr 1, 2022",
+    "favicon": ""
+  },
+  {
+    "url": "https://atendimento.tecnospeed.com.br/hc/pt-br/articles/360016531773-Regra-Tributaria-vUnCom-Valor-Unit%C3%A1rio-de-Comercializa%C3%A7%C3%A3o-da-NF-e",
+    "name": "vUnCom - Valor Unitário de Comercialização da NF-e",
+    "snippet": "Feb 8, 2022 — Para efeitos de cálculo o valor unitário será obtido pela divisão do valor do produto pela quantidade comercial. Campo numérico com 11 posições ...\nFeb 8, 2022 — NF -e existe o campo vUnCom - Valor Unitário de Comercialização da NF -e. Campo numérico com 11 posições e até 10 casas decimais .",
+    "host_name": "atendimento.tecnospeed.com.br",
+    "rank": 1,
+    "date": "Feb 8, 2022",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=OeljCPBB1ds=",
+    "name": "Nota Técnica 2013.005 - v.1.03 - Projeto Nota Fiscal Eletrônica",
+    "snippet": "NF - e com. Em toneladas - 4 casas decimais 137 J09 pesoB Peso Bruto E J01 C 1-1 1-9 Peso Bruto Total - em tonelada - 4 casas decimais 138 J10",
+    "host_name": "www.nfe.fazenda.gov.br",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://suporte.senior.com.br/hc/pt-br/articles/4408633912340-ERP-NF-e-Como-s%C3%A3o-gerados-os-valores-e-quantidades-no-XML-da-NF-e-no-que-tange-utiliza%C3%A7%C3%A3o-de-casas-decimais-tags-qCom-vUnCom-vUnTrib-qTrib",
+    "name": "Como são gerados os valores e quantidades no XML da NF-e",
+    "snippet": "Como são gerados os valores e quantidades no XML da NF - e no que tange utilização de casas decimais (tags qCom , vUnCom , vUnTrib, qTrib)?. Solução.\nComo são gerados os valores e quantidades no XML da NF-e no que tange utilização de casas decimais (tags qCom , vUnCom , vUnTrib, qTrib)?. Solução. Read more",
+    "host_name": "suporte.senior.com.br",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=3TUfSJK-8N0",
+    "name": "How to configure decimal places for products",
+    "snippet": "Como configurar as casas decimais para as quantidades e preços unitários no E -Trade http://vrsystem.info.",
+    "host_name": "www.youtube.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

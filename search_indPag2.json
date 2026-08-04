@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=eWTd1q6pRMM=",
+    "name": "Nota Técnica 2023.004 Informações de Pagamentos e Outros",
+    "snippet": "Feb 5, 2024 — Esta nota técnica tem o objetivo de prover aos atores envolvidos nos processos da NF - e /NFC-e a possibilidade de anotar no documento fiscal ... Read more",
+    "host_name": "www.nfe.fazenda.gov.br",
+    "rank": 0,
+    "date": "Feb 5, 2024",
+    "favicon": ""
+  },
+  {
+    "url": "https://atendimento.tecnospeed.com.br/hc/pt-br/articles/360015124194-Regra-Tributaria-indPag-Indicador-da-forma-de-pagamento-da-NF-e",
+    "name": "indPag - Indicador da forma de pagamento da NF-e",
+    "snippet": "Feb 8, 2022 — Na NF - e existe o campo indPag - Indicador da forma de pagamento da NF - e . Esse campo pode ser preenchido com os seguintes valores:. Read more",
+    "host_name": "atendimento.tecnospeed.com.br",
+    "rank": 1,
+    "date": "Feb 8, 2022",
+    "favicon": ""
+  },
+  {
+    "url": "https://blog.nstecnologia.com.br/formas-de-pagamento-da-nfe-nfce-4-0",
+    "name": "Quais as Formas de Pagamento da NFe 4.0 e NFCe 4.00?",
+    "snippet": "Mar 7, 2023 — Vamos mostrar as mudanças no detalhamento do pagamento e 5 exemplos diferentes de Formas de Pagamento da NFe 4.0 e na NFCe 4.0 . Nas novas ... Read more\nMar 7, 2023 — A partir de 05/04/2021 terão mudanças nos campos de formas de pagamentos da NFe e NFCe 4.00 conforme a NT 2020.006 v1.00. Confira AQUI ... Read more",
+    "host_name": "blog.nstecnologia.com.br",
+    "rank": 2,
+    "date": "Mar 7, 2023",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.projetoacbr.com.br/forum/topic/38104-sem-o-indicado-indpag-fica-obrigat%C3%B3rio-informar-o-grupo-pag-forma-de-pagamento-para-devolu%C3%A7%C3%A3o-de-mercadoria-nf-e-40",
+    "name": "Sem o Indicado \"indPag\" fica obrigatório informar o Grupo \"",
+    "snippet": "Aug 3, 2017 — Sem o Indicador da forma de pagamento \" indPag \" fica obrigatório informar o Grupo \"pag\" Forma de pagamento para Devolução de Mercadoria NF - e 4.0 ... Read more",
+    "host_name": "www.projetoacbr.com.br",
+    "rank": 3,
+    "date": "Aug 3, 2017",
+    "favicon": ""
+  },
+  {
+    "url": "https://suporte.starsoft.com.br/portal/pt/kb/articles/qual-a-regra-de-preenchimento-da-tag-indpag-no-xml-da-nf-e-br",
+    "name": "Qual a regra de preenchimento da TAG \"indPag\" no XML da",
+    "snippet": "... indPag que é a forma de pagamento da Nota Fiscal, nos seguintes critérios: 0 - À Vista (vencimento da parcela na mesma data da emissão da NF - e );. 1 - À Prazo ... Read more\nQual a regra de preenchimento da TAG \" indPag \" no XML da NF - e ?",
+    "host_name": "suporte.starsoft.com.br",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://github.com/cmendezs/mcp-nfe-br/blob/main/specs/nfe/xsd/leiauteNFe_v4.00.xsd",
+    "name": "mcp-nfe-br/specs/nfe/xsd/leiauteNFe_v4.00.xsd at main",
+    "snippet": "Model Context Protocol (MCP) server for Brazilian Electronic Invoicing (NF-e / NFC-e, modelo 55/65, schema 4.00). Provides CPF/CNPJ validation tools, with NF-e/NFC-e generation and SEFAZ integration planned. - mcp-nfe-br/specs/nfe/xsd/leiauteNFe_v4.00.xsd at main · cmendezs/mcp-nfe-br",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/Samuel-Oliveira/Java_NFe/blob/master/schemas/leiauteNFe_v4.00.xsd",
+    "name": "Java_NFe/schemas/leiauteNFe_v4.00.xsd at master · Samuel",
+    "snippet": "EventoInsucessoNFe_v1.00.xsd confRecebto_v1.00.xsd consCad_v2.00.xsd consReciNFe_v4.00.xsd consSitNFe_v4.00.xsd consStatServ_v4.00.xsd distDFeInt_v1.01.xsd",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/d2bridge/d2bridgeframework/blob/main/Stable/Demos/NFe_XML2PDF/bin/Win32/Debug/Schemas/NFe/leiauteNFe_v4.00.xsd",
+    "name": "leiauteNFe_v4.00.xsd",
+    "snippet": "d2bridge / d2bridgeframework Public Fork 25 Star 119 main d2bridgeframework / Stable / Demos / NFe_XML2PDF / bin / Win32 / Debug / Schemas / NFe /",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/nfephp-org/sped-nfe/blob/master/schemes/PL_009_V4/leiauteNFe_v4.00.xsd",
+    "name": "sped-nfe/schemes/PL_009_V4/leiauteNFe_v4.00.xsd at master",
+    "snippet": "consReciNFe_v3.10.xsd consReciNFe_v4.00.xsd consSitNFe_v3.10.xsd consSitNFe_v4.00.xsd consStatServ_v3.10.xsd consStatServ_v4.00.xsd distDFeInt_v1.00.xsd",
+    "host_name": "github.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/wmixvideo/nfe/blob/master/src/main/resources/schemas/PL_009_V4_2017_002/leiauteNFe_v4.00.xsd",
+    "name": "nfe/src/main/resources/schemas/PL_009_V4_2017_002  - GitHub",
+    "snippet": "Nota Fiscal Eletrônica em Java. Contribute to wmixvideo/nfe development by creating an account on GitHub.",
+    "host_name": "github.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

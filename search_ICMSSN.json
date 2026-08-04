@@ -1,0 +1,47 @@
+[
+  {
+    "url": "http://www.nfe.fazenda.gov.br/PORTal/exibirArquivo.aspx?conteudo=kyIo/HqJ3n0=",
+    "name": "[PDF] NT 2024.001- CRT MEI - Portal da Nota Fiscal Eletrônica",
+    "snippet": "Jun 10, 2024 · Essa Nota Técnica tem o objetivo de alterar campos e regras de validação para permitir a emissão de. NF-e/NFC-e nas operações por MEI utilizando ...",
+    "host_name": "www.nfe.fazenda.gov.br",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://flexdocs.net/guiaNFe/gerarNFe.detalhe.imp.ICMS.NT20005.CSOSN.html",
+    "name": "ICMS 4.00-CSOSN [obsoleto] - Guia de Uso da NFe_Util",
+    "snippet": "ICMS 4.00-CSOSN ・ 102 - Tributada pelo Simples Nacional sem permissão de crédito; 103 - Isenção do ICMS no Simples Nacional ・ dos códigos 103, 203, 300, 400, ...",
+    "host_name": "flexdocs.net",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://focusnfe.com.br/blog/csosn",
+    "name": "CSOSN: o que é esse código do Simples Nacional e pra que serve",
+    "snippet": "Jul 15, 2025 · O CSOSN será usado na Nota Fiscal somente quando o Código de Regime Tributário (CRT) for igual a “1” e substituirá os códigos da tabela B — ...",
+    "host_name": "focusnfe.com.br",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://ajuda.webmania.com.br/pt-BR/articles/12680770-csosn-o-que-significa-cada-codigo-de-situacao-tributaria-do-icms",
+    "name": "CSOSN - O que significa cada código de situação tributária do ICMS?",
+    "snippet": "Oct 28, 2025 · O CSOSN (Código de Situação da Operação no Simples Nacional) é composto por 4 dígitos, onde o 1º dígito indica a origem da mercadoria e os ...",
+    "host_name": "ajuda.webmania.com.br",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://blog.egestor.com.br/csosn",
+    "name": "CSOSN: o que é, tabela completa de códigos e como usar na NF-e",
+    "snippet": "Jun 2, 2026 · CSOSN 103 — Isenção do ICMS no Simples Nacional por faixa de receita. Use este código quando a faixa de receita bruta da empresa, dentro do ...",
+    "host_name": "blog.egestor.com.br",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

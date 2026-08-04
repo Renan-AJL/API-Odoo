@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://oobj.com.br/bc/como-formada-chave-acesso-dfe",
+    "name": "Como é formada a Chave de Acesso de uma NFe, NFCe, de  - Oobj",
+    "snippet": "Jun 12, 2024 · cNF – Código Numérico que compõe a Chave de Acesso;; cDV – Dígito Verificador da Chave de Acesso. Confira a distribuição pela quantidade de ...\nJun 12, 2024 — cDV – Dígito Verificador da Chave de Acesso . Confira a distribuição pela quantidade de caracteres de cada campo: Código da UF (cUF), AAMM da ...",
+    "host_name": "oobj.com.br",
+    "rank": 0,
+    "date": "Jun 12, 2024",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=6wb21O4RVtg=",
+    "name": "[PDF] Nota Técnica 2021.002 - Portal da Nota Fiscal Eletrônica",
+    "snippet": "A Chave de Acesso de NF-e emitida ao abrigo da NFF (tpEmis=3) possui uma regra de formação onde a série não identifica se a Chave de Acesso contém um CPF ou ...\nA chave de acesso da NFF será gerada pelo App NFF, utilizando os espaços destinados à serie e número da NF-e para, conforme mostrado na tabela a seguir, ...",
+    "host_name": "www.nfe.fazenda.gov.br",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://fiscalapi.com.br/blog/rejeicoes/rejeicao-484-chave-de-acesso-com-tipo-de-emissao-diferente-de-4-posicao",
+    "name": "Rejeição 484 — Chave de Acesso com tipo de emissão diferente de",
+    "snippet": "Apr 7, 2026 · A Rejeição 484 é retornada pela SEFAZ durante a validação da NF-e quando há uma inconsistência relacionada a chave de acesso que identifica ...\nApr 7, 2026 — A Rejeição 484 é retornada pela SEFAZ durante a validação da NF -e quando chave de acesso “ 4 ”(posição 35 da Chave de Acess. cDV NFe /infNFe/ ide / ...",
+    "host_name": "fiscalapi.com.br",
+    "rank": 2,
+    "date": "Apr 7, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://flexdocs.net/suporte/knowledgebase.php?article=119",
+    "name": "502 - Rejeição: Erro na Chave de Acesso - campo ID v2.00",
+    "snippet": "A NF-e está sendo rejeitada com o seguinte código: \"502 - Rejeição: Erro na Chave de Acesso - campo ID\" O que devo verificar?",
+    "host_name": "flexdocs.net",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://focusnfe.com.br/blog/como-e-formada-a-chave-de-acesso-de-nf-e-nfc-e-ct-e-e-mdf-e",
+    "name": "Chave de Acesso da NF: o que é e como ela é formada?",
+    "snippet": "Jun 13, 2025 · A chave natural é específica para cada transação e costuma ser visível no documento da nota fiscal. Possui a função de verificar notas fiscais ...\nJun 13, 2025 — A chave natural é específica para cada transação e costuma ser visível no documento da nota fiscal. Possui a função de verificar notas fiscais ...",
+    "host_name": "focusnfe.com.br",
+    "rank": 4,
+    "date": "Jun 13, 2025",
+    "favicon": ""
+  }
+]

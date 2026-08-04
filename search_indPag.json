@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://userapps.support.sap.com/sap/support/knowledge/en/2941031",
+    "name": "NF-e Technical Note 2024.001 Troubleshooting Guide",
+    "snippet": "Sep 23, 2024 — This SAP Knowledge Base Article aims to clarify questions about the Technical Note 2024.001 related to the Electronic Invoicing for Brazil. Read more\nThis SAP Knowledge Base Article aims to clarify questions about the Technical Note 2024.001 related to the Electronic Invoicing for Brazil (Nota Técnica 2024.001 da Nota Fiscal Eletrônica).",
+    "host_name": "userapps.support.sap.com",
+    "rank": 0,
+    "date": "Sep 23, 2024",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?tipoConteudo=BMPFMBoln3w=",
+    "name": "Esquemas XML - Portal da Nota Fiscal Eletrônica",
+    "snippet": "Esquema XML NF - e /NFC- e - Pacote de Liberação no 9o (Novo leiaute da NF - e , NT 2024.001 v.1.00) (ZIP). Publicado em 04/06/2024",
+    "host_name": "www.nfe.fazenda.gov.br",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://dfe-portal.svrs.rs.gov.br/NFe/Documentos",
+    "name": "Portal da Nota Fiscal Eletrônica - SVRS",
+    "snippet": "Schemas NF - e 009i da NT 2021.004. Publicada a versão “i” do Pacote de Liberação nº 9 dos esquemas XML da NF - e , que incorpora todas as alterações ... Read more",
+    "host_name": "dfe-portal.svrs.rs.gov.br",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://sapbr.com/2017/04/12/nfe-4-00-date-and-other-changes",
+    "name": "NFe 4.00 – Date and other changes",
+    "snippet": "Apr 12, 2017 — The most important is the deactivation date of the current 3.10 layout in production was pushed to April 2nd, 2018. Read more",
+    "host_name": "sapbr.com",
+    "rank": 3,
+    "date": "Apr 12, 2017",
+    "favicon": ""
+  },
+  {
+    "url": "https://atendimento.tecnospeed.com.br/hc/pt-br/articles/360015124194-Regra-Tributaria-indPag-Indicador-da-forma-de-pagamento-da-NF-e",
+    "name": "indPag - Indicador da forma de pagamento da NF-e",
+    "snippet": "Na NF - e existe o campo indPag - Indicador da forma de pagamento da NF - e . Esse campo pode ser preenchido com os seguintes valores:. Read more",
+    "host_name": "atendimento.tecnospeed.com.br",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

@@ -1,0 +1,83 @@
+[
+  {
+    "url": "https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?tipoConteudo=BMPFMBoln3w=",
+    "name": "Esquemas XML - Portal da Nota Fiscal Eletrônica",
+    "snippet": "Esquemas XML NF - e - Pacote de Liberação Distribuição. XML NFGas - Pacote de Liberação 1.00 e (ZIP) NF - e - Pacote de Liberação No. Publicado em 09/ 01 /2024 (ZIP)  ...",
+    "host_name": "www.nfe.fazenda.gov.br",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://dfe-portal.svrs.rs.gov.br/NFe/Documentos",
+    "name": "Portal da Nota Fiscal Eletrônica - SVRS",
+    "snippet": "Schemas NF - e 009g da NT 2020.005. Publicada a versão “g” do Pacote de Liberação nº 9 dos esquemas XML da NF - e , que incorpora todas as alterações introduzidas ...",
+    "host_name": "dfe-portal.svrs.rs.gov.br",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://atendimento.tecnospeed.com.br/hc/pt-br/articles/360015124194-Regra-Tributaria-indPag-Indicador-da-forma-de-pagamento-da-NF-e",
+    "name": "indPag - Indicador da forma de pagamento da NF-e",
+    "snippet": "Feb 8, 2022 — Na NF - e existe o campo indPag - Indicador da forma de pagamento da NF - e . Esse campo pode ser preenchido com os seguintes valores:.",
+    "host_name": "atendimento.tecnospeed.com.br",
+    "rank": 2,
+    "date": "Feb 8, 2022",
+    "favicon": ""
+  },
+  {
+    "url": "http://sped.rfb.gov.br/estatico/07/778E3F32D4E17E4A54F6BB7BA9EDA18CA9AC25/Manual_Integracao_Contribuinte_4.01-NT2009.006.pdf",
+    "name": "Manual de Integração Contribuinte versão 4.01-NT2009.006x",
+    "snippet": "Sep 21, 2009 — Os schemas válidos estão contidos no pacote de liberação e são identificados pelo seu nome, seguido da versão do respectivo schema . Assim ... 232 pages",
+    "host_name": "sped.rfb.gov.br",
+    "rank": 3,
+    "date": "Sep 21, 2009",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/nfephp-org/sped-nfe/blob/master/schemes/PL_009_V4/leiauteNFe_v4.00.xsd",
+    "name": "sped-nfe/schemes/PL_009_V4/leiauteNFe_v4.00.xsd",
+    "snippet": "1 - emissão de NF - e avulsa pelo Fisco;. 2 - emissão de NF - e avulsa, pelo contribuinte com seu certificado digital, através do site. do Fisco;. 3- emissão de NF ...",
+    "host_name": "github.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://cursosmodulos.com.br/Noticia/Reforma-Tributaria-novos-Schemas-para-NF-e-e-NFC-e-sao-divulgados",
+    "name": "novos Schemas para NF-e e NFC-e são divulgados",
+    "snippet": "Oct 7, 2025 — A NT 2025.002 tem como objetivo adequar os documentos fiscais eletrônicos ( NF - e e NFC-e) para contemplarem os novos tributos instituídos pela ...",
+    "host_name": "cursosmodulos.com.br",
+    "rank": 5,
+    "date": "Oct 7, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://suporte.starsoft.com.br/portal/pt/kb/articles/qual-a-regra-de-preenchimento-da-tag-indpag-no-xml-da-nf-e-br",
+    "name": "Qual a regra de preenchimento da TAG \"indPag\" no XML da",
+    "snippet": "O leiaute do XML da nota fiscal eletrônica do StarSoft Applications ® referente à tag indPag que é a forma de pagamento da Nota Fiscal, nos seguintes.",
+    "host_name": "suporte.starsoft.com.br",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.totvs.com/blog/fiscal-clientes/publicada-atualizacao-do-esquema-xml-da-nf-e-e-nfc-e",
+    "name": "Publicada atualização do schema XML da NF-e e NFC-e",
+    "snippet": "Foi liberado, no Portal da NF - e , em 20 de agosto de 2025, o schema XML – Pacote de Liberação nº 010b, versão 1.21, da Nota Fiscal Eletrônica ...",
+    "host_name": "www.totvs.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=h3mzP-AJWVw",
+    "name": "Technical Breakdown: What’s Changed in NT 2025.002 v1.40",
+    "snippet": "fisco #reformatributaria #nt2025002 A versão 1.40 da NT 2025.002 trouxe novos campos como o CNIOP, mudanças nas regras de compras ...",
+    "host_name": "www.youtube.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  }
+]
