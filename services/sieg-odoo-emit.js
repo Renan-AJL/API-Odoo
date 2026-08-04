@@ -448,7 +448,7 @@ async function readCompany(client, db, uid, pwd, companyId) {
     zip: c.zip || p.zip || '',
     city_ibge_code: cityIbge || '4106902',
     state_ibge: stateIbge || '41',
-    crt: '1',
+    crt: '3',
     phone: c.phone || p.phone || '',
     email: c.email || p.email || '',
     x_studio_sieg_ultimo_nfe: c.x_studio_sieg_ultimo_nfe || 0,
@@ -721,21 +721,22 @@ async function buildLineData(client, db, uid, pwd, line) {
     qty: line.quantity || 0, price_unit: line.price_unit || 0,
     price_subtotal: line.price_subtotal || (line.quantity * line.price_unit),
     detailed_type: detailedType,
-    csosn: tax.csosn || '103', orig: '0',
-    cst_icms: tax.cst_icms || '',
-    // Simples Nacional: ICMS isento (ICMSSN102), vBC/pICMS/vICMS = 0
-    vbc_icms: tax.csosn ? '0' : String(tax.vbc || 0),
-    vicms: tax.csosn ? '0' : String(tax.vicms || 0),
-    picms: tax.csosn ? '0' : String(tax.picms || 0),
-    // Simples Nacional: PIS/COFINS CST 01 com aliquotas reais (prova: XML aceito SIEG 29/07 usa pPIS=1.65, pCOFINS=7.60, vBC=0.00)
-    cst_pis: tax.csosn ? '01' : (tax.cst_pis || '01'),
-    vbc_pis: tax.csosn ? '0' : String(tax.vbc_pis || 0),
-    ppis: tax.csosn ? '1.65' : String(tax.ppis || 0),
-    vpis: tax.csosn ? '0' : String(tax.vpis || 0),
-    cst_cofins: tax.csosn ? '01' : (tax.cst_cofins || '01'),
-    vbc_cofins: tax.csosn ? '0' : String(tax.vbc_cofins || 0),
-    pcofins: tax.csosn ? '7.60' : String(tax.pcofins || 0),
-    vcofins: tax.csosn ? '0' : String(tax.vcofins || 0),
+    // Tributação Lucro Real (padrão) — sobrescrito se Odoo tiver impostos configurados
+    csosn: tax.csosn || '',
+    cst_icms: tax.cst_icms || '00',
+    mod_bc: tax.mod_bc || '3',
+    orig: '0',
+    vbc_icms: String(tax.vbc || 0),
+    vicms: String(tax.vicms || 0),
+    picms: String(tax.picms || 0),
+    cst_pis: tax.cst_pis || '01',
+    vbc_pis: String(tax.vbc_pis || 0),
+    ppis: String(tax.ppis || 0),
+    vpis: String(tax.vpis || 0),
+    cst_cofins: tax.cst_cofins || '01',
+    vbc_cofins: String(tax.vbc_cofins || 0),
+    pcofins: String(tax.pcofins || 0),
+    vcofins: String(tax.vcofins || 0),
     // NFS-e fields from product
     x_studio_c_trib_nac: prodStudio.c_trib_nac,
     x_studio_c_nbs: prodStudio.c_nbs,
@@ -755,12 +756,17 @@ async function buildLineData(client, db, uid, pwd, line) {
   console.log('[SIEG-EMIT-LINE]   vProd:      ' + lineData.price_subtotal);
   console.log('[SIEG-EMIT-LINE]   CSOSN:      ' + JSON.stringify(lineData.csosn));
   console.log('[SIEG-EMIT-LINE]   CST_ICMS:   ' + JSON.stringify(lineData.cst_icms));
+  console.log('[SIEG-EMIT-LINE]   modBC:      ' + JSON.stringify(lineData.mod_bc));
   console.log('[SIEG-EMIT-LINE]   vBC_ICMS:   ' + lineData.vbc_icms);
   console.log('[SIEG-EMIT-LINE]   vICMS:      ' + lineData.vicms);
   console.log('[SIEG-EMIT-LINE]   pICMS:      ' + lineData.picms);
   console.log('[SIEG-EMIT-LINE]   CST_PIS:    ' + JSON.stringify(lineData.cst_pis));
+  console.log('[SIEG-EMIT-LINE]   vBC_PIS:    ' + lineData.vbc_pis);
+  console.log('[SIEG-EMIT-LINE]   pPIS:       ' + lineData.ppis);
   console.log('[SIEG-EMIT-LINE]   vPIS:       ' + lineData.vpis);
   console.log('[SIEG-EMIT-LINE]   CST_COFINS: ' + JSON.stringify(lineData.cst_cofins));
+  console.log('[SIEG-EMIT-LINE]   vBC_COFINS: ' + lineData.vbc_cofins);
+  console.log('[SIEG-EMIT-LINE]   pCOFINS:    ' + lineData.pcofins);
   console.log('[SIEG-EMIT-LINE]   vCOFINS:    ' + lineData.vcofins);
 
   return lineData;
@@ -805,10 +811,24 @@ function buildServiceBlock(linesData, move) {
 // Tax Extraction
 // ============================================================
 async function extractTaxes(client, db, uid, pwd, line) {
+  // Padrão: Lucro Real (CRT 3) — CST 00, ICMS 18% PR interno
+  // PIS/COFINS não-cumulativo com base no valor do produto
+  var base = parseFloat(line.price_subtotal) || 0;
   var result = {
-    csosn: '103', cst_icms: '', vbc: 0, vicms: 0, picms: 0,
-    cst_pis: '01', vbc_pis: 0, ppis: 1.65, vpis: 0,
-    cst_cofins: '01', vbc_cofins: 0, pcofins: 7.60, vcofins: 0,
+    csosn: '',
+    cst_icms: '00',
+    mod_bc: '3',
+    vbc: base,
+    vicms: base * 0.18,
+    picms: 18.00,
+    cst_pis: '01',
+    vbc_pis: base,
+    ppis: 1.65,
+    vpis: base * 0.0165,
+    cst_cofins: '01',
+    vbc_cofins: base,
+    pcofins: 7.60,
+    vcofins: base * 0.076,
   };
 
   var taxIds = (line.tax_ids || []).map(function(t) { return Array.isArray(t) ? t[0] : t; }).filter(Boolean);
@@ -820,8 +840,8 @@ async function extractTaxes(client, db, uid, pwd, line) {
     ]]);
     if (!taxes || !taxes.length) return result;
 
-    var base = parseFloat(line.price_subtotal) || 0;
     var totalIcms = 0, totalPis = 0, totalCofins = 0;
+    var foundCsosn = '';
 
     for (var i = 0; i < taxes.length; i++) {
       var tax = taxes[i];
@@ -830,14 +850,28 @@ async function extractTaxes(client, db, uid, pwd, line) {
       if (n.indexOf('ICMS') >= 0 || n.indexOf('CSOSN') >= 0) {
         totalIcms += amt;
         var m = n.match(/(10[0-9]|20[0-9]|300|400|500|900)/);
-        if (m) result.csosn = m[1];
+        if (m) foundCsosn = m[1];
       } else if (n.indexOf('PIS') >= 0) { totalPis += amt; }
       else if (n.indexOf('COFINS') >= 0) { totalCofins += amt; }
     }
 
-    result.picms = totalIcms; result.vbc = base; result.vicms = base * (totalIcms / 100);
-    result.ppis = totalPis; result.vbc_pis = base; result.vpis = base * (totalPis / 100);
-    result.pcofins = totalCofins; result.vbc_cofins = base; result.vcofins = base * (totalCofins / 100);
+    // Sobrescreve defaults apenas se o Odoo tiver impostos reais configurados (> 0)
+    if (foundCsosn) {
+      result.csosn = foundCsosn;
+      result.cst_icms = '';
+    }
+    if (totalIcms > 0) {
+      result.picms = totalIcms;
+      result.vicms = base * (totalIcms / 100);
+    }
+    if (totalPis > 0) {
+      result.ppis = totalPis;
+      result.vpis = base * (totalPis / 100);
+    }
+    if (totalCofins > 0) {
+      result.pcofins = totalCofins;
+      result.vcofins = base * (totalCofins / 100);
+    }
   } catch (e) { console.warn('[SIEG-EMIT] Erro ao extrair impostos:', e.message); }
 
   return result;
