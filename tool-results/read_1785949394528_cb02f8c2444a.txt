@@ -1,0 +1,755 @@
+     1→/**
+     2→ * services/sieg-nfe-xml.js — Gerador de XML NF-e v4.00 a partir de dados Odoo
+     3→ * 
+     4→ * Gera o <NFe> para envio ao SIEG via POST /api/v1/send-xml
+     5→ * O SIEG adiciona: XMLDSig (assinatura) + envia à SEFAZ + retorna nfeProc
+     6→ * 
+     7→ * Baseado no XML real emitido pela AJL via SIEG (29/07/2026)
+     8→ */
+     9→
+    10→const NFE_NS = 'http://www.portalfiscal.inf.br/nfe';
+    11→
+    12→/**
+    13→ * Extrai numero do logradouro quando o campo 'number' esta vazio/S/N.
+    14→ * Odoo frequentemente armazena o endereco completo no campo 'street':
+    15→ *   "Avenida Juscelino Kubitschek de Oliveira, 7525"
+    16→ *   "Rua Bom Jesus, 212"
+    17→ *   "Rua Augusta, 1200 Sala 53"
+    18→ * Retorna { street, number }
+    19→ */
+    20→function parseStreetNumber(street, number) {
+    21→  if (!street) return { street: '', number: number || 'S/N' };
+    22→  // Se ja tem numero valido, retorna como esta
+    23→  if (number && number !== 'S/N' && String(number).trim() !== '') {
+    24→    return { street: street, number: String(number) };
+    25→  }
+    26→  // Padrão 1: "Logradouro, NNNN" (virgula + espaco + numero)
+    27→  var m = street.match(/^(.+?),\s*(\d+[\w]?(?:\s*[A-Za-zÀ-ÿ]+)?)\s*$/);
+    28→  if (m) return { street: m[1].trim(), number: m[2].trim() };
+    29→  // Padrao 2: "Logradouro, NNNN complemento" (virgula + numero + complemento)
+    30→  m = street.match(/^(.+?),\s*(\d+)\s+(.+)$/);
+    31→  if (m) return { street: m[1].trim(), number: m[2].trim() };
+    32→  // Padrao 3: "Logradouro NNNN" (espaco + numero no final, sem virgula)
+    33→  m = street.match(/^(.+?)\s+(\d+)\s*$/);
+    34→  if (m) return { street: m[1].trim(), number: m[2].trim() };
+    35→  // Nenhum padrao encontrado
+    36→  return { street: street, number: number || 'S/N' };
+    37→}
+    38→
+    39→/**
+    40→ * Preenche campos de endereço comuns (emit/dest)
+    41→ */
+    42→function xmlEndereco(end, tagPrefix) {
+    43→  if (!end) return '';
+    44→  // Separar logradouro e numero
+    45→  var parsed = parseStreetNumber(end.street || end.xLgr || '', end.number || end.nro);
+    46→  const parts = [];
+    47→  parts.push(`    <${tagPrefix}>`);
+    48→  parts.push(`      <xLgr>${esc(parsed.street)}</xLgr>`);
+    49→  parts.push(`      <nro>${esc(parsed.number)}</nro>`);
+    50→  if (end.street2 || end.xBairro) {
+    51→    parts.push(`      <xBairro>${esc(end.street2 || end.xBairro || '')}</xBairro>`);
+    52→  }
+    53→  parts.push(`      <cMun>${esc(String(end.city_ibge_code || end.cMun || ''))}</cMun>`);
+    54→  parts.push(`      <xMun>${esc(end.city || end.xMun || '')}</xMun>`);
+    55→  parts.push(`      <UF>${esc(end.state || end.UF || '')}</UF>`);
+    56→  parts.push(`      <CEP>${cepFmt(end.zip || end.CEP || '')}</CEP>`);
+    57→  parts.push(`      <cPais>1058</cPais>`);
+    58→  parts.push(`      <xPais>Brasil</xPais>`);
+    59→  if (end.phone || end.fone) {
+    60→    parts.push(`      <fone>${foneFmt(end.phone || end.fone || '')}</fone>`);
+    61→  }
+    62→  parts.push(`    </${tagPrefix}>`);
+    63→  return parts.join('\n');
+    64→}
+    65→
+    66→/**
+    67→ * Gera bloco de impostos por item — dinâmico baseado nos dados reais do Odoo
+    68→ * Suporta: ICMS (Simples Nacional CSOSN / Regime Normal CST), PIS, COFINS
+    69→ */
+    70→function xmlImpostoItem(line, crt, ibsInfo) {
+    71→  const csosn  = line.csosn  || '';
+    72→  const cstIcms = line.cst_icms || '';
+    73→  const orig   = line.orig   || '0';
+    74→  const modBC  = line.mod_bc || '';
+    75→  const vBC    = num(line.vbc_icms  || line.vbc  || '0.00');
+    76→  const vICMS  = num(line.vicms || '0.00');
+    77→  const pICMS  = num(line.picms || '0.00');
+    78→  const cstPis   = line.cst_pis   || '01';
+    79→  const baseItem = line.vbc_icms || line.vbc || line.price_subtotal || 0;
+    80→  const vBCPis   = num(line.vbc_pis   || baseItem || '0.00');
+    81→  const pPis     = num(line.ppis      || line.pis_aliquota || '0.00');
+    82→  const vPIS     = num(line.vpis      || '0.00');
+    83→  const cstCof   = line.cst_cofins || '01';
+    84→  const vBCCof   = num(line.vbc_cofins || baseItem || '0.00');
+    85→  const pCofins  = num(line.pcofins    || line.cofins_aliquota || '0.00');
+    86→  const vCOFINS  = num(line.vcofins    || '0.00');
+    87→
+    88→  // --- ICMS ---
+    89→  // Mapeamento CSOSN → Grupo XSD (NT 2024.001 / NF-e 4.00):
+    90→  //   CSOSN 101 → ICMSSN101
+    91→  //   CSOSN 102,103,300,400 → ICMSSN102
+    92→  //   CSOSN 201 → ICMSSN201
+    93→  //   CSOSN 202,203 → ICMSSN202
+    94→  //   CSOSN 500 → ICMSSN500
+    95→  //   CSOSN 900 → ICMSSN900
+    96→  let icmsBlock = '';
+    97→  if (csosn) {
+    98→    const csosnNum = csosn.replace(/\D/g, '');
+    99→    let tag = 'ICMSSN102'; // fallback
+   100→    if (csosnNum === '101') {
+   101→      tag = 'ICMSSN101';
+   102→    } else if (['102','103','300','400'].includes(csosnNum)) {
+   103→      tag = 'ICMSSN102';
+   104→    } else if (csosnNum === '201') {
+   105→      tag = 'ICMSSN201';
+   106→    } else if (['202','203'].includes(csosnNum)) {
+   107→      tag = 'ICMSSN202';
+   108→    } else if (csosnNum === '500') {
+   109→      tag = 'ICMSSN500';
+   110→    } else if (csosnNum === '900') {
+   111→      tag = 'ICMSSN900';
+   112→    }
+   113→
+   114→    if (csosnNum === '900') {
+   115→      icmsBlock = `<ICMS><${tag}><orig>${orig}</orig><CSOSN>${csosn}</CSOSN><vICMS>${vICMS}</vICMS><vBC>${vBC}</vBC><pICMS>${pICMS}</pICMS></${tag}></ICMS>`;
+   116→    } else {
+   117→      icmsBlock = `<ICMS><${tag}><orig>${orig}</orig><CSOSN>${csosn}</CSOSN></${tag}></ICMS>`;
+   118→    }
+   119→  } else if (cstIcms) {
+   120→    // Regime Normal: CST 00-90
+   121→    const cstNum = String(cstIcms).replace(/\D/g, '');
+   122→    let tag = 'ICMS' + cstNum;
+   123→    if (['00','10','20','30','40','41','50','51','60','70','90'].includes(cstNum)) {
+   124→      tag = 'ICMS' + cstNum;
+   125→    } else {
+   126→      tag = 'ICMS00';
+   127→    }
+   128→    icmsBlock = `<ICMS><${tag}><orig>${orig}</orig><CST>${cstIcms}</CST><modBC>${modBC || '0'}</modBC><vBC>${vBC}</vBC><pICMS>${pICMS}</pICMS><vICMS>${vICMS}</vICMS></${tag}></ICMS>`;
+   129→  } else {
+   130→    // Fallback CSOSN 103
+   131→    icmsBlock = `<ICMS><ICMSSN102><orig>${orig}</orig><CSOSN>103</CSOSN></ICMSSN102></ICMS>`;
+   132→  }
+   133→
+   134→  // --- PIS ---
+   135→  // PISAliq: CST 01,02,03 | PISNT: CST 04,05,06,07,08,09 | PISOutr: CST 49,50,51,52,53,54,55,56,60-75,98,99
+   136→  let pisBlock = '';
+   137→  const pisCstNum = String(cstPis).replace(/\D/g, '');
+   138→  if (['04','05','06','07','08','09'].includes(pisCstNum)) {
+   139→    pisBlock = `<PIS><PISNT><CST>${cstPis}</CST></PISNT></PIS>`;
+   140→  } else if (['01','02','03'].includes(pisCstNum)) {
+   141→    pisBlock = `<PIS><PISAliq><CST>${cstPis}</CST><vBC>${vBCPis}</vBC><pPIS>${pPis}</pPIS><vPIS>${vPIS}</vPIS></PISAliq></PIS>`;
+   142→  } else {
+   143→    pisBlock = `<PIS><PISOutr><CST>${cstPis}</CST><vBC>${vBCPis}</vBC><pPIS>${pPis}</pPIS><vPIS>${vPIS}</vPIS></PISOutr></PIS>`;
+   144→  }
+   145→
+   146→  // --- COFINS ---
+   147→  // COFINSAliq: CST 01,02,03 | COFINSNT: CST 04,05,06,07,08,09 | COFINSOutr: CST 49,50,51,52,53,54,55,56,60-75,98,99
+   148→  let cofinsBlock = '';
+   149→  const cofCstNum = String(cstCof).replace(/\D/g, '');
+   150→  if (['04','05','06','07','08','09'].includes(cofCstNum)) {
+   151→    cofinsBlock = `<COFINS><COFINSNT><CST>${cstCof}</CST></COFINSNT></COFINS>`;
+   152→  } else if (['01','02','03'].includes(cofCstNum)) {
+   153→    cofinsBlock = `<COFINS><COFINSAliq><CST>${cstCof}</CST><vBC>${vBCCof}</vBC><pCOFINS>${pCofins}</pCOFINS><vCOFINS>${vCOFINS}</vCOFINS></COFINSAliq></COFINS>`;
+   154→  } else {
+   155→    cofinsBlock = `<COFINS><COFINSOutr><CST>${cstCof}</CST><vBC>${vBCCof}</vBC><pCOFINS>${pCofins}</pCOFINS><vCOFINS>${vCOFINS}</vCOFINS></COFINSOutr></COFINS>`;
+   156→  }
+   157→
+   158→  // --- IPI ---
+   159→  // Emitir IPI somente quando o Odoo realmente fornecer o CST do item.
+   160→  let ipiBlock = '';
+   161→  if (String(crt || '') === '3' && line.cst_ipi) {
+   162→    const cstIpi = String(line.cst_ipi).replace(/\D/g, '').padStart(2, '0');
+   163→    const vBCIpi = num(line.vbc_ipi || '0.00');
+   164→    const pIpi   = num4(line.pipi || '0.00');
+   165→    const vIpi   = num(line.vipi || '0.00');
+   166→    const cEnq   = line.cenq || '999';
+   167→    if (['51','52','53','54','55'].includes(cstIpi)) {
+   168→      ipiBlock = `<IPI><cEnq>${cEnq}</cEnq><IPINT><CST>${cstIpi}</CST></IPINT></IPI>`;
+   169→    } else if (['00','49','50','99'].includes(cstIpi)) {
+   170→      ipiBlock = `<IPI><cEnq>${cEnq}</cEnq><IPITrib><CST>${cstIpi}</CST><vBC>${vBCIpi}</vBC><pIPI>${pIpi}</pIPI><vIPI>${vIpi}</vIPI></IPITrib></IPI>`;
+   171→    }
+   172→  }
+   173→
+   174→  // --- IBS/CBS (Reforma Tributaria - obrigatorio no layout vigente 2026) ---
+   175→  let ibsBlock = '';
+   176→  if (ibsInfo) {
+   177→    ibsBlock = `<IBSCBS><CST>${ibsInfo.cst}</CST><cClassTrib>${ibsInfo.cClassTrib}</cClassTrib>`
+   178→      + `<gIBSCBS><vBC>${ibsInfo.vBC}</vBC>`
+   179→      + `<gIBSUF><pIBSUF>${ibsInfo.pIBSUF}</pIBSUF><vIBSUF>${ibsInfo.vIBSUF}</vIBSUF></gIBSUF>`
+   180→      + `<gIBSMun><pIBSMun>${ibsInfo.pIBSMun}</pIBSMun><vIBSMun>${ibsInfo.vIBSMun}</vIBSMun></gIBSMun>`
+   181→      + `<vIBS>${ibsInfo.vIBS}</vIBS>`
+   182→      + `<gCBS><pCBS>${ibsInfo.pCBS}</pCBS><vCBS>${ibsInfo.vCBS}</vCBS></gCBS>`
+   183→      + `</gIBSCBS></IBSCBS>`;
+   184→  }
+   185→
+   186→  // Ordem exigida pelo XSD: ICMS, IPI, PIS, COFINS, IBSCBS
+   187→  return `<imposto>${icmsBlock}${ipiBlock}${pisBlock}${cofinsBlock}${ibsBlock}</imposto>`;
+   188→}
+   189→
+   190→/**
+   191→ * Calcula IBS/CBS de um item conforme o padrao do XML real da AJL:
+   192→ *   vBC = vProd - ICMS - PIS - COFINS (tributos "por dentro" excluidos)
+   193→ *   vIBSUF = vBC * pIBSUF% | vIBSMun = vBC * pIBSMun% | vCBS = vBC * pCBS%
+   194→ */
+   195→function calcIbsCbsItem(line, vProdNum, cfg) {
+   196→  const pIBSUF  = parseFloat(cfg.pIBSUF  != null ? cfg.pIBSUF  : (process.env.NFE_P_IBS_UF  || '0.10'));
+   197→  const pIBSMun = parseFloat(cfg.pIBSMun != null ? cfg.pIBSMun : (process.env.NFE_P_IBS_MUN || '0.00'));
+   198→  const pCBS    = parseFloat(cfg.pCBS    != null ? cfg.pCBS    : (process.env.NFE_P_CBS     || '0.90'));
+   199→  const vICMS   = parseFloat(line.vicms   || 0) || 0;
+   200→  const vPIS    = parseFloat(line.vpis    || 0) || 0;
+   201→  const vCOFINS = parseFloat(line.vcofins || 0) || 0;
+   202→  let base = vProdNum - vICMS - vPIS - vCOFINS;
+   203→  if (!(base > 0)) base = vProdNum;
+   204→  const vIBSUF  = round2(base * pIBSUF  / 100);
+   205→  const vIBSMun = round2(base * pIBSMun / 100);
+   206→  const vCBS    = round2(base * pCBS    / 100);
+   207→  return {
+   208→    cst: line.cst_ibscbs || cfg.cstIBSCBS || '000',
+   209→    cClassTrib: line.cclass_trib || cfg.cClassTrib || '000001',
+   210→    vBCNum: round2(base),
+   211→    vBC: num(base),
+   212→    pIBSUF: num4(pIBSUF), vIBSUF: num(vIBSUF), vIBSUFNum: vIBSUF,
+   213→    pIBSMun: num4(pIBSMun), vIBSMun: num(vIBSMun), vIBSMunNum: vIBSMun,
+   214→    vIBS: num(vIBSUF + vIBSMun), vIBSNum: round2(vIBSUF + vIBSMun),
+   215→    pCBS: num4(pCBS), vCBS: num(vCBS), vCBSNum: vCBS,
+   216→  };
+   217→}
+   218→
+   219→function round2(n) { return Math.round((parseFloat(n) || 0) * 100) / 100; }
+   220→
+   221→/**
+   222→ * Gera XML NF-e completo a partir dos dados extraidos do Odoo
+   223→ * 
+   224→ * @param {Object} data - Dados do Odoo (sale.order + company + partner + lines)
+   225→ * @param {Object} data.company - Dados da empresa (emitente)
+   226→ * @param {Object} data.partner - Dados do cliente (destinatario)
+   227→ * @param {Object} data.order - Dados do pedido
+   228→ * @param {Array}  data.lines - Linhas do pedido (produtos)
+   229→ * @param {Array}  [data.duplicatas] - Parcelas de cobranca
+   230→ * @param {Array}  [data.pagamentos] - Pagamentos recebidos
+   231→ * @param {Object} [data.config] - Configuracoes adicionais
+   232→ * @returns {string} XML string do <NFe>
+   233→ */
+   234→function gerarXmlNFe(data) {
+   235→  const { company, partner, order, lines, config: cfg = {} } = data;
+   236→  const dup = data.duplicatas || [];
+   237→  const pag = data.pagamentos || [];
+   238→
+   239→  // === Validacao de campos obrigatorios ===
+   240→  const cUF = company.state_ibge || '41';
+   241→  const cNF = randomCnf();
+   242→  const serie = cfg.serie || '100';
+   243→  const nNF = String(order.number || order.name || '1').replace(/\D/g, '');
+   244→  const dhEmi = formatDh(order.date_order || new Date().toISOString());
+   245→  const tpNF = '1'; // saida
+   246→  const idDest = calcIdDest(company.state || company.UF, partner.state || partner.UF);
+   247→  const cMunFG = company.city_ibge_code || '';
+   248→  const tpAmb = cfg.tpAmb || process.env.SIEG_TP_AMB || '1'; // 1=producao, 2=homologacao
+   249→  const finNFe = cfg.finNFe || '1'; // 1=normal
+   250→  const indFinal = (partner.is_consumer || partner.indFinal) ? '1' : '0';
+   251→  const indPres = cfg.indPres || process.env.NFE_IND_PRES || '9'; // 9=operacao nao presencial, outros
+   252→  const indIntermed = ['2','3','4'].includes(String(indPres)) ? (cfg.indIntermed || '0') : null;
+   253→  const ibsCbsAtivo = String(cfg.ibsCbs != null ? cfg.ibsCbs : (process.env.NFE_IBSCBS || 'true')) !== 'false';
+   254→  const verProc = cfg.verProc || 'Odoo19-SIEG-1.0';
+   255→
+   256→  // === VALIDACAO DETALHADA POR CAMPO ===
+   257→  var xmlErrors = [];
+   258→  var xmlWarnings = [];
+   259→
+   260→  console.log('[NFE-XML] ========== VALIDACAO CAMPOS XML ==========');
+   261→
+   262→  // --- Emitente ---
+   263→  console.log('[NFE-XML] [EMITENTE]');
+   264→  logField('cUF', cUF);
+   265→  logField('CNPJ', onlyNum(company.cnpj_cpf), !onlyNum(company.cnpj_cpf));
+   266→  logField('xNome', company.legal_name || company.xNome, !(company.legal_name || company.xNome));
+   267→  logField('xFant', company.name || company.xFant);
+   268→  logField('xLgr', company.street, !company.street);
+   269→  logField('nro', company.number || 'S/N');
+   270→  logField('xBairro', company.street2, !company.street2);
+   271→  logField('cMun', company.city_ibge_code, !company.city_ibge_code);
+   272→  logField('xMun', company.city, !company.city);
+   273→  logField('UF', company.state, !company.state);
+   274→  logField('CEP', company.zip, !company.zip);
+   275→  logField('fone', company.phone);
+   276→  logField('IE', company.inscr_est, !company.inscr_est);
+   277→  logField('CRT', company.crt || '1');
+   278→
+   279→  if (!onlyNum(company.cnpj_cpf)) xmlErrors.push('CNPJ emitente vazio');
+   280→  if (!company.inscr_est) xmlErrors.push('IE emitente vazia');
+   281→  if (!company.street) xmlErrors.push('Logradouro emitente vazio');
+   282→  if (!company.city_ibge_code) xmlErrors.push('cMunFG/cMun emitente vazio');
+   283→  if (!company.city) xmlWarnings.push('xMun emitente vazio');
+   284→  if (!company.state) xmlErrors.push('UF emitente vazia');
+   285→
+   286→  // --- Destinatario ---
+   287→  console.log('[NFE-XML] [DESTINATARIO]');
+   288→  var docDest2 = onlyNum(partner.cnpj_cpf || '');
+   289→  logField('CNPJ/CPF', docDest2, !docDest2);
+   290→  logField('xNome', partner.legal_name || partner.xNome, !(partner.legal_name || partner.xNome));
+   291→  logField('xLgr', partner.street, !partner.street);
+   292→  logField('nro', partner.number || 'S/N');
+   293→  logField('xBairro', partner.street2, !partner.street2);
+   294→  logField('cMun', partner.city_ibge_code, !partner.city_ibge_code);
+   295→  logField('xMun', partner.city, !partner.city);
+   296→  logField('UF', partner.state, !partner.state);
+   297→  logField('CEP', partner.zip, !partner.zip);
+   298→  logField('fone', partner.phone);
+   299→  logField('email', partner.email);
+   300→
+   301→  if (!docDest2) xmlErrors.push('CNPJ/CPF destinatario vazio');
+   302→  if (!(partner.legal_name || partner.xNome)) xmlErrors.push('Nome destinatario vazio');
+   303→  if (!partner.street) xmlErrors.push('Logradouro destinatario vazio');
+   304→  if (!partner.city_ibge_code) xmlErrors.push('cMun destinatario vazio');
+   305→  if (!partner.city) xmlWarnings.push('xMun destinatario vazio');
+   306→  if (!partner.state) xmlErrors.push('UF destinatario vazia');
+   307→
+   308→  // --- IDE ---
+   309→  console.log('[NFE-XML] [IDE]');
+   310→  logField('cMunFG', cMunFG, !cMunFG);
+   311→  logField('natOp', cfg.natOp || 'Venda de Mercadoria');
+   312→  logField('serie', serie);
+   313→  logField('nNF', nNF);
+   314→  logField('dhEmi', dhEmi);
+   315→  logField('tpAmb', tpAmb);
+   316→  logField('mod', cfg.mod || '55');
+   317→
+   318→  if (!cMunFG) xmlErrors.push('cMunFG vazio (empresa sem codigo IBGE da cidade)');
+   319→
+   320→  // --- Itens (linhas) ---
+   321→  lines.forEach(function(l, i) {
+   322→    console.log('[NFE-XML] [ITEM ' + (i+1) + ']');
+   323→    logField('  cProd', l.cProd || l.default_code, !(l.cProd || l.default_code));
+   324→    logField('  xProd', l.xProd || l.product_name);
+   325→    logField('  NCM', l.ncm || l.NCM, !(l.ncm || l.NCM));
+   326→    logField('  CFOP', l.cfop || '5102');
+   327→    logField('  uCom', l.uom || 'UN');
+   328→    logField('  qCom', l.qty);
+   329→    logField('  vUnCom', l.price_unit);
+   330→    logField('  vProd', l.price_subtotal || (l.qty * l.price_unit));
+   331→    logField('  CSOSN', l.csosn || '');
+   332→    logField('  CST_ICMS', l.cst_icms || '(vazio - usara CSOSN)');
+   333→    logField('  vICMS', l.vicms || '0.00');
+   334→    logField('  CST_PIS', l.cst_pis || '01');
+   335→    logField('  vPIS', l.vpis || '0.00');
+   336→    logField('  CST_COFINS', l.cst_cofins || '01');
+   337→    logField('  vCOFINS', l.vcofins || '0.00');
+   338→
+   339→    if (!(l.ncm || l.NCM)) xmlErrors.push('NCM vazio no item ' + (i+1) + ' (' + (l.xProd || l.product_name || '?') + ')');
+   340→    if (!(l.cProd || l.default_code)) xmlWarnings.push('cProd vazio no item ' + (i+1) + ' (codigo interno do produto)');
+   341→  });
+   342→
+   343→  // --- Totais / Pagamento ---
+   344→  // Calcular vProdTotal antes da validacao (usado nos logs)
+   345→  var vProdTotal = 0;
+   346→  for (var vi = 0; vi < lines.length; vi++) {
+   347→    vProdTotal += parseFloat(lines[vi].price_subtotal || (lines[vi].qty * lines[vi].price_unit));
+   348→  }
+   349→  console.log('[NFE-XML] [TOTAIS]');
+   350→  logField('vNF', order.amount_total || vProdTotal);
+   351→  logField('vProd', vProdTotal);
+   352→  if (pag.length > 0) {
+   353→    logField('tPag', pag[0].tPag || '15');
+   354→    logField('vPag', pag[0].vPag);
+   355→  } else {
+   356→    xmlWarnings.push('Nenhum pagamento informado (bloco <pag> vazio)');
+   357→  }
+   358→
+   359→  // --- Resumo da validacao ---
+   360→  console.log('[NFE-XML] ========== RESUMO VALIDACAO ==========');
+   361→  if (xmlErrors.length > 0) {
+   362→    console.error('[NFE-XML] *** ERROS (' + xmlErrors.length + ') — XML provavelmente sera REJEITADO ***');
+   363→    for (var e = 0; e < xmlErrors.length; e++) {
+   364→      console.error('[NFE-XML]   ERRO: ' + xmlErrors[e]);
+   365→    }
+   366→  }
+   367→  if (xmlWarnings.length > 0) {
+   368→    console.warn('[NFE-XML] *** AVISOS (' + xmlWarnings.length + ') ***');
+   369→    for (var w = 0; w < xmlWarnings.length; w++) {
+   370→      console.warn('[NFE-XML]   AVISO: ' + xmlWarnings[w]);
+   371→    }
+   372→  }
+   373→  if (xmlErrors.length === 0 && xmlWarnings.length === 0) {
+   374→    console.log('[NFE-XML] Todos os campos validados com sucesso!');
+   375→  }
+   376→  console.log('[NFE-XML] ========================================');
+   377→
+   378→  // Calcular cDV e adicionar Id na infNFe (obrigatorio pelo schema NF-e 4.00)
+   379→  var tpEmis = '1';
+   380→  var accessKey = calcAccessKey(cUF, dhEmi, company.cnpj_cpf, '55', serie, nNF, tpEmis, cNF);
+   381→  var cDV = accessKey[43];
+   382→  console.log('[NFE-XML] cDV calculado: ' + cDV + ' (chave sem DV: ' + accessKey.slice(0, 43) + ')');
+   383→
+   384→  let xml = `<?xml version="1.0" encoding="UTF-8"?>
+   385→<NFe xmlns="${NFE_NS}">
+   386→  <infNFe versao="4.00" Id="NFe${accessKey}">
+   387→    <ide>
+   388→      <cUF>${cUF}</cUF>
+   389→      <cNF>${cNF}</cNF>
+   390→      <natOp>${esc(cfg.natOp || 'Venda de Mercadoria')}</natOp>
+   391→      <mod>55</mod>
+   392→      <serie>${serie}</serie>
+   393→      <nNF>${nNF}</nNF>
+   394→      <dhEmi>${dhEmi}</dhEmi>
+   395→      <dhSaiEnt>${dhEmi}</dhSaiEnt>
+   396→      <tpNF>${tpNF}</tpNF>
+   397→      <idDest>${idDest}</idDest>
+   398→      <cMunFG>${cMunFG}</cMunFG>${ibsCbsAtivo ? `
+   399→      <cMunFGIBS>${cMunFG}</cMunFGIBS>` : ''}
+   400→      <tpImp>1</tpImp>
+   401→      <tpEmis>${tpEmis}</tpEmis>
+   402→      <cDV>${cDV}</cDV>
+   403→      <tpAmb>${tpAmb}</tpAmb>
+   404→      <finNFe>${finNFe}</finNFe>
+   405→      <indFinal>${indFinal}</indFinal>
+   406→      <indPres>${indPres}</indPres>${indIntermed ? `
+   407→      <indIntermed>${indIntermed}</indIntermed>` : ''}
+   408→      <procEmi>0</procEmi>
+   409→      <verProc>${esc(verProc)}</verProc>
+   410→    </ide>`;
+   411→
+   412→  // === emit ===
+   413→  xml += `
+   414→    <emit>
+   415→      <CNPJ>${onlyNum(company.cnpj_cpf)}</CNPJ>
+   416→      <xNome>${esc(company.legal_name || company.xNome)}</xNome>
+   417→      <xFant>${esc(company.name || company.xFant || '')}</xFant>
+   418→${xmlEndereco(company, 'enderEmit')}
+   419→      <IE>${onlyNum(company.inscr_est || company.IE || '')}</IE>
+   420→      <CRT>${company.crt || '1'}</CRT>
+   421→    </emit>`;
+   422→
+   423→  // === dest ===
+   424→  const docDest = onlyNum(partner.cnpj_cpf || '');
+   425→  const destTag = docDest.length === 14 ? 'CNPJ' : (docDest.length === 11 ? 'CPF' : '');
+   426→  const indIEDest = calcIndIEDest(partner);
+   427→
+   428→  xml += `
+   429→    <dest>
+   430→      ${destTag ? `<${destTag}>${docDest}</${destTag}>` : '<CPF>00000000000</CPF>'}
+   431→      <xNome>${esc(partner.legal_name || partner.xNome || '')}</xNome>
+   432→${xmlEndereco(partner, 'enderDest')}
+   433→      <indIEDest>${indIEDest}</indIEDest>${partner.inscr_est ? `
+   434→      <IE>${onlyNum(partner.inscr_est)}</IE>` : ''}${partner.email ? `
+   435→      <email>${esc(partner.email)}</email>` : ''}
+   436→    </dest>`;
+   437→
+   438→  // === det (items) ===
+   439→  const ibsTot = { vBC: 0, vIBSUF: 0, vIBSMun: 0, vIBS: 0, vCBS: 0 };
+   440→  lines.forEach((line, idx) => {
+   441→    const nItem = String(idx + 1);
+   442→    const vProdNum = round2(line.price_subtotal || (line.qty * line.price_unit));
+   443→    const vProd = num(vProdNum);
+   444→    // vProdTotal ja foi calculado no bloco de validacao acima
+   445→    const ibsItem = ibsCbsAtivo ? calcIbsCbsItem(line, vProdNum, cfg) : null;
+   446→    if (ibsItem) {
+   447→      ibsTot.vBC     += ibsItem.vBCNum;
+   448→      ibsTot.vIBSUF  += ibsItem.vIBSUFNum;
+   449→      ibsTot.vIBSMun += ibsItem.vIBSMunNum;
+   450→      ibsTot.vIBS    += ibsItem.vIBSNum;
+   451→      ibsTot.vCBS    += ibsItem.vCBSNum;
+   452→    }
+   453→
+   454→    xml += `
+   455→    <det nItem="${nItem}">
+   456→      <prod>
+   457→        <cProd>${esc(String(line.default_code || line.cProd || ''))}</cProd>
+   458→        <cEAN>${line.barcode || 'SEM GTIN'}</cEAN>
+   459→        <xProd>${esc(line.product_name || line.xProd || '')}</xProd>
+   460→        <NCM>${esc(String(line.ncm || line.NCM || ''))}</NCM>
+   461→        <CFOP>${esc(String(line.cfop || '5102'))}</CFOP>
+   462→        <uCom>${esc(line.uom || 'UN')}</uCom>
+   463→        <qCom>${num3(line.qty)}</qCom>
+   464→        <vUnCom>${num3(line.price_unit)}</vUnCom>
+   465→        <vProd>${vProd}</vProd>
+   466→        <cEANTrib>SEM GTIN</cEANTrib>
+   467→        <uTrib>${esc(line.uom || 'UN')}</uTrib>
+   468→        <qTrib>${num3(line.qty)}</qTrib>
+   469→        <vUnTrib>${num3(line.price_unit)}</vUnTrib>
+   470→        <indTot>1</indTot>
+   471→      </prod>${xmlImpostoItem(line, company.crt || '1', ibsItem)}${ibsItem ? `
+   472→      <vItem>${vProd}</vItem>` : ''}
+   473→    </det>`;
+   474→  });
+   475→
+   476→  // === total (somar impostos reais das linhas) ===
+   477→  let vBC_total = 0, vICMS_total = 0, vPIS_total = 0, vCOFINS_total = 0;
+   478→  lines.forEach(line => {
+   479→    vBC_total += parseFloat(line.vbc_icms || line.vbc || 0);
+   480→    vICMS_total += parseFloat(line.vicms || 0);
+   481→    vPIS_total += parseFloat(line.vpis || 0);
+   482→    vCOFINS_total += parseFloat(line.vcofins || 0);
+   483→  });
+   484→
+   485→  // vTotTrib: soma dos tributos estimados por linha (ICMS + PIS + COFINS)
+   486→  var vTotTrib = 0;
+   487→  for (var vt = 0; vt < lines.length; vt++) {
+   488→    vTotTrib += parseFloat(lines[vt].vicms || 0);
+   489→    vTotTrib += parseFloat(lines[vt].vpis || 0);
+   490→    vTotTrib += parseFloat(lines[vt].vcofins || 0);
+   491→  }
+   492→
+   493→  const vNF = num(order.amount_total || vProdTotal);
+   494→  xml += `
+   495→    <total>
+   496→      <ICMSTot>
+   497→        <vBC>${num(vBC_total)}</vBC>
+   498→        <vICMS>${num(vICMS_total)}</vICMS>
+   499→        <vICMSDeson>0.00</vICMSDeson>
+   500→        <vFCP>0.00</vFCP>
+   501→        <vBCST>0.00</vBCST>
+   502→        <vST>0.00</vST>
+   503→        <vFCPST>0.00</vFCPST>
+   504→        <vFCPSTRet>0.00</vFCPSTRet>
+   505→        <vProd>${num(vProdTotal)}</vProd>
+   506→        <vFrete>0.00</vFrete>
+   507→        <vSeg>0.00</vSeg>
+   508→        <vDesc>0.00</vDesc>
+   509→        <vII>0.00</vII>
+   510→        <vIPI>0.00</vIPI>
+   511→        <vIPIDevol>0.00</vIPIDevol>
+   512→        <vPIS>${num(vPIS_total)}</vPIS>
+   513→        <vCOFINS>${num(vCOFINS_total)}</vCOFINS>
+   514→        <vOutro>0.00</vOutro>
+   515→        <vNF>${vNF}</vNF>
+   516→        <vTotTrib>${num(vTotTrib)}</vTotTrib>
+   517→      </ICMSTot>${ibsCbsAtivo ? `
+   518→      <IBSCBSTot>
+   519→        <vBCIBSCBS>${num(ibsTot.vBC)}</vBCIBSCBS>
+   520→        <gIBS>
+   521→          <gIBSUF><vDif>0.00</vDif><vDevTrib>0.00</vDevTrib><vIBSUF>${num(ibsTot.vIBSUF)}</vIBSUF></gIBSUF>
+   522→          <gIBSMun><vDif>0.00</vDif><vDevTrib>0.00</vDevTrib><vIBSMun>${num(ibsTot.vIBSMun)}</vIBSMun></gIBSMun>
+   523→          <vIBS>${num(ibsTot.vIBS)}</vIBS>
+   524→          <vCredPres>0.00</vCredPres>
+   525→          <vCredPresCondSus>0.00</vCredPresCondSus>
+   526→        </gIBS>
+   527→        <gCBS>
+   528→          <vDif>0.00</vDif>
+   529→          <vDevTrib>0.00</vDevTrib>
+   530→          <vCBS>${num(ibsTot.vCBS)}</vCBS>
+   531→          <vCredPres>0.00</vCredPres>
+   532→          <vCredPresCondSus>0.00</vCredPresCondSus>
+   533→        </gCBS>
+   534→      </IBSCBSTot>
+   535→      <vNFTot>${num(round2(parseFloat(vNF) + ibsTot.vIBS + ibsTot.vCBS))}</vNFTot>` : ''}
+   536→    </total>`;
+   537→
+   538→  // === transp ===
+   539→  const modFrete = String(cfg.modFrete || '9');
+   540→  const hasVolume = cfg.qVol != null && Number(cfg.qVol) > 0;
+   541→  xml += `
+   542→    <transp>
+   543→      <modFrete>${modFrete}</modFrete>${hasVolume ? `
+   544→      <vol>
+   545→        <qVol>${Math.trunc(Number(cfg.qVol))}</qVol>
+   546→      </vol>` : ''}
+   547→    </transp>`;
+   548→
+   549→  // === cobr (duplicatas) ===
+   550→  if (dup.length > 0) {
+   551→    xml += `
+   552→    <cobr>
+   553→      <fat>
+   554→        <nFat>${esc(String(order.name || nNF))}</nFat>
+   555→        <vOrig>${vNF}</vOrig>
+   556→        <vDesc>0.00</vDesc>
+   557→        <vLiq>${vNF}</vLiq>
+   558→      </fat>`;
+   559→    dup.forEach((d, i) => {
+   560→      xml += `
+   561→      <dup>
+   562→        <nDup>${String(i + 1).padStart(3, '0')}</nDup>
+   563→        <dVenc>${d.dVenc || ''}</dVenc>
+   564→        <vDup>${num(d.vDup)}</vDup>
+   565→      </dup>`;
+   566→    });
+   567→    xml += `\n    </cobr>`;
+   568→  }
+   569→
+   570→  // === pag ===
+   571→  if (pag.length > 0) {
+   572→    xml += `\n    <pag>`;
+   573→    pag.forEach(p => {
+   574→      xml += `
+   575→      <detPag>
+   576→        <tPag>${p.tPag || '15'}</tPag>
+   577→        <vPag>${num(p.vPag)}</vPag>
+   578→      </detPag>`;
+   579→    });
+   580→    xml += `\n    </pag>`;
+   581→  }
+   582→
+   583→  // === infAdic ===
+   584→  var infCplText = stripHtml(order.note || order.infCpl || '');
+   585→  if (infCplText) {
+   586→    xml += `\n    <infAdic>
+   587→      <infCpl>${esc(infCplText.substring(0, 2000))}</infCpl>
+   588→    </infAdic>`;
+   589→  }
+   590→
+   591→  // === infRespTec (obrigatorio na NF-e 4.00 desde a NT 2018.005) ===
+   592→  var respCnpj = onlyNum(cfg.respTecCnpj || process.env.NFE_RESP_TEC_CNPJ || '');
+   593→  var respNome = cfg.respTecContato || process.env.NFE_RESP_TEC_CONTATO || '';
+   594→  var respEmail = cfg.respTecEmail || process.env.NFE_RESP_TEC_EMAIL || '';
+   595→  var respFone = onlyNum(cfg.respTecFone || process.env.NFE_RESP_TEC_FONE || '');
+   596→  if (respCnpj && respNome && respEmail && respFone) {
+   597→    xml += `\n    <infRespTec>
+   598→      <CNPJ>${respCnpj}</CNPJ>
+   599→      <xContato>${esc(respNome)}</xContato>
+   600→      <email>${esc(respEmail)}</email>
+   601→      <fone>${respFone}</fone>
+   602→    </infRespTec>`;
+   603→  } else {
+   604→    console.error('[NFE-XML] *** infRespTec ausente — configure NFE_RESP_TEC_CNPJ, NFE_RESP_TEC_CONTATO, NFE_RESP_TEC_EMAIL e NFE_RESP_TEC_FONE. O XML sera rejeitado sem esse grupo. ***');
+   605→  }
+   606→
+   607→  xml += `\n  </infNFe>\n</NFe>`;
+   608→  return xml;
+   609→}
+   610→
+   611→// === Helper functions ===
+   612→
+   613→function stripHtml(s) {
+   614→  if (!s) return '';
+   615→  return String(s).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').trim();
+   616→}
+   617→
+   618→function esc(s) {
+   619→  if (!s) return '';
+   620→  return String(s)
+   621→    .replace(/&/g, '&amp;')
+   622→    .replace(/</g, '&lt;')
+   623→    .replace(/>/g, '&gt;')
+   624→    .replace(/"/g, '&quot;')
+   625→    .replace(/'/g, '&apos;');
+   626→}
+   627→
+   628→function num(v, decimals) {
+   629→  if (v === null || v === undefined) return '0.00';
+   630→  const n = parseFloat(String(v).replace(',', '.'));
+   631→  if (isNaN(n)) return decimals === 3 ? '0.000' : '0.00';
+   632→  return n.toFixed(decimals || 2);
+   633→}
+   634→
+   635→function num4(v) {
+   636→  const n = parseFloat(String(v == null ? 0 : v).replace(',', '.'));
+   637→  return (isNaN(n) ? 0 : n).toFixed(4);
+   638→}
+   639→
+   640→function num3(v) {
+   641→  return num(v, 3);
+   642→}
+   643→
+   644→function onlyNum(s) {
+   645→  return String(s || '').replace(/\D/g, '');
+   646→}
+   647→
+   648→function cepFmt(s) {
+   649→  return onlyNum(s);
+   650→}
+   651→
+   652→function foneFmt(s) {
+   653→  return onlyNum(s);
+   654→}
+   655→
+   656→function randomCnf() {
+   657→  return String(Math.floor(10000000 + Math.random() * 90000000));
+   658→}
+   659→
+   660→function formatDh(iso) {
+   661→  // 2026-07-29T07:56:51-03:00
+   662→  if (!iso) {
+   663→    const now = new Date();
+   664→    const offset = -now.getTimezoneOffset();
+   665→    const offH = String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0');
+   666→    const offM = String(Math.abs(offset) % 60).padStart(2, '0');
+   667→    const sign = offset >= 0 ? '+' : '-';
+   668→    return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}T${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}${sign}${offH}:${offM}`;
+   669→  }
+   670→  var str = String(iso).trim();
+   671→
+   672→  // Odoo (XML-RPC) devolve "YYYY-MM-DD HH:MM:SS" em UTC, sem 'T' e sem offset.
+   673→  // Converter para horario de Brasilia (-03:00) no formato exigido pelo XSD.
+   674→  var mOdoo = str.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
+   675→  if (mOdoo) {
+   676→    var utc = Date.UTC(+mOdoo[1], +mOdoo[2] - 1, +mOdoo[3], +mOdoo[4], +mOdoo[5], +(mOdoo[6] || 0));
+   677→    var d = new Date(utc - 3 * 3600 * 1000);
+   678→    return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()) +
+   679→           'T' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes()) + ':' + pad2(d.getUTCSeconds()) + '-03:00';
+   680→  }
+   681→
+   682→  // Ja veio com data + hora + offset (ISO completo)
+   683→  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})$/.test(str)) {
+   684→    var dIso = new Date(str);
+   685→    if (!isNaN(dIso.getTime())) {
+   686→      var b = new Date(dIso.getTime() - 3 * 3600 * 1000);
+   687→      return b.getUTCFullYear() + '-' + pad2(b.getUTCMonth() + 1) + '-' + pad2(b.getUTCDate()) +
+   688→             'T' + pad2(b.getUTCHours()) + ':' + pad2(b.getUTCMinutes()) + ':' + pad2(b.getUTCSeconds()) + '-03:00';
+   689→    }
+   690→  }
+   691→
+   692→  // Apenas data "YYYY-MM-DD"
+   693→  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str + 'T00:00:00-03:00';
+   694→
+   695→  // Fallback: nao arriscar um valor invalido no XML — usar agora
+   696→  console.warn('[NFE-XML] dhEmi em formato desconhecido ("' + str + '"), usando data/hora atual');
+   697→  return formatDh(null);
+   698→}
+   699→
+   700→function pad2(n) { return String(n).padStart(2, '0'); }
+   701→
+   702→function calcIdDest(ufEmit, ufDest) {
+   703→  if (!ufEmit || !ufDest) return '1';
+   704→ if (ufEmit === ufDest) return '1'; // mesma UF
+   705→ if (ufDest === 'EX') return '3'; // exterior
+   706→ return '2'; // fora UF
+   707→}
+   708→
+   709→function calcIndIEDest(partner) {
+   710→  const ie = partner.inscr_est || '';
+   711→  const uf = partner.state || partner.UF || '';
+   712→  if (!ie || onlyNum(ie) === 'ISENTO' || onlyNum(ie) === '') return '9';
+   713→  return '1'; // contribuinte ICMS
+   714→}
+   715→
+   716→function logField(fieldName, value, isError) {
+   717→  var displayVal = value === undefined || value === null ? '(undefined)' : JSON.stringify(value);
+   718→  if (isError) {
+   719→    console.error('[NFE-XML]   ' + fieldName + ': ' + displayVal + ' *** VAZIO/INVALIDO ***');
+   720→  } else {
+   721→    console.log('[NFE-XML]   ' + fieldName + ': ' + displayVal);
+   722→  }
+   723→}
+   724→
+   725→/**
+   726→ * Calcula a chave de acesso da NF-e (44 digitos) com DV.
+   727→ * Formato: cUF(2) + AAMM(4) + CNPJ(14) + mod(2) + serie(3) + nNF(9) + tpEmis(1) + cNF(8) + cDV(1) = 44
+   728→ */
+   729→function calcAccessKey(cUF, dhEmi, cnpj, mod, serie, nNF, tpEmis, cNF) {
+   730→  var aamm = dhEmi.slice(2, 4) + dhEmi.slice(5, 7);
+   731→  var key =
+   732→    String(cUF).padStart(2, '0') +
+   733→    aamm +
+   734→    onlyNum(cnpj).padStart(14, '0') +
+   735→    String(mod).padStart(2, '0') +
+   736→    String(serie).padStart(3, '0') +
+   737→    String(nNF).padStart(9, '0') +
+   738→    String(tpEmis) +
+   739→    String(cNF).padStart(8, '0');
+   740→  // DV = modulo 11 dos 43 digitos, pesos 2-9 ciclicos do DIREITA para ESQUERDA
+   741→  // Para iterar da esquerda, o peso do digito i (0=esquerda, 42=direita) e:
+   742→  //   pesos_ciclicos[(42 - i) % 8]
+   743→  var cycle = [2,3,4,5,6,7,8,9];
+   744→  var sum = 0;
+   745→  for (var i = 0; i < 43; i++) {
+   746→    sum += parseInt(key[i]) * cycle[(42 - i) % 8];
+   747→  }
+   748→  var remainder = sum % 11;
+   749→  var cDV = 11 - remainder;
+   750→  if (cDV === 10 || cDV === 11) cDV = 0;
+   751→  return key + String(cDV);
+   752→}
+   753→
+   754→module.exports = { gerarXmlNFe };
+   755→
