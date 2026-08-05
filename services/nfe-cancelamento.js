@@ -22,12 +22,15 @@ var ENVELOPED = 'http://www.w3.org/2000/09/xmldsig#enveloped-signature';
 var SHA1      = 'http://www.w3.org/2000/09/xmldsig#sha1';
 var RSA_SHA1  = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1';
 
-/** Formata data-hora no padrão SEFAZ: YYYY-MM-DDTHH:MM:SS-03:00 */
+/** Formata data-hora no padrão SEFAZ: YYYY-MM-DDTHH:MM:SS-03:00
+ *  O servidor pode estar em UTC (Render). Converte UTC -> BRT (UTC-3) explicitamente.
+ */
 function dhEvento() {
-  var d = new Date();
+  // Pega o timestamp UTC e subtrai 3h para obter horário de Brasília
+  var d = new Date(Date.now() - 3 * 60 * 60 * 1000);
   var pad = function(n) { return String(n).padStart(2, '0'); };
-  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
-    + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds())
+  return d.getUTCFullYear() + '-' + pad(d.getUTCMonth()+1) + '-' + pad(d.getUTCDate())
+    + 'T' + pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes()) + ':' + pad(d.getUTCSeconds())
     + '-03:00';
 }
 
