@@ -119,7 +119,9 @@ async function cancelarNFe(opts) {
   console.log('[NFE-CANCEL] Enviando cancelamento chave=' + chave + ' prot=' + protocolo + ' -> ' + baseUrl);
 
   // -------- Enviar via SOAP --------
-  var respXml = await soapPost(baseUrl, 'NFeRecepcaoEvento4', xmlLote, 30000);
+  var respRaw = await soapPost(baseUrl, 'NFeRecepcaoEvento4', xmlLote, 30000);
+  var respXml = typeof respRaw === 'string' ? respRaw : (respRaw && respRaw.xml ? String(respRaw.xml) : '');
+  console.log('[NFE-CANCEL] HTTP status=' + (respRaw && respRaw.status) + ' xml_len=' + respXml.length);
 
   var cStat   = tag(respXml, 'cStat');
   var xMotivo = tag(respXml, 'xMotivo');
