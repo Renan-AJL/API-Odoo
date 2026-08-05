@@ -247,7 +247,10 @@ function gerarXmlNFe(data) {
   const cMunFG = company.city_ibge_code || '';
   const tpAmb = cfg.tpAmb || process.env.SIEG_TP_AMB || '2'; // 2=homologacao (padrao seguro), 1=producao — defina SIEG_TP_AMB=1 para producao
   const finNFe = cfg.finNFe || '1'; // 1=normal
-  const indFinal = (partner.is_consumer || partner.indFinal) ? '1' : '0';
+  // indFinal: '1' quando consumidor final OU quando nao contribuinte (indIEDest=9)
+  // Regra SEFAZ cStat 696: operacao com nao contribuinte DEVE ter indFinal=1
+  const _indIEDestCalc = calcIndIEDest(partner);
+  const indFinal = (partner.is_consumer || partner.indFinal || _indIEDestCalc === '9') ? '1' : '0';
   const indPres = cfg.indPres || process.env.NFE_IND_PRES || '9'; // 9=operacao nao presencial, outros
   // indIntermed obrigatorio quando indPres = 2, 3, 4 ou 9 (NT2015.003 / cStat 434 SEFAZ PR)
   const indIntermed = ['2','3','4','9'].includes(String(indPres)) ? (cfg.indIntermed || '0') : null;
