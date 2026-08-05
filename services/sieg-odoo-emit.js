@@ -674,21 +674,13 @@ async function buildLineData(client, db, uid, pwd, line) {
         }
       }
 
-      // x_studio fields (NFS-e e customizacoes — podem nao existir)
+      // x_studio fields documentados neste Odoo (NFS-e e customizacoes)
       try {
         var prods2 = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
           'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code',
-          'x_studio_ncm',
         ]]);
         if (prods2 && prods2[0]) {
           var pr2 = prods2[0];
-          console.log('[SIEG-EMIT-NCM] x_studio_ncm: ' + JSON.stringify(pr2.x_studio_ncm));
-          if (!ncm && pr2.x_studio_ncm) {
-            ncm = String(pr2.x_studio_ncm).replace(/\D/g, '');
-            if (ncm.length === 8) {
-              console.log('[SIEG-EMIT-NCM] NCM lido de x_studio_ncm: ' + ncm);
-            } else { ncm = ''; }
-          }
           prodStudio = {
             c_trib_nac: pr2.x_studio_c_trib_nac || '',
             c_nbs: pr2.x_studio_c_nbs || '',
@@ -933,7 +925,7 @@ async function searchCityIbge(client, db, uid, pwd, cityName, stateId) {
   try {
     var domain = [['name', 'ilike', cityName]];
     if (stateId) domain.push(['state_id', '=', stateId]);
-    var ids = await executeKw(client, db, uid, pwd, 'res.city', 'search', [domain, {limit: 5}]);
+    var ids = await executeKw(client, db, uid, pwd, 'res.city', 'search', [domain], { limit: 5 });
     if (ids && ids.length > 0) {
       // Ler ibge_code de todos os resultados encontrados
       var cities = await executeKw(client, db, uid, pwd, 'res.city', 'read', [ids, ['name', 'ibge_code']]);
