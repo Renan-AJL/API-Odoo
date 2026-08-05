@@ -70,7 +70,13 @@ function agent() {
     opts.key = cert.privateKeyPem;
     // chainPem ja contem [leaf, ca1, ca2, ...] — formato esperado pelo TLS
     opts.cert = cert.chainPem.join('');
-    console.log('[SEFAZ] Agente mTLS criado com PEM (key + cert chain, ' + cert.chainPem.length + ' certificados).');
+    // Inclui as CAs intermediarias da ICP-Brasil como âncoras de confianca para
+    // validar o certificado TLS do servidor da SEFAZ (resolve "self-signed certificate
+    // in certificate chain" em containers sem bundle ICP-Brasil no OpenSSL do sistema).
+    if (cert.chainPem.length > 1) {
+      opts.ca = cert.chainPem.slice(1); // CAs: indice 1..N (sem o leaf)
+    }
+    console.log('[SEFAZ] Agente mTLS criado com PEM (key + cert chain, ' + cert.chainPem.length + ' certificados). CAs extras: ' + (opts.ca ? opts.ca.length : 0));
   } else if (cert.privateKeyPem && cert.certPem) {
     opts.key = cert.privateKeyPem;
     opts.cert = cert.certPem;

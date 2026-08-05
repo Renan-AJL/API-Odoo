@@ -209,10 +209,37 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     vProdSum += parseFloat(linesData[li].price_subtotal) || 0;
   }
 
-  // Pagamentos: NF-e 4.00 exige <pag> — usar valor total da fatura
+  // Calcular IBS/CBS por item para incluir no vPag e no amount_total da ordem.
+  // A SEFAZ valida que a soma dos <vPag> deve ser igual ao <vNFTot>
+  // (que ja inclui IBS e CBS "por fora"). Calcular aqui usando as mesmas
+  // aliquotas e logica do sieg-nfe-xml.js para garantir consistencia.
+  var ibsCbsAtivo = String(process.env.NFE_IBSCBS !== undefined ? process.env.NFE_IBSCBS : 'true') !== 'false';
+  var vIBSTotal = 0, vCBSTotal = 0;
+  if (ibsCbsAtivo) {
+    var pIBSUF  = parseFloat(process.env.NFE_P_IBS_UF  || '0.10');
+    var pIBSMun = parseFloat(process.env.NFE_P_IBS_MUN || '0.00');
+    var pCBS    = parseFloat(process.env.NFE_P_CBS     || '0.90');
+    for (var lb = 0; lb < linesData.length; lb++) {
+      var ldItem = linesData[lb];
+      var vProdItem = parseFloat(ldItem.price_subtotal) || 0;
+      var vICMSItem = parseFloat(ldItem.vicms) || 0;
+      var vPISItem  = parseFloat(ldItem.vpis)  || 0;
+      var vCOFItem  = parseFloat(ldItem.vcofins) || 0;
+      var baseIBS = vProdItem - vICMSItem - vPISItem - vCOFItem;
+      if (!(baseIBS > 0)) baseIBS = vProdItem;
+      vIBSTotal += Math.round(baseIBS * (pIBSUF + pIBSMun) / 100 * 100) / 100;
+      vCBSTotal += Math.round(baseIBS * pCBS / 100 * 100) / 100;
+    }
+  }
+  vIBSTotal = Math.round(vIBSTotal * 100) / 100;
+  vCBSTotal = Math.round(vCBSTotal * 100) / 100;
+  // vNFTot = vNF + IBS + CBS (valor total que o comprador paga de fato)
+  var vNFTot = Math.round((vProdSum + vIBSTotal + vCBSTotal) * 100) / 100;
+
+  // Pagamentos: NF-e 4.00 exige <pag> — vPag deve igualar vNFTot (incluindo IBS/CBS)
   var pagamentos = [{
     tPag: '15', // PIX
-    vPag: String(vProdSum.toFixed(2)),
+    vPag: String(vNFTot.toFixed(2)),
   }];
 
   var emitData = {
@@ -222,7 +249,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       name: move.name,
       number: String(nextNum),
       date_order: move.invoice_date || move.date,
-      amount_total: vProdSum, // usar soma dos vProd (consistente com XML)
+      amount_total: vProdSum, // vNF (sem IBS/CBS) — o XML calcula vNFTot internamente
       note: move.narration || '',
     },
     lines: linesData,
