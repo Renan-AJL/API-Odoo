@@ -59,14 +59,29 @@ function tag(xml, name) {
 function agent() {
   var cert = carregarCertificado();
   if (!cert) throw new Error('Certificado A1 nao configurado — impossivel abrir conexao mTLS com a SEFAZ.');
-  return new https.Agent({
-    pfx: cert.pfx,
-    passphrase: cert.senha,
-    // Alguns webservices estaduais ainda negociam TLS legado
+  var opts = {
     minVersion: 'TLSv1.2',
     keepAlive: true,
     rejectUnauthorized: process.env.NFE_TLS_INSECURE === '1' ? false : true,
-  });
+  };
+  // Node 20+ com OpenSSL 3 nao suporta PFX com algoritmos legados (3DES/RC2/PBES2-AES).
+  // Usamos PEM (key + cert + ca) extraidos previamente pelo nfe-cert.js.
+  if (cert.privateKeyPem && cert.chainPem && cert.chainPem.length) {
+    opts.key = cert.privateKeyPem;
+    // chainPem ja contem [leaf, ca1, ca2, ...] — formato esperado pelo TLS
+    opts.cert = cert.chainPem.join('');
+    console.log('[SEFAZ] Agente mTLS criado com PEM (key + cert chain, ' + cert.chainPem.length + ' certificados).');
+  } else if (cert.privateKeyPem && cert.certPem) {
+    opts.key = cert.privateKeyPem;
+    opts.cert = cert.certPem;
+    console.log('[SEFAZ] Agente mTLS criado com PEM (key + leaf cert, sem chain).');
+  } else {
+    // Fallback: tenta PFX direto (funciona em Node < 20 ou certificados modernos)
+    opts.pfx = cert.pfx;
+    opts.passphrase = cert.senha;
+    console.warn('[SEFAZ] PEM nao disponivel, usando PFX direto no https.Agent (pode falhar no Node 20+ com OpenSSL 3).');
+  }
+  return new https.Agent(opts);
 }
 
 function envelope(servico, conteudo) {
