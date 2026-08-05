@@ -183,8 +183,16 @@ function xmlImpostoItem(line, crt, ibsInfo) {
       + `</gIBSCBS></IBSCBS>`;
   }
 
-  // Ordem exigida pelo XSD: ICMS, IPI, PIS, COFINS, IBSCBS
-  return `<imposto>${icmsBlock}${ipiBlock}${pisBlock}${cofinsBlock}${ibsBlock}</imposto>`;
+  // vTrib por item: soma dos tributos estimados (ICMS + PIS + COFINS) — obrigatorio pelo MOC 4.00
+  // A SEFAZ valida que a soma dos vTrib por item = vTotTrib no ICMSTot (cStat 685)
+  const vTribItem = num(
+    (parseFloat(line.vicms || 0))
+    + (parseFloat(line.vpis  || 0))
+    + (parseFloat(line.vcofins || 0))
+  );
+
+  // Ordem exigida pelo XSD: ICMS, IPI, PIS, COFINS, IBSCBS, vTrib
+  return `<imposto>${icmsBlock}${ipiBlock}${pisBlock}${cofinsBlock}${ibsBlock}<vTrib>${vTribItem}</vTrib></imposto>`;
 }
 
 /**
