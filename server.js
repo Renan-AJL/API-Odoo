@@ -75,6 +75,7 @@ const teDeliveryRoutes = require('./routes/delivery');
 const teWebhookRoutes = require('./routes/webhook-te');
 const itauPagamentosRoutes = require('./routes/itau-pagamentos');
 const siegRoutes = require('./routes/sieg');
+const nfeCertRoutes = require('./routes/nfe-cert');
 
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/cnpj', cnpjRoutes);
@@ -86,6 +87,7 @@ app.use('/api/v1/te/webhook', teWebhookRoutes);
 app.use('/api/v1/te', teDeliveryRoutes);
 app.use('/api/v1/itau', itauPagamentosRoutes);
 app.use('/api/v1/sieg', siegRoutes);
+app.use('/api/v1/nfe', nfeCertRoutes);
 app.use('/callback/sieg', siegRoutes);
 
 // --- Root ---
