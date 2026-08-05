@@ -309,14 +309,20 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       console.error('[SIEG-EMIT] Erro ao atualizar sequencia:', seqErr.message);
     }
   } else {
+    // Falha: NUNCA gravar texto livre num campo Selection (o Odoo descarta e a
+    // fatura some da fila). Grava um valor valido ('erro' ou 'pendente') e
+    // mantem o motivo detalhado no chatter.
+    var errStatus = statusOnError();
     if (tipo === 'nfe') {
-      updateVals.x_studio_nfe_status = info.cStat + ' - ' + info.motivo;
+      updateVals.x_studio_nfe_status = errStatus;
     } else {
-      updateVals.x_studio_nfse_status = info.motivo;
+      updateVals.x_studio_nfse_status = errStatus;
     }
+    console.warn('[SIEG-EMIT] Emissao NAO autorizada -> status "' + errStatus
+      + '" (motivo: ' + (info.cStat ? info.cStat + ' - ' : '') + (info.motivo || 'n/d') + ')');
   }
 
-  await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId], updateVals]);
+  await writeStatusSafe(client, db, uid, pwd, moveId, tipo, updateVals);
   console.log('[SIEG-EMIT] Fatura atualizada');
 
   // 12. Post XML + PDF to Chatter
@@ -1015,12 +1021,42 @@ function tupId(val) {
   return parseInt(val) || 0;
 }
 
+/**
+ * Valor gravado no campo Selection quando a emissao falha.
+ * NFE_STATUS_ON_ERROR=pendente -> a fatura volta para a fila e e retentada.
+ * Padrao 'erro' -> exige reprocessamento manual.
+ */
+function statusOnError() {
+  var v = String(process.env.NFE_STATUS_ON_ERROR || 'erro').trim().toLowerCase();
+  return v === 'pendente' ? 'pendente' : 'erro';
+}
+
+/**
+ * Grava o status com fallback: se o Odoo recusar o valor da Selection,
+ * tenta 'pendente' para a fatura nunca ficar fora da fila silenciosamente.
+ */
+async function writeStatusSafe(client, db, uid, pwd, moveId, tipo, vals) {
+  var field = tipo === 'nfe' ? 'x_studio_nfe_status' : 'x_studio_nfse_status';
+  try {
+    await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId], vals]);
+  } catch (e) {
+    console.error('[SIEG-EMIT] Falha ao gravar status (' + vals[field] + '): ' + e.message);
+    var fb = {};
+    fb[field] = 'pendente';
+    try {
+      await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId], fb]);
+      console.warn('[SIEG-EMIT] Status revertido para "pendente" (retentativa possivel)');
+    } catch (e2) { console.error('[SIEG-EMIT] Falha no fallback de status:', e2.message); }
+  }
+}
+
 async function safeUpdateError(client, db, uid, pwd, moveId, tipo, errMsg) {
   try {
     var vals = {};
-    if (tipo === 'nfe') vals.x_studio_nfe_status = 'erro: ' + errMsg.substring(0, 200);
-    else vals.x_studio_nfse_status = 'erro: ' + errMsg.substring(0, 200);
-    await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId], vals]);
+    var st = statusOnError();
+    if (tipo === 'nfe') vals.x_studio_nfe_status = st;
+    else vals.x_studio_nfse_status = st;
+    await writeStatusSafe(client, db, uid, pwd, moveId, tipo, vals);
     await executeKw(client, db, uid, pwd, 'mail.message', 'create', [{
       model: 'account.move', res_id: moveId,
       body: '<b>Erro na Emissao de ' + (tipo === 'nfe' ? 'NF-e' : 'NFS-e') + '</b><br/>' + errMsg.substring(0, 500),
