@@ -82,4 +82,21 @@ services:
         sync: false
       - key: NFE_RESP_TEC_FONE
         sync: false
+      # --- Emissao propria NF-e (certificado A1 + SEFAZ) ---
+      - key: NFE_EMISSAO_MODO
+        value: "proprio"
+      - key: NFE_UF
+        value: "PR"
+      - key: NFE_CERT_DIR
+        value: "/var/data"
+      - key: NFE_CERT_KEK
+        sync: false
+      - key: NFE_DANFE_PROVIDER
+        value: "local"
+      - key: SIEG_IMPORT_XML
+        value: "0"
     healthCheckPath: /api/v1/health
+    disk:
+      name: nfe-cert
+      mountPath: /var/data
+      sizeGB: 1
