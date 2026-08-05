@@ -26,7 +26,7 @@ const SIEG_BASE = 'https://api.sieg.com';
 
 /**
  * Enviar NF-e XML ao SIEG
- * A SIEG assina o XML com certificado, envia a SEFAZ e retorna resultado
+ * Importa no SIEG um XML fiscal ja assinado/autorizado.
  * 
  * Schema: { "Xml": "<xml em base64>" }
  * Response: { IsSuccess, Data, ErrorMessage, StatusCode, IsFailure }
@@ -40,6 +40,20 @@ async function enviarNFe(dadosOdoo) {
   // Preserva espaços dentro de texto de tags (xNome, xLgr, infCpl, etc.)
   const xmlMin = xml.replace(/>\s+</g, '><');
   console.log('[SIEG-API] XML minificado: ' + xmlMin.length + ' chars (economia: ' + (xml.length - xmlMin.length) + ')');
+
+  // /send-xml e um endpoint de importacao: ele nao assina nem autoriza uma NF-e.
+  // Evita o 409 generico e deixa explicito que falta a etapa fiscal anterior.
+  if (xmlMin.indexOf('<Signature') === -1 || xmlMin.indexOf('<protNFe') === -1) {
+    return {
+      sucesso: false,
+      httpStatus: 422,
+      xmlEnviado: xml,
+      resposta: null,
+      data: null,
+      erro: 'O endpoint SIEG /send-xml aceita XML de NF-e ja assinado e autorizado (nfeProc). Falta autorizar a NF-e na SEFAZ com certificado digital antes de importar no SIEG.',
+      statusCode: 422,
+    };
+  }
 
   const headers = await getAuthHeaders();
   let resp;
