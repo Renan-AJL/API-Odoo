@@ -21,6 +21,7 @@ const {
 } = require('../services/sieg-auth');
 const { emitirNota, enviarNFe, emitirNFSe, gerarDanfe, gerarDanfse } = require('../services/sieg-api');
 const { processPendingEmissions } = require('../services/sieg-odoo-emit');
+const { cancelarNFeOdoo } = require('../services/nfe-cancelar-odoo');
 
 // === OAuth Callback ===
 // A SIEG redireciona aqui apos o usuario autorizar o acesso.
@@ -189,6 +190,23 @@ router.post('/webhook', apiKeyAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('[SIEG] Erro webhook:', err.message);
+    res.status(500).json({ sucesso: false, erro: err.message });
+  }
+});
+
+// === CANCELAR NF-e ===
+// Recebe: { move_id, justificativa }
+// Cancela na SEFAZ + reverte fatura no Odoo
+router.post('/cancelar', apiKeyAuth, async (req, res) => {
+  var moveId       = req.body.move_id;
+  var justificativa = req.body.justificativa || 'Cancelamento solicitado pelo emitente';
+  if (!moveId) return res.status(400).json({ sucesso: false, erro: 'move_id obrigatorio' });
+  console.log('[NFE-CANCEL] Solicitacao de cancelamento move_id=' + moveId + ' just=' + justificativa.slice(0, 50));
+  try {
+    var resultado = await cancelarNFeOdoo({ moveId, justificativa });
+    res.json(resultado);
+  } catch (err) {
+    console.error('[NFE-CANCEL] Erro:', err.message);
     res.status(500).json({ sucesso: false, erro: err.message });
   }
 });

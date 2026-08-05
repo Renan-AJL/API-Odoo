@@ -39,18 +39,21 @@ var WS = {
     retAutorizacao: ['https://nfe.sefa.pr.gov.br/nfe/NFeRetAutorizacao4', 'https://homologacao.nfe.sefa.pr.gov.br/nfe/NFeRetAutorizacao4'],
     consulta: ['https://nfe.sefa.pr.gov.br/nfe/NFeConsultaProtocolo4', 'https://homologacao.nfe.sefa.pr.gov.br/nfe/NFeConsultaProtocolo4'],
     status: ['https://nfe.sefa.pr.gov.br/nfe/NFeStatusServico4', 'https://homologacao.nfe.sefa.pr.gov.br/nfe/NFeStatusServico4'],
+    cancelamento: ['https://nfe.sefa.pr.gov.br/nfe/NFeRecepcaoEvento4', 'https://homologacao.nfe.sefa.pr.gov.br/nfe/NFeRecepcaoEvento4'],
   },
   SP: {
     autorizacao: ['https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx', 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx'],
     retAutorizacao: ['https://nfe.fazenda.sp.gov.br/ws/nferetautorizacao4.asmx', 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nferetautorizacao4.asmx'],
     consulta: ['https://nfe.fazenda.sp.gov.br/ws/nfeconsultaprotocolo4.asmx', 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nfeconsultaprotocolo4.asmx'],
     status: ['https://nfe.fazenda.sp.gov.br/ws/nfestatusservico4.asmx', 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nfestatusservico4.asmx'],
+    cancelamento: ['https://www.nfe.fazenda.sp.gov.br/ws/nferecepcaoevento4.asmx', 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nferecepcaoevento4.asmx'],
   },
   SVRS: {
     autorizacao: ['https://nfe.svrs.rs.gov.br/ws/NfeAutorizacao/NFeAutorizacao4.asmx', 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeAutorizacao/NFeAutorizacao4.asmx'],
     retAutorizacao: ['https://nfe.svrs.rs.gov.br/ws/NfeRetAutorizacao/NFeRetAutorizacao4.asmx', 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeRetAutorizacao/NFeRetAutorizacao4.asmx'],
     consulta: ['https://nfe.svrs.rs.gov.br/ws/NfeConsulta/NfeConsulta4.asmx', 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeConsulta/NfeConsulta4.asmx'],
     status: ['https://nfe.svrs.rs.gov.br/ws/NfeStatusServico/NfeStatusServico4.asmx', 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeStatusServico/NfeStatusServico4.asmx'],
+    cancelamento: ['https://nfe.svrs.rs.gov.br/ws/NfeRecepcaoEvento/NfeRecepcaoEvento4.asmx', 'https://nfe-homologacao.svrs.rs.gov.br/ws/NfeRecepcaoEvento/NfeRecepcaoEvento4.asmx'],
   },
 };
 
@@ -276,4 +279,6 @@ module.exports = {
   endpoint,
   uf,
   tpAmb,
+  cUF,
+  soapPost,
 };
