@@ -546,7 +546,7 @@ async function findSaleOrderByTeId(teOrderId) {
     var orders = await safeReadCustom('sale.order', ids, SALE_ORDER_FIELDS, SALE_ORDER_CUSTOM_FIELDS);
     return orders ? orders[0] : null;
   } catch (err) {
-    if (err.message && err.message.indexOf('Invalid field') !== -1) return null;
+    if (err.message && (err.message.indexOf('Invalid field') !== -1 || err.message.indexOf('invalid item in domain') !== -1)) return null;
     throw err;
   }
 }
