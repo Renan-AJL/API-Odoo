@@ -74,4 +74,12 @@ services:
         sync: false
       - key: SIEG_TP_AMB
         value: "2"
+      - key: NFE_RESP_TEC_CNPJ
+        sync: false
+      - key: NFE_RESP_TEC_CONTATO
+        sync: false
+      - key: NFE_RESP_TEC_EMAIL
+        sync: false
+      - key: NFE_RESP_TEC_FONE
+        sync: false
     healthCheckPath: /api/v1/health
