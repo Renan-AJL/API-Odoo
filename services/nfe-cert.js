@@ -15,6 +15,7 @@ var os = require('os');
 var path = require('path');
 var crypto = require('crypto');
 var forge = require('node-forge');
+var openPfxWithOpenssl = require('./pfx-openssl').openPfxWithOpenssl;
 
 var DIR = process.env.NFE_CERT_DIR || '/var/data';
 var PFX_FILE = 'nfe-cert.pfx';
@@ -58,28 +59,34 @@ function decryptSenha(blob) {
 
 function onlyNum(s) { return String(s || '').replace(/\D/g, ''); }
 
-/**
- * Abre o PKCS#12, valida a senha e extrai chave privada + cadeia em PEM.
- * Lanca erro descritivo se a senha estiver incorreta.
- */
-function openPfx(pfxBuffer, senha) {
-  var der;
-  try {
-    der = forge.util.createBuffer(pfxBuffer.toString('binary'));
-  } catch (e) {
-    throw new Error('Arquivo de certificado invalido.');
+/** Monta as infos publicas a partir do certificado do titular em PEM. */
+function infoFromCertPem(certPem) {
+  var leaf = forge.pki.certificateFromPem(certPem);
+  var cn = '';
+  try { cn = (leaf.subject.getField('CN') || {}).value || ''; } catch (e) { cn = ''; }
+  var cnpj = onlyNum((cn.split(':')[1] || ''));
+  if (cnpj.length !== 14) {
+    var m = cn.match(/(\d{14})/);
+    cnpj = m ? m[1] : '';
   }
-  var p12;
-  try {
-    var asn1 = forge.asn1.fromDer(der);
-    p12 = forge.pkcs12.pkcs12FromAsn1(asn1, false, String(senha));
-  } catch (e) {
-    var msg = String(e && e.message || e);
-    if (/mac|password|invalid/i.test(msg)) throw new Error('Senha do certificado incorreta ou arquivo .pfx invalido.');
-    throw new Error('Falha ao abrir o certificado: ' + msg);
-  }
+  return {
+    titular: cn.split(':')[0] || cn,
+    cnpj: cnpj,
+    emissor: (function () { try { return (leaf.issuer.getField('CN') || {}).value || ''; } catch (e) { return ''; } })(),
+    validoDe: leaf.validity.notBefore.toISOString(),
+    validoAte: leaf.validity.notAfter.toISOString(),
+    diasRestantes: Math.floor((leaf.validity.notAfter.getTime() - Date.now()) / 86400000),
+    expirado: leaf.validity.notAfter.getTime() < Date.now(),
+    serial: leaf.serialNumber,
+  };
+}
 
-  // Chave privada
+/** Leitura via node-forge (PFX classicos: 3DES/RC2 com provider disponivel). */
+function openPfxForge(pfxBuffer, senha) {
+  var der = forge.util.createBuffer(pfxBuffer.toString('binary'));
+  var asn1 = forge.asn1.fromDer(der);
+  var p12 = forge.pkcs12.pkcs12FromAsn1(asn1, false, String(senha));
+
   var keyBags = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag })[forge.pki.oids.pkcs8ShroudedKeyBag] || [];
   if (!keyBags.length) {
     keyBags = p12.getBags({ bagType: forge.pki.oids.keyBag })[forge.pki.oids.keyBag] || [];
@@ -87,7 +94,6 @@ function openPfx(pfxBuffer, senha) {
   if (!keyBags.length || !keyBags[0].key) throw new Error('Chave privada nao encontrada no certificado A1.');
   var privateKeyPem = forge.pki.privateKeyToPem(keyBags[0].key);
 
-  // Certificados
   var certBags = p12.getBags({ bagType: forge.pki.oids.certBag })[forge.pki.oids.certBag] || [];
   if (!certBags.length) throw new Error('Certificado nao encontrado no arquivo .pfx.');
 
@@ -97,7 +103,6 @@ function openPfx(pfxBuffer, senha) {
     var c = certBags[i].cert;
     if (!c) continue;
     chainPem.push(forge.pki.certificateToPem(c));
-    // O certificado do titular tem uso de assinatura digital e nao eh CA
     var isCa = false;
     try {
       var bc = c.getExtension('basicConstraints');
@@ -106,32 +111,44 @@ function openPfx(pfxBuffer, senha) {
     if (!isCa && !leaf) leaf = c;
   }
   if (!leaf) leaf = certBags[0].cert;
-
-  var cn = '';
-  try { cn = (leaf.subject.getField('CN') || {}).value || ''; } catch (e) { cn = ''; }
-  // O CNPJ vem no CN ("RAZAO SOCIAL:12345678000190") ou no otherName do subjectAltName
-  var cnpj = onlyNum((cn.split(':')[1] || ''));
-  if (cnpj.length !== 14) {
-    var m = cn.match(/(\d{14})/);
-    cnpj = m ? m[1] : '';
-  }
-
   var certPem = forge.pki.certificateToPem(leaf);
 
+  return { privateKeyPem: privateKeyPem, certPem: certPem, chainPem: chainPem, info: infoFromCertPem(certPem) };
+}
+
+/**
+ * Abre o PKCS#12, valida a senha e extrai chave privada + cadeia em PEM.
+ * Tenta o node-forge e, quando o PFX usa algoritmos que ele nao suporta
+ * (PBES2/AES-256 dos certificados ICP-Brasil recentes -> "Unsupported PKCS12
+ * PFX data"), cai para o OpenSSL do sistema.
+ */
+function openPfx(pfxBuffer, senha) {
+  if (!Buffer.isBuffer(pfxBuffer) || !pfxBuffer.length) throw new Error('Arquivo de certificado invalido.');
+  var forgeErr = null;
+  try {
+    return openPfxForge(pfxBuffer, senha);
+  } catch (e) {
+    forgeErr = e;
+    var msg = String((e && e.message) || e);
+    if (/mac|password|senha/i.test(msg) && !/unsupported/i.test(msg)) {
+      throw new Error('Senha do certificado incorreta ou arquivo .pfx invalido.');
+    }
+    console.warn('[NFE-CERT] node-forge nao leu o PFX (' + msg + '). Tentando via OpenSSL...');
+  }
+
+  var viaSsl;
+  try {
+    viaSsl = openPfxWithOpenssl(pfxBuffer, senha);
+  } catch (e2) {
+    throw new Error(String((e2 && e2.message) || e2) +
+      ' (node-forge: ' + String((forgeErr && forgeErr.message) || forgeErr) + ')');
+  }
+  console.log('[NFE-CERT] PFX lido via OpenSSL' + (viaSsl.legacy ? ' (modo legacy)' : '') + '.');
   return {
-    privateKeyPem: privateKeyPem,
-    certPem: certPem,
-    chainPem: chainPem,
-    info: {
-      titular: cn.split(':')[0] || cn,
-      cnpj: cnpj,
-      emissor: (function () { try { return (leaf.issuer.getField('CN') || {}).value || ''; } catch (e) { return ''; } })(),
-      validoDe: leaf.validity.notBefore.toISOString(),
-      validoAte: leaf.validity.notAfter.toISOString(),
-      diasRestantes: Math.floor((leaf.validity.notAfter.getTime() - Date.now()) / 86400000),
-      expirado: leaf.validity.notAfter.getTime() < Date.now(),
-      serial: leaf.serialNumber,
-    },
+    privateKeyPem: viaSsl.privateKeyPem,
+    certPem: viaSsl.certPem,
+    chainPem: viaSsl.chainPem,
+    info: infoFromCertPem(viaSsl.certPem),
   };
 }
 
