@@ -67,7 +67,7 @@ function xmlEndereco(end, tagPrefix) {
  * Gera bloco de impostos por item — dinâmico baseado nos dados reais do Odoo
  * Suporta: ICMS (Simples Nacional CSOSN / Regime Normal CST), PIS, COFINS
  */
-function xmlImpostoItem(line) {
+function xmlImpostoItem(line, crt, ibsInfo) {
   const csosn  = line.csosn  || '';
   const cstIcms = line.cst_icms || '';
   const orig   = line.orig   || '0';
@@ -76,11 +76,12 @@ function xmlImpostoItem(line) {
   const vICMS  = num(line.vicms || '0.00');
   const pICMS  = num(line.picms || '0.00');
   const cstPis   = line.cst_pis   || '01';
-  const vBCPis   = num(line.vbc_pis   || line.vbc || '0.00');
+  const baseItem = line.vbc_icms || line.vbc || line.price_subtotal || 0;
+  const vBCPis   = num(line.vbc_pis   || baseItem || '0.00');
   const pPis     = num(line.ppis      || line.pis_aliquota || '0.00');
   const vPIS     = num(line.vpis      || '0.00');
   const cstCof   = line.cst_cofins || '01';
-  const vBCCof   = num(line.vbc_cofins || line.vbc || '0.00');
+  const vBCCof   = num(line.vbc_cofins || baseItem || '0.00');
   const pCofins  = num(line.pcofins    || line.cofins_aliquota || '0.00');
   const vCOFINS  = num(line.vcofins    || '0.00');
 
@@ -154,8 +155,69 @@ function xmlImpostoItem(line) {
     cofinsBlock = `<COFINS><COFINSOutr><CST>${cstCof}</CST><vBC>${vBCCof}</vBC><pCOFINS>${pCofins}</pCOFINS><vCOFINS>${vCOFINS}</vCOFINS></COFINSOutr></COFINS>`;
   }
 
-  return `<imposto>${icmsBlock}${pisBlock}${cofinsBlock}</imposto>`;
+  // --- IPI ---
+  // Emitente do Regime Normal (CRT=3) deve informar o grupo IPI.
+  // Simples Nacional (CRT=1/2) nao informa IPI.
+  let ipiBlock = '';
+  if (String(crt || '') === '3') {
+    const cstIpi = line.cst_ipi || '50';
+    const vBCIpi = num(line.vbc_ipi || '0.00');
+    const pIpi   = num4(line.pipi || '0.00');
+    const vIpi   = num(line.vipi || '0.00');
+    const cEnq   = line.cenq || '999';
+    if (['01','02','03','04','51','52','53','54','55'].includes(String(cstIpi))) {
+      ipiBlock = `<IPI><cEnq>${cEnq}</cEnq><IPINT><CST>${cstIpi}</CST></IPINT></IPI>`;
+    } else {
+      ipiBlock = `<IPI><cEnq>${cEnq}</cEnq><IPITrib><CST>${cstIpi}</CST><vBC>${vBCIpi}</vBC><pIPI>${pIpi}</pIPI><vIPI>${vIpi}</vIPI></IPITrib></IPI>`;
+    }
+  }
+
+  // --- IBS/CBS (Reforma Tributaria - obrigatorio no layout vigente 2026) ---
+  let ibsBlock = '';
+  if (ibsInfo) {
+    ibsBlock = `<IBSCBS><CST>${ibsInfo.cst}</CST><cClassTrib>${ibsInfo.cClassTrib}</cClassTrib>`
+      + `<gIBSCBS><vBC>${ibsInfo.vBC}</vBC>`
+      + `<gIBSUF><pIBSUF>${ibsInfo.pIBSUF}</pIBSUF><vIBSUF>${ibsInfo.vIBSUF}</vIBSUF></gIBSUF>`
+      + `<gIBSMun><pIBSMun>${ibsInfo.pIBSMun}</pIBSMun><vIBSMun>${ibsInfo.vIBSMun}</vIBSMun></gIBSMun>`
+      + `<vIBS>${ibsInfo.vIBS}</vIBS>`
+      + `<gCBS><pCBS>${ibsInfo.pCBS}</pCBS><vCBS>${ibsInfo.vCBS}</vCBS></gCBS>`
+      + `</gIBSCBS></IBSCBS>`;
+  }
+
+  // Ordem exigida pelo XSD: ICMS, IPI, PIS, COFINS, IBSCBS
+  return `<imposto>${icmsBlock}${ipiBlock}${pisBlock}${cofinsBlock}${ibsBlock}</imposto>`;
 }
+
+/**
+ * Calcula IBS/CBS de um item conforme o padrao do XML real da AJL:
+ *   vBC = vProd - ICMS - PIS - COFINS (tributos "por dentro" excluidos)
+ *   vIBSUF = vBC * pIBSUF% | vIBSMun = vBC * pIBSMun% | vCBS = vBC * pCBS%
+ */
+function calcIbsCbsItem(line, vProdNum, cfg) {
+  const pIBSUF  = parseFloat(cfg.pIBSUF  != null ? cfg.pIBSUF  : (process.env.NFE_P_IBS_UF  || '0.10'));
+  const pIBSMun = parseFloat(cfg.pIBSMun != null ? cfg.pIBSMun : (process.env.NFE_P_IBS_MUN || '0.00'));
+  const pCBS    = parseFloat(cfg.pCBS    != null ? cfg.pCBS    : (process.env.NFE_P_CBS     || '0.90'));
+  const vICMS   = parseFloat(line.vicms   || 0) || 0;
+  const vPIS    = parseFloat(line.vpis    || 0) || 0;
+  const vCOFINS = parseFloat(line.vcofins || 0) || 0;
+  let base = vProdNum - vICMS - vPIS - vCOFINS;
+  if (!(base > 0)) base = vProdNum;
+  const vIBSUF  = round2(base * pIBSUF  / 100);
+  const vIBSMun = round2(base * pIBSMun / 100);
+  const vCBS    = round2(base * pCBS    / 100);
+  return {
+    cst: line.cst_ibscbs || cfg.cstIBSCBS || '000',
+    cClassTrib: line.cclass_trib || cfg.cClassTrib || '000001',
+    vBCNum: round2(base),
+    vBC: num(base),
+    pIBSUF: num4(pIBSUF), vIBSUF: num(vIBSUF), vIBSUFNum: vIBSUF,
+    pIBSMun: num4(pIBSMun), vIBSMun: num(vIBSMun), vIBSMunNum: vIBSMun,
+    vIBS: num(vIBSUF + vIBSMun), vIBSNum: round2(vIBSUF + vIBSMun),
+    pCBS: num4(pCBS), vCBS: num(vCBS), vCBSNum: vCBS,
+  };
+}
+
+function round2(n) { return Math.round((parseFloat(n) || 0) * 100) / 100; }
 
 /**
  * Gera XML NF-e completo a partir dos dados extraidos do Odoo
@@ -187,7 +249,9 @@ function gerarXmlNFe(data) {
   const tpAmb = cfg.tpAmb || process.env.SIEG_TP_AMB || '1'; // 1=producao, 2=homologacao
   const finNFe = cfg.finNFe || '1'; // 1=normal
   const indFinal = (partner.is_consumer || partner.indFinal) ? '1' : '0';
-  const indPres = cfg.indPres || '0'; // 0=nao presencial
+  const indPres = cfg.indPres || process.env.NFE_IND_PRES || '9'; // 9=operacao nao presencial, outros
+  const indIntermed = ['2','3','4'].includes(String(indPres)) ? (cfg.indIntermed || '0') : null;
+  const ibsCbsAtivo = String(cfg.ibsCbs != null ? cfg.ibsCbs : (process.env.NFE_IBSCBS || 'true')) !== 'false';
   const verProc = cfg.verProc || 'Odoo19-SIEG-1.0';
 
   // === VALIDACAO DETALHADA POR CAMPO ===
@@ -332,14 +396,16 @@ function gerarXmlNFe(data) {
       <dhSaiEnt>${dhEmi}</dhSaiEnt>
       <tpNF>${tpNF}</tpNF>
       <idDest>${idDest}</idDest>
-      <cMunFG>${cMunFG}</cMunFG>
+      <cMunFG>${cMunFG}</cMunFG>${ibsCbsAtivo ? `
+      <cMunFGIBS>${cMunFG}</cMunFGIBS>` : ''}
       <tpImp>1</tpImp>
       <tpEmis>${tpEmis}</tpEmis>
       <cDV>${cDV}</cDV>
       <tpAmb>${tpAmb}</tpAmb>
       <finNFe>${finNFe}</finNFe>
       <indFinal>${indFinal}</indFinal>
-      <indPres>${indPres}</indPres>
+      <indPres>${indPres}</indPres>${indIntermed ? `
+      <indIntermed>${indIntermed}</indIntermed>` : ''}
       <procEmi>0</procEmi>
       <verProc>${esc(verProc)}</verProc>
     </ide>`;
@@ -371,10 +437,20 @@ ${xmlEndereco(partner, 'enderDest')}
     </dest>`;
 
   // === det (items) ===
+  const ibsTot = { vBC: 0, vIBSUF: 0, vIBSMun: 0, vIBS: 0, vCBS: 0 };
   lines.forEach((line, idx) => {
     const nItem = String(idx + 1);
-    const vProd = num(line.price_subtotal || (line.qty * line.price_unit));
+    const vProdNum = round2(line.price_subtotal || (line.qty * line.price_unit));
+    const vProd = num(vProdNum);
     // vProdTotal ja foi calculado no bloco de validacao acima
+    const ibsItem = ibsCbsAtivo ? calcIbsCbsItem(line, vProdNum, cfg) : null;
+    if (ibsItem) {
+      ibsTot.vBC     += ibsItem.vBCNum;
+      ibsTot.vIBSUF  += ibsItem.vIBSUFNum;
+      ibsTot.vIBSMun += ibsItem.vIBSMunNum;
+      ibsTot.vIBS    += ibsItem.vIBSNum;
+      ibsTot.vCBS    += ibsItem.vCBSNum;
+    }
 
     xml += `
     <det nItem="${nItem}">
@@ -393,7 +469,8 @@ ${xmlEndereco(partner, 'enderDest')}
         <qTrib>${num3(line.qty)}</qTrib>
         <vUnTrib>${num3(line.price_unit)}</vUnTrib>
         <indTot>1</indTot>
-      </prod>${xmlImpostoItem(line)}
+      </prod>${xmlImpostoItem(line, company.crt || '1', ibsItem)}${ibsItem ? `
+      <vItem>${vProd}</vItem>` : ''}
     </det>`;
   });
 
@@ -421,8 +498,6 @@ ${xmlEndereco(partner, 'enderDest')}
         <vBC>${num(vBC_total)}</vBC>
         <vICMS>${num(vICMS_total)}</vICMS>
         <vICMSDeson>0.00</vICMSDeson>
-        <vFCPUFDest>0.00</vFCPUFDest>
-        <vICMSUFDest>0.00</vICMSUFDest>
         <vFCP>0.00</vFCP>
         <vBCST>0.00</vBCST>
         <vST>0.00</vST>
@@ -440,13 +515,34 @@ ${xmlEndereco(partner, 'enderDest')}
         <vOutro>0.00</vOutro>
         <vNF>${vNF}</vNF>
         <vTotTrib>${num(vTotTrib)}</vTotTrib>
-      </ICMSTot>
+      </ICMSTot>${ibsCbsAtivo ? `
+      <IBSCBSTot>
+        <vBCIBSCBS>${num(ibsTot.vBC)}</vBCIBSCBS>
+        <gIBS>
+          <gIBSUF><vDif>0.00</vDif><vDevTrib>0.00</vDevTrib><vIBSUF>${num(ibsTot.vIBSUF)}</vIBSUF></gIBSUF>
+          <gIBSMun><vDif>0.00</vDif><vDevTrib>0.00</vDevTrib><vIBSMun>${num(ibsTot.vIBSMun)}</vIBSMun></gIBSMun>
+          <vIBS>${num(ibsTot.vIBS)}</vIBS>
+          <vCredPres>0.00</vCredPres>
+          <vCredPresCondSus>0.00</vCredPresCondSus>
+        </gIBS>
+        <gCBS>
+          <vDif>0.00</vDif>
+          <vDevTrib>0.00</vDevTrib>
+          <vCBS>${num(ibsTot.vCBS)}</vCBS>
+          <vCredPres>0.00</vCredPres>
+          <vCredPresCondSus>0.00</vCredPresCondSus>
+        </gCBS>
+      </IBSCBSTot>
+      <vNFTot>${num(round2(parseFloat(vNF) + ibsTot.vIBS + ibsTot.vCBS))}</vNFTot>` : ''}
     </total>`;
 
   // === transp ===
   xml += `
     <transp>
       <modFrete>${cfg.modFrete || '9'}</modFrete>
+      <vol>
+        <qVol>${cfg.qVol || '0'}</qVol>
+      </vol>
     </transp>`;
 
   // === cobr (duplicatas) ===
@@ -491,6 +587,22 @@ ${xmlEndereco(partner, 'enderDest')}
     </infAdic>`;
   }
 
+  // === infRespTec (obrigatorio na NF-e 4.00 desde a NT 2018.005) ===
+  var respCnpj = onlyNum(cfg.respTecCnpj || process.env.NFE_RESP_TEC_CNPJ || '');
+  var respNome = cfg.respTecContato || process.env.NFE_RESP_TEC_CONTATO || '';
+  var respEmail = cfg.respTecEmail || process.env.NFE_RESP_TEC_EMAIL || '';
+  var respFone = onlyNum(cfg.respTecFone || process.env.NFE_RESP_TEC_FONE || '');
+  if (respCnpj && respNome && respEmail && respFone) {
+    xml += `\n    <infRespTec>
+      <CNPJ>${respCnpj}</CNPJ>
+      <xContato>${esc(respNome)}</xContato>
+      <email>${esc(respEmail)}</email>
+      <fone>${respFone}</fone>
+    </infRespTec>`;
+  } else {
+    console.error('[NFE-XML] *** infRespTec ausente — configure NFE_RESP_TEC_CNPJ, NFE_RESP_TEC_CONTATO, NFE_RESP_TEC_EMAIL e NFE_RESP_TEC_FONE. O XML sera rejeitado sem esse grupo. ***');
+  }
+
   xml += `\n  </infNFe>\n</NFe>`;
   return xml;
 }
@@ -517,6 +629,11 @@ function num(v, decimals) {
   const n = parseFloat(String(v).replace(',', '.'));
   if (isNaN(n)) return decimals === 3 ? '0.000' : '0.00';
   return n.toFixed(decimals || 2);
+}
+
+function num4(v) {
+  const n = parseFloat(String(v == null ? 0 : v).replace(',', '.'));
+  return (isNaN(n) ? 0 : n).toFixed(4);
 }
 
 function num3(v) {
@@ -549,10 +666,37 @@ function formatDh(iso) {
     const sign = offset >= 0 ? '+' : '-';
     return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}T${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}${sign}${offH}:${offM}`;
   }
-  // If already formatted
-  if (iso.includes('T')) return iso;
-  return iso + 'T00:00:00-03:00';
+  var str = String(iso).trim();
+
+  // Odoo (XML-RPC) devolve "YYYY-MM-DD HH:MM:SS" em UTC, sem 'T' e sem offset.
+  // Converter para horario de Brasilia (-03:00) no formato exigido pelo XSD.
+  var mOdoo = str.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (mOdoo) {
+    var utc = Date.UTC(+mOdoo[1], +mOdoo[2] - 1, +mOdoo[3], +mOdoo[4], +mOdoo[5], +(mOdoo[6] || 0));
+    var d = new Date(utc - 3 * 3600 * 1000);
+    return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()) +
+           'T' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes()) + ':' + pad2(d.getUTCSeconds()) + '-03:00';
+  }
+
+  // Ja veio com data + hora + offset (ISO completo)
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})$/.test(str)) {
+    var dIso = new Date(str);
+    if (!isNaN(dIso.getTime())) {
+      var b = new Date(dIso.getTime() - 3 * 3600 * 1000);
+      return b.getUTCFullYear() + '-' + pad2(b.getUTCMonth() + 1) + '-' + pad2(b.getUTCDate()) +
+             'T' + pad2(b.getUTCHours()) + ':' + pad2(b.getUTCMinutes()) + ':' + pad2(b.getUTCSeconds()) + '-03:00';
+    }
+  }
+
+  // Apenas data "YYYY-MM-DD"
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str + 'T00:00:00-03:00';
+
+  // Fallback: nao arriscar um valor invalido no XML — usar agora
+  console.warn('[NFE-XML] dhEmi em formato desconhecido ("' + str + '"), usando data/hora atual');
+  return formatDh(null);
 }
+
+function pad2(n) { return String(n).padStart(2, '0'); }
 
 function calcIdDest(ufEmit, ufDest) {
   if (!ufEmit || !ufDest) return '1';
