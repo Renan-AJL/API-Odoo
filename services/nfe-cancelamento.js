@@ -123,13 +123,24 @@ async function cancelarNFe(opts) {
   var respXml = typeof respRaw === 'string' ? respRaw : (respRaw && respRaw.xml ? String(respRaw.xml) : '');
   console.log('[NFE-CANCEL] HTTP status=' + (respRaw && respRaw.status) + ' xml_len=' + respXml.length);
 
-  var cStat   = tag(respXml, 'cStat');
-  var xMotivo = tag(respXml, 'xMotivo');
-  var nProt   = tag(respXml, 'nProt');
-  var dhRecbto = tag(respXml, 'dhRecbto');
+  // cStat do lote (128 = processado) — o resultado real fica dentro de <retEvento>
+  var cStatLote = tag(respXml, 'cStat');
+  var xMotivoLote = tag(respXml, 'xMotivo');
+  console.log('[NFE-CANCEL] cStat lote: ' + cStatLote + ' - ' + xMotivoLote);
 
-  var sucesso = cStat === '135';
-  console.log('[NFE-CANCEL] Resultado: cStat=' + cStat + ' - ' + xMotivo + (nProt ? ' nProt=' + nProt : ''));
+  // Extrair bloco <retEvento> para pegar o cStat individual do evento
+  var retEventoMatch = respXml.match(/<retEvento[\s\S]*?<\/retEvento>/);
+  var retEventoXml = retEventoMatch ? retEventoMatch[0] : respXml;
+
+  var cStat   = tag(retEventoXml, 'cStat');
+  var xMotivo = tag(retEventoXml, 'xMotivo');
+  var nProt   = tag(retEventoXml, 'nProt');
+  var dhRecbto = tag(retEventoXml, 'dhRecbto');
+
+  // cStat 135 = Evento registrado e vinculado à NF-e (cancelamento confirmado)
+  // cStat 155 = Cancelamento homologado (também aceito)
+  var sucesso = cStat === '135' || cStat === '155';
+  console.log('[NFE-CANCEL] Resultado evento: cStat=' + cStat + ' - ' + xMotivo + (nProt ? ' nProt=' + nProt : ''));
 
   return { sucesso, cStat, xMotivo, nProt, dhRecbto };
 }
