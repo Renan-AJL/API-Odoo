@@ -183,11 +183,32 @@ function salvarCertificado(pfxBuffer, senha) {
 function carregarCertificado() {
   if (cache) return cache;
 
-  // 1) Disco
+  // 1) Variaveis de ambiente (PRIORIDADE — sobrevive a deploys/reinicios no Render)
+  var b64 = process.env.NFE_CERT_PFX_BASE64;
+  var envSenha = process.env.NFE_CERT_SENHA;
+  if (b64 && envSenha) {
+    try {
+      console.log('[NFE-CERT] Carregando certificado das variaveis de ambiente (NFE_CERT_PFX_BASE64=' + b64.slice(0, 20) + '...)');
+      var buf = Buffer.from(b64, 'base64');
+      var ab = openPfx(buf, envSenha);
+      cache = {
+        pfx: buf, senha: envSenha,
+        privateKeyPem: ab.privateKeyPem, certPem: ab.certPem,
+        chainPem: ab.chainPem, info: ab.info,
+      };
+      console.log('[NFE-CERT] Certificado carregado via env vars. Titular: ' + ab.info.titular + ' | CNPJ: ' + ab.info.cnpj);
+      return cache;
+    } catch (e) {
+      console.error('[NFE-CERT] Falha ao abrir certificado das env vars: ' + e.message);
+    }
+  }
+
+  // 2) Disco (backup — pode ser perdido em reinicios no Render)
   try {
     var dir = ensureDir();
     var pfxPath = path.join(dir, PFX_FILE);
     var metaPath = path.join(dir, META_FILE);
+    console.log('[NFE-CERT] Verificando disco: dir=' + dir + ' pfx=' + fs.existsSync(pfxPath) + ' meta=' + fs.existsSync(metaPath));
     if (fs.existsSync(pfxPath) && fs.existsSync(metaPath)) {
       var meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
       var pfx = fs.readFileSync(pfxPath);
@@ -198,26 +219,14 @@ function carregarCertificado() {
         privateKeyPem: aberto.privateKeyPem, certPem: aberto.certPem,
         chainPem: aberto.chainPem, info: aberto.info,
       };
+      console.log('[NFE-CERT] Certificado carregado do disco. Titular: ' + aberto.info.titular);
       return cache;
     }
   } catch (e) {
     console.error('[NFE-CERT] Falha ao ler certificado do disco: ' + e.message);
   }
 
-  // 2) Variaveis de ambiente (fallback)
-  var b64 = process.env.NFE_CERT_PFX_BASE64;
-  var envSenha = process.env.NFE_CERT_SENHA;
-  if (b64 && envSenha) {
-    var buf = Buffer.from(b64, 'base64');
-    var ab = openPfx(buf, envSenha);
-    cache = {
-      pfx: buf, senha: envSenha,
-      privateKeyPem: ab.privateKeyPem, certPem: ab.certPem,
-      chainPem: ab.chainPem, info: ab.info,
-    };
-    return cache;
-  }
-
+  console.warn('[NFE-CERT] Nenhum certificado encontrado. Defina NFE_CERT_PFX_BASE64 + NFE_CERT_SENHA nas env vars (recomendado) ou envie via POST /api/v1/nfe/certificado.');
   return null;
 }
 

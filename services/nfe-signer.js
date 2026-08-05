@@ -30,7 +30,7 @@ function minify(xml) {
 function assinarNFe(xmlNFe) {
   var cert = carregarCertificado();
   if (!cert) {
-    var err = new Error('Certificado digital A1 nao configurado. Envie o .pfx em POST /api/v1/nfe/certificado.');
+    var err = new Error('Certificado digital A1 nao configurado. No Render, defina as variaveis de ambiente NFE_CERT_PFX_BASE64 (conteudo do .pfx em base64) e NFE_CERT_SENHA. Alternativamente, envie via POST /api/v1/nfe/certificado (mas o arquivo sera perdido em reinicios).');
     err.code = 'CERT_AUSENTE';
     throw err;
   }
