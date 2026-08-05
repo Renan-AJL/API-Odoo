@@ -245,7 +245,7 @@ function gerarXmlNFe(data) {
   const tpNF = '1'; // saida
   const idDest = calcIdDest(company.state || company.UF, partner.state || partner.UF);
   const cMunFG = company.city_ibge_code || '';
-  const tpAmb = cfg.tpAmb || process.env.SIEG_TP_AMB || '1'; // 1=producao, 2=homologacao
+  const tpAmb = cfg.tpAmb || process.env.SIEG_TP_AMB || '2'; // 2=homologacao (padrao seguro), 1=producao — defina SIEG_TP_AMB=1 para producao
   const finNFe = cfg.finNFe || '1'; // 1=normal
   const indFinal = (partner.is_consumer || partner.indFinal) ? '1' : '0';
   const indPres = cfg.indPres || process.env.NFE_IND_PRES || '9'; // 9=operacao nao presencial, outros
