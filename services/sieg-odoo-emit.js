@@ -1067,4 +1067,124 @@ async function safeUpdateError(client, db, uid, pwd, moveId, tipo, errMsg) {
   } catch (e) { console.error('[SIEG-EMIT] Falha ao registrar erro:', e.message); }
 }
 
-module.exports = { processPendingEmissions };
+// ============================================================
+// Process Pending Cancellations (polling para status 'cancelando')
+// ============================================================
+/**
+ * Busca faturas com x_studio_nfe_status = 'cancelando' e envia o
+ * evento de cancelamento à SEFAZ PR, depois atualiza o Odoo.
+ * Chamado pelo runSiegPoll no server.js junto com processPendingEmissions.
+ */
+async function processPendingCancellations() {
+  var odoo = config.odoo;
+  if (!odoo || !odoo.enabled || !odoo.url) {
+    return { processed: 0, reason: 'odoo_not_configured' };
+  }
+
+  var client = createClient(odoo.url);
+  var uid = await authenticate(client, odoo.db, odoo.user, odoo.password);
+  var db = odoo.db;
+  var pwd = odoo.password;
+
+  var ids = await executeKw(client, db, uid, pwd, 'account.move', 'search', [[
+    ['move_type', '=', 'out_invoice'],
+    ['x_studio_nfe_status', '=', 'cancelando'],
+  ]], { order: 'id asc', limit: 5 });
+
+  if (!ids.length) return { processed: 0 };
+
+  console.log('[SIEG-CANCEL-POLL] ' + ids.length + ' fatura(s) aguardando cancelamento');
+
+  var { cancelarNFe } = require('./nfe-cancelamento');
+
+  var results = [];
+  for (var i = 0; i < ids.length; i++) {
+    var moveId = ids[i];
+    try {
+      var r = await cancelOneInvoice(client, db, uid, pwd, moveId, cancelarNFe);
+      results.push(r);
+    } catch (err) {
+      console.error('[SIEG-CANCEL-POLL] ERRO fatura ' + moveId + ':', err.message);
+      try {
+        await executeKw(client, db, uid, pwd, 'account.move', 'write',
+          [[moveId], { x_studio_nfe_status: 'erro' }]);
+        await executeKw(client, db, uid, pwd, 'mail.message', 'create', [{
+          model: 'account.move', res_id: moveId,
+          body: '<b>Erro no Cancelamento</b><br/>' + err.message.substring(0, 500),
+          message_type: 'comment',
+        }]);
+      } catch (e2) { console.error('[SIEG-CANCEL-POLL] Falha ao gravar erro:', e2.message); }
+      results.push({ move_id: moveId, sucesso: false, erro: err.message });
+    }
+  }
+
+  var ok = results.filter(function(r) { return r.sucesso; }).length;
+  console.log('[SIEG-CANCEL-POLL] Concluido: ' + ok + '/' + results.length + ' cancelada(s)');
+  return { processed: results.length, sucesso: ok };
+}
+
+async function cancelOneInvoice(client, db, uid, pwd, moveId, cancelarNFe) {
+  var moves = await executeKw(client, db, uid, pwd, 'account.move', 'read',
+    [[moveId], ['name', 'x_studio_nfe_chave', 'x_studio_nfe_protocolo',
+                'x_studio_nfe_status', 'company_id']]);
+  if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
+  var move = moves[0];
+
+  var chave     = (move.x_studio_nfe_chave || '').replace(/\D/g, '');
+  var protocolo = String(move.x_studio_nfe_protocolo || '').trim();
+  var justificativa = 'Cancelamento solicitado pelo emitente via Odoo';
+  if (justificativa.length < 15) justificativa = 'Cancelamento solicitado pelo emitente via Odoo';
+
+  console.log('[SIEG-CANCEL-POLL] Fatura ' + move.name + ' | chave=' + chave.slice(0, 15) + '...');
+
+  if (!chave || chave.length !== 44) throw new Error('Chave de acesso invalida (' + chave.length + ' digitos). Nota precisa estar autorizada.');
+  if (!protocolo) throw new Error('Protocolo de autorizacao ausente na fatura ' + move.name);
+
+  var companyId = Array.isArray(move.company_id) ? move.company_id[0] : move.company_id;
+  var companies = await executeKw(client, db, uid, pwd, 'res.company', 'read', [[companyId], ['vat']]);
+  var cnpj = ((companies && companies[0] && companies[0].vat) || '').replace(/\D/g, '');
+  if (!cnpj) throw new Error('CNPJ do emitente nao encontrado na empresa');
+
+  // Marcar como processando para nao processar duas vezes em paralelo
+  await executeKw(client, db, uid, pwd, 'account.move', 'write',
+    [[moveId], { x_studio_nfe_status: 'processando' }]);
+
+  var resultado = await cancelarNFe({ chave, protocolo, cnpj, justificativa });
+
+  var statusNovo = resultado.sucesso ? 'cancelada' : 'erro';
+  await executeKw(client, db, uid, pwd, 'account.move', 'write',
+    [[moveId], {
+      x_studio_nfe_status: statusNovo,
+      x_studio_nfe_protocolo: resultado.nProt || protocolo,
+    }]);
+
+  if (resultado.sucesso) {
+    try {
+      await executeKw(client, db, uid, pwd, 'account.move', 'button_draft', [[moveId]]);
+      await executeKw(client, db, uid, pwd, 'account.move', 'button_cancel', [[moveId]]);
+      console.log('[SIEG-CANCEL-POLL] Fatura ' + move.name + ' revertida no Odoo');
+    } catch (e) {
+      console.warn('[SIEG-CANCEL-POLL] Nao foi possivel reverter a fatura: ' + e.message);
+    }
+  }
+
+  var msgCorpo = resultado.sucesso
+    ? '<b>NF-e Cancelada na SEFAZ</b><br/>'
+      + 'Protocolo: ' + (resultado.nProt || protocolo) + '<br/>'
+      + 'Data: ' + (resultado.dhRecbto || '') + '<br/>'
+      + 'Justificativa: ' + justificativa
+    : '<b>Cancelamento rejeitado pela SEFAZ</b><br/>'
+      + 'Status: ' + resultado.cStat + ' - ' + resultado.xMotivo + '<br/>'
+      + 'Justificativa enviada: ' + justificativa;
+
+  try {
+    await executeKw(client, db, uid, pwd, 'mail.message', 'create', [{
+      model: 'account.move', res_id: moveId,
+      body: msgCorpo, message_type: 'comment',
+    }]);
+  } catch (e) { console.warn('[SIEG-CANCEL-POLL] Erro ao postar chatter:', e.message); }
+
+  return { move_id: moveId, sucesso: resultado.sucesso, fatura: move.name, cStat: resultado.cStat };
+}
+
+module.exports = { processPendingEmissions, processPendingCancellations };

@@ -166,13 +166,22 @@ function startSiegPolling() {
 }
 
 function runSiegPoll() {
-  var processPendingEmissions = require('./services/sieg-odoo-emit').processPendingEmissions;
-  processPendingEmissions().then(function(result) {
+  var emit = require('./services/sieg-odoo-emit');
+  // Emissoes pendentes
+  emit.processPendingEmissions().then(function(result) {
     if (result.processed > 0) {
       console.log('  [SIEG-POLL] ' + result.processed + ' fatura(s) processada(s), ' + (result.sucesso || 0) + ' autorizada(s)');
     }
   }).catch(function(err) {
-    console.error('  [SIEG-POLL] Erro:', err.message);
+    console.error('  [SIEG-POLL] Erro emissao:', err.message);
+  });
+  // Cancelamentos pendentes
+  emit.processPendingCancellations().then(function(result) {
+    if (result.processed > 0) {
+      console.log('  [SIEG-POLL] ' + result.processed + ' cancelamento(s) processado(s), ' + (result.sucesso || 0) + ' cancelada(s)');
+    }
+  }).catch(function(err) {
+    console.error('  [SIEG-POLL] Erro cancelamento:', err.message);
   });
 }
 
