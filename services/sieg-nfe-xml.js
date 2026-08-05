@@ -156,18 +156,17 @@ function xmlImpostoItem(line, crt, ibsInfo) {
   }
 
   // --- IPI ---
-  // Emitente do Regime Normal (CRT=3) deve informar o grupo IPI.
-  // Simples Nacional (CRT=1/2) nao informa IPI.
+  // Emitir IPI somente quando o Odoo realmente fornecer o CST do item.
   let ipiBlock = '';
-  if (String(crt || '') === '3') {
-    const cstIpi = line.cst_ipi || '50';
+  if (String(crt || '') === '3' && line.cst_ipi) {
+    const cstIpi = String(line.cst_ipi).replace(/\D/g, '').padStart(2, '0');
     const vBCIpi = num(line.vbc_ipi || '0.00');
     const pIpi   = num4(line.pipi || '0.00');
     const vIpi   = num(line.vipi || '0.00');
     const cEnq   = line.cenq || '999';
-    if (['01','02','03','04','51','52','53','54','55'].includes(String(cstIpi))) {
+    if (['51','52','53','54','55'].includes(cstIpi)) {
       ipiBlock = `<IPI><cEnq>${cEnq}</cEnq><IPINT><CST>${cstIpi}</CST></IPINT></IPI>`;
-    } else {
+    } else if (['00','49','50','99'].includes(cstIpi)) {
       ipiBlock = `<IPI><cEnq>${cEnq}</cEnq><IPITrib><CST>${cstIpi}</CST><vBC>${vBCIpi}</vBC><pIPI>${pIpi}</pIPI><vIPI>${vIpi}</vIPI></IPITrib></IPI>`;
     }
   }
@@ -537,12 +536,14 @@ ${xmlEndereco(partner, 'enderDest')}
     </total>`;
 
   // === transp ===
+  const modFrete = String(cfg.modFrete || '9');
+  const hasVolume = cfg.qVol != null && Number(cfg.qVol) > 0;
   xml += `
     <transp>
-      <modFrete>${cfg.modFrete || '9'}</modFrete>
+      <modFrete>${modFrete}</modFrete>${hasVolume ? `
       <vol>
-        <qVol>${cfg.qVol || '0'}</qVol>
-      </vol>
+        <qVol>${Math.trunc(Number(cfg.qVol))}</qVol>
+      </vol>` : ''}
     </transp>`;
 
   // === cobr (duplicatas) ===
