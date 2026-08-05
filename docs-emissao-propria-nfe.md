@@ -37,6 +37,12 @@ pelas variaveis `NFE_CERT_PFX_BASE64` / `NFE_CERT_SENHA`.
 
 ## 3. Enviar o certificado
 
+**Jeito facil (navegador):** abra `https://sua-api.onrender.com/api/v1/nfe/painel`,
+cole a API Key, escolha o `.pfx`, digite a senha e clique em **Enviar certificado**.
+A mesma pagina tem os botoes "Ver certificado atual" e "Testar conexao com a SEFAZ".
+
+**Pelo terminal (opcional):**
+
 ```bash
 node scripts/enviar-certificado.js ./AJL.pfx "SENHA_DO_PFX" \
   https://sua-api.onrender.com SUA_API_KEY
