@@ -597,17 +597,26 @@ ${xmlEndereco(partner, 'enderDest')}
   var respNome  = cfg.respTecContato          || process.env.NFE_RESP_TEC_CONTATO  || '';
   var respEmail = cfg.respTecEmail            || process.env.NFE_RESP_TEC_EMAIL    || '';
   var respFone  = onlyNum(cfg.respTecFone     || process.env.NFE_RESP_TEC_FONE     || '');
-  var respIdCSRT   = cfg.respTecIdCSRT   || process.env.NFE_RESP_TEC_ID_CSRT   || '';
-  var respHashCSRT = cfg.respTecHashCSRT || process.env.NFE_RESP_TEC_HASH_CSRT || '';
+  // idCSRT/hashCSRT: opcionais. Se NFE_RESP_TEC_TOKEN_CSRT estiver definido,
+  // o hash é calculado dinamicamente: base64(sha1(chave44 + token_csrt))
+  var respIdCSRT = cfg.respTecIdCSRT || process.env.NFE_RESP_TEC_ID_CSRT || '';
+  var respTokenCSRT = process.env.NFE_RESP_TEC_TOKEN_CSRT || '';
+  var respHashCSRT = '';
+  if (respIdCSRT && respTokenCSRT) {
+    var crypto = require('crypto');
+    // chave de 44 digitos sem o digito verificador prefixo 'NFe'
+    var chave44 = String(accessKey).replace(/\D/g, '').slice(0, 44);
+    respHashCSRT = crypto.createHash('sha1').update(chave44 + respTokenCSRT).digest('base64');
+  }
   if (respCnpj && respNome && respEmail && respFone) {
-    console.log('[NFE-XML] infRespTec CNPJ=' + respCnpj + ' contato=' + respNome + (respIdCSRT ? ' idCSRT=' + respIdCSRT : ''));
+    console.log('[NFE-XML] infRespTec CNPJ=' + respCnpj + ' contato=' + respNome + (respIdCSRT ? ' idCSRT=' + respIdCSRT : ' (sem CSRT)'));
     xml += '\n    <infRespTec>'
       + '\n      <CNPJ>' + respCnpj + '</CNPJ>'
       + '\n      <xContato>' + esc(respNome) + '</xContato>'
       + '\n      <email>' + esc(respEmail) + '</email>'
       + '\n      <fone>' + respFone + '</fone>'
-      + (respIdCSRT   ? '\n      <idCSRT>'   + respIdCSRT   + '</idCSRT>'   : '')
-      + (respHashCSRT ? '\n      <hashCSRT>' + respHashCSRT + '</hashCSRT>' : '')
+      + (respIdCSRT && respHashCSRT ? '\n      <idCSRT>'   + respIdCSRT   + '</idCSRT>'   : '')
+      + (respIdCSRT && respHashCSRT ? '\n      <hashCSRT>' + respHashCSRT + '</hashCSRT>' : '')
       + '\n    </infRespTec>';
   } else {
     console.error('[NFE-XML] *** infRespTec ausente — configure NFE_RESP_TEC_CNPJ, NFE_RESP_TEC_CONTATO, NFE_RESP_TEC_EMAIL e NFE_RESP_TEC_FONE ***');
