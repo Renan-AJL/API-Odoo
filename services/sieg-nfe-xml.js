@@ -249,7 +249,8 @@ function gerarXmlNFe(data) {
   const finNFe = cfg.finNFe || '1'; // 1=normal
   const indFinal = (partner.is_consumer || partner.indFinal) ? '1' : '0';
   const indPres = cfg.indPres || process.env.NFE_IND_PRES || '9'; // 9=operacao nao presencial, outros
-  const indIntermed = ['2','3','4'].includes(String(indPres)) ? (cfg.indIntermed || '0') : null;
+  // indIntermed obrigatorio quando indPres = 2, 3, 4 ou 9 (NT2015.003 / cStat 434 SEFAZ PR)
+  const indIntermed = ['2','3','4','9'].includes(String(indPres)) ? (cfg.indIntermed || '0') : null;
   const ibsCbsAtivo = String(cfg.ibsCbs != null ? cfg.ibsCbs : (process.env.NFE_IBSCBS || 'true')) !== 'false';
   const verProc = cfg.verProc || 'Odoo19-SIEG-1.0';
 
