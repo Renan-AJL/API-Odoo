@@ -183,16 +183,10 @@ function xmlImpostoItem(line, crt, ibsInfo) {
       + `</gIBSCBS></IBSCBS>`;
   }
 
-  // vTrib por item: soma dos tributos estimados (ICMS + PIS + COFINS) — obrigatorio pelo MOC 4.00
-  // A SEFAZ valida que a soma dos vTrib por item = vTotTrib no ICMSTot (cStat 685)
-  const vTribItem = num(
-    (parseFloat(line.vicms || 0))
-    + (parseFloat(line.vpis  || 0))
-    + (parseFloat(line.vcofins || 0))
-  );
-
-  // Ordem exigida pelo XSD NF-e 4.00: ICMS → IPI → PIS → COFINS → vTrib → IBSCBS
-  return `<imposto>${icmsBlock}${ipiBlock}${pisBlock}${cofinsBlock}<vTrib>${vTribItem}</vTrib>${ibsBlock}</imposto>`;
+  // NT2024/004 (IBSCBS): o schema PR-v4_9_86 nao aceita <vTrib> como filho de <imposto>
+  // quando IBSCBS esta presente. A informacao de tributos flui pelo proprio IBS/CBS.
+  // Ordem exigida pelo XSD: ICMS → IPI → PIS → COFINS → IBSCBS
+  return `<imposto>${icmsBlock}${ipiBlock}${pisBlock}${cofinsBlock}${ibsBlock}</imposto>`;
 }
 
 /**
@@ -494,13 +488,10 @@ ${xmlEndereco(partner, 'enderDest')}
     vCOFINS_total += parseFloat(line.vcofins || 0);
   });
 
-  // vTotTrib: soma dos tributos estimados por linha (ICMS + PIS + COFINS)
+  // vTotTrib: NT2024/004 com IBSCBS — a SEFAZ PR-v4_9_86 calcula como 0.00 quando nao ha
+  // <vTrib> por item. Zeramos aqui para manter consistencia (0.00 = 0.00, sem cStat 685).
   var vTotTrib = 0;
-  for (var vt = 0; vt < lines.length; vt++) {
-    vTotTrib += parseFloat(lines[vt].vicms || 0);
-    vTotTrib += parseFloat(lines[vt].vpis || 0);
-    vTotTrib += parseFloat(lines[vt].vcofins || 0);
-  }
+  // (loop removido: vTrib por item nao e permitido no schema com IBSCBS)
 
   const vNF = num(order.amount_total || vProdTotal);
   xml += `
