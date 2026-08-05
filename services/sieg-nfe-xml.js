@@ -191,8 +191,8 @@ function xmlImpostoItem(line, crt, ibsInfo) {
     + (parseFloat(line.vcofins || 0))
   );
 
-  // Ordem exigida pelo XSD: ICMS, IPI, PIS, COFINS, IBSCBS, vTrib
-  return `<imposto>${icmsBlock}${ipiBlock}${pisBlock}${cofinsBlock}${ibsBlock}<vTrib>${vTribItem}</vTrib></imposto>`;
+  // Ordem exigida pelo XSD NF-e 4.00: ICMS → IPI → PIS → COFINS → vTrib → IBSCBS
+  return `<imposto>${icmsBlock}${ipiBlock}${pisBlock}${cofinsBlock}<vTrib>${vTribItem}</vTrib>${ibsBlock}</imposto>`;
 }
 
 /**
