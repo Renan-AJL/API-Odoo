@@ -189,7 +189,7 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
     var axios = require('axios');
     var { getAuthHeaders } = require('../services/sieg-auth');
     var headers = await withTimeout(getAuthHeaders(), 15000);
-    var { dataInicio, dataFim, cnpjEmitente, cnpjDestinatario, pagina, tipoXml } = req.query;
+    var { dataInicio, dataFim, cnpjEmitente, cnpjDestinatario, pagina, tipoXml, nomeEmitente } = req.query;
 
     var skip = ((parseInt(pagina) || 1) - 1) * 50;
     var body = {
@@ -291,6 +291,13 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
       }
     }
 
+    // Filtro por nome do emitente (após parse do ZIP)
+    if (nomeEmitente) {
+      var ne = nomeEmitente.toUpperCase();
+      registros = registros.filter(function(r) {
+        return (r.emitente || '').toUpperCase().indexOf(ne) !== -1;
+      });
+    }
     res.json({ total: registros.length, registros, pagina: parseInt(pagina) || 1 });
   } catch(e) {
     console.error('[ADMIN] sieg/recebidas erro:', e.message);
@@ -608,6 +615,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
             </select>
           </div>
           <div class="fg"><label>CNPJ Emitente</label><input type="text" id="r-cnpj" placeholder="00.000.000/0001-00" style="min-width:170px"></div>
+          <div class="fg"><label>Nome Emitente</label><input type="text" id="r-emit" placeholder="Ex: Maximus, Ferragens..." style="min-width:180px"></div>
           <div class="fg"><label>&nbsp;</label>
             <div class="bgroup">
               <button class="btn btn-o" onclick="preset('r',0)">Hoje</button>
@@ -788,6 +796,8 @@ async function loadRec(){
   if(di) url+='&dataInicio='+di;
   if(df) url+='&dataFim='+df;
   if(cnpj) url+='&cnpjEmitente='+encodeURIComponent(cnpj);
+  var emitNome=document.getElementById('r-emit')?document.getElementById('r-emit').value.trim():'';
+  if(emitNome) url+='&nomeEmitente='+encodeURIComponent(emitNome);
 
   var d=await get(url);
   if(d.erro){ document.getElementById('r-tbl').innerHTML='<div class="err-box">⚠️ '+d.erro+'</div>'; return; }
@@ -818,8 +828,8 @@ async function loadRec(){
       html+='<div class="row-menu">'
         +'<button class="btn btn-o" style="padding:4px 10px;font-size:12px" onclick="toggleMenu(this)">⋯</button>'
         +'<div class="row-dropdown">'
-        +'<a href="'+xmlUrl+'" download="NFe_'+r.chave+'.xml">⬇ Baixar XML</a>'
-        +'<a href="/admin/api/sieg/pdf/'+r.chave+'" download="NFe_'+r.chave+'.pdf">⬇ Baixar PDF</a>'
+        +'<a href="#" class="dl-link" data-url="'+xmlUrl+'" data-file="NFe_'+r.chave+'.xml">⬇ Baixar XML</a>'
+        +'<a href="#" class="dl-link" data-url="/admin/api/sieg/pdf/'+r.chave+'" data-file="NFe_'+r.chave+'.pdf">⬇ Baixar PDF</a>'
         +'</div>'
         +'</div>';
     } else { html+='—'; }
@@ -828,6 +838,20 @@ async function loadRec(){
   });
   html+='</tbody></table></div>';
   document.getElementById('r-tbl').innerHTML=html;
+}
+
+// ── Download via fetch (evita bloqueio de cookie em <a> direto) ──
+async function downloadFile(url, filename){
+  try {
+    var r = await fetch(url, { credentials: 'include' });
+    if(!r.ok){ var e=await r.json().catch(()=>({erro:'Erro '+r.status})); alert('Erro: '+(e.erro||r.status)); return; }
+    var blob = await r.blob();
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 1000);
+  } catch(e){ alert('Erro ao baixar: '+e.message); }
 }
 
 // ── Menu dropdown por linha ──────────────────────────────────────
@@ -840,6 +864,14 @@ function toggleMenu(btn){
 }
 // Fechar ao clicar fora
 document.addEventListener('click',function(e){
+  // Download via fetch ao clicar em link de download
+  var dlLink = e.target.closest('.dl-link');
+  if(dlLink){
+    e.preventDefault();
+    downloadFile(dlLink.dataset.url, dlLink.dataset.file);
+    document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
+    return;
+  }
   if(!e.target.closest('.row-menu')) document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
 });
 
