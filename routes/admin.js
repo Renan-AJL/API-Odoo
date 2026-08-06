@@ -207,38 +207,67 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
     console.log('[ADMIN] ZIP entries:', entries.length);
 
     var registros = [];
+    var chavesVistas = {};
     for (var entry of entries) {
       if (entry.isDirectory) continue;
       try {
         var xmlStr = zip.readAsText(entry);
-        // Extrair campos do XML com regex simples
+
+        // Remover prefixos de namespace (ex: <nfe:infNFe> -> <infNFe>)
+        var xml = xmlStr
+          .replace(/\s+xmlns(?::[^=]+)?="[^"]*"/g, '')
+          .replace(/<([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '<'; })
+          .replace(/<\/([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '</'; });
+
+        // Extrai texto de uma tag
         function xt(tag) {
-          var m = xmlStr.match(new RegExp('<' + tag + '[^>]*>([\s\S]*?)<\/' + tag + '>'));
+          var re = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + tag + '>', 'i');
+          var m = xml.match(re);
           return m ? m[1].replace(/<[^>]+>/g, '').trim() : '';
         }
-        // Chave está no atributo Id da tag infNFe ou infCte
-        var chaveMatch = xmlStr.match(/Id="NFe(\d{44})"/i) || xmlStr.match(/chNFe>(\d{44})</i);
-        var chave = chaveMatch ? chaveMatch[1] : '';
-        // Emitente fica dentro de <emit>, destinatário dentro de <dest>
-        function xblock(block, tag) {
-          var bm = xmlStr.match(new RegExp('<' + block + '[\s\S]*?<\/' + block + '>'));
-          if (!bm) return '';
-          var m = bm[0].match(new RegExp('<' + tag + '[^>]*>([\s\S]*?)<\/' + tag + '>'));
-          return m ? m[1].replace(/<[^>]+>/g, '').trim() : '';
+        // Extrai texto de uma tag dentro de um bloco pai
+        function xb(parent, tag) {
+          var rp = new RegExp('<' + parent + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + parent + '>', 'i');
+          var mp = xml.match(rp);
+          if (!mp) return '';
+          var re2 = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + tag + '>', 'i');
+          var m2 = mp[1].match(re2);
+          return m2 ? m2[1].replace(/<[^>]+>/g, '').trim() : '';
         }
+
+        // Chave de acesso — atributo Id ou tag chNFe/chCTe
+        var chaveM = xml.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i)
+                  || xml.match(/<chNFe>(\d{44})</)
+                  || xml.match(/<chCTe>(\d{44})</);
+        var chave = chaveM ? chaveM[1] : '';
+
+        // Deduplicar por chave
+        if (chave && chavesVistas[chave]) continue;
+        if (chave) chavesVistas[chave] = true;
+
+        var emitNome = xb('emit','xFant') || xb('emit','xNome') || '';
+        var emitCNPJ = xb('emit','CNPJ')  || xb('emit','CPF')   || '';
+        var destNome = xb('dest','xNome') || '';
+        var destCNPJ = xb('dest','CNPJ')  || xb('dest','CPF')   || '';
+        var dhEmi    = xt('dhEmi') || xt('dEmi') || '';
+        var vNF      = parseFloat(xt('vNF') || xt('vCT') || xt('vTPrest') || '0') || 0;
+        var nNF      = xt('nNF') || xt('nCT') || xt('nMDF') || '';
+        var serie    = xt('serie') || '';
+
         registros.push({
-          arquivo: entry.entryName,
-          chave: chave,
-          numero: xt('nNF') || xt('nCT'),
-          serie: xt('serie'),
-          emitente: xblock('emit','xNome') || xblock('emit','xFant') || '',
-          cnpjEmitente: xblock('emit','CNPJ') || xblock('emit','CPF') || '',
-          destinatario: xblock('dest','xNome') || '',
-          cnpjDestinatario: xblock('dest','CNPJ') || xblock('dest','CPF') || '',
-          dataEmissao: (xt('dhEmi') || xt('dEmi') || '').slice(0, 10),
-          valor: parseFloat(xt('vNF') || xt('vCT') || xt('vTPrest') || '0') || 0,
-          status: '',
+          chave,
+          numero: nNF,
+          serie,
+          emitente: emitNome,
+          cnpjEmitente: emitCNPJ,
+          destinatario: destNome,
+          cnpjDestinatario: destCNPJ,
+          dataEmissao: dhEmi.slice(0, 10),
+          valor: vNF,
         });
+        if (registros.length <= 2) {
+          console.log('[ADMIN] XML parse sample — emit:', emitNome, 'dest:', destNome, 'nNF:', nNF, 'vNF:', vNF, 'chave:', chave.slice(0,10));
+        }
       } catch(ezip) {
         console.warn('[ADMIN] Erro ao parsear entry', entry.entryName, ezip.message);
       }
@@ -434,10 +463,11 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
           <div class="fg"><label>Até</label><input type="date" id="r-df"></div>
           <div class="fg"><label>Tipo</label>
             <select id="r-tipo">
-              <option value="1">NF-e Recebidas</option>
-              <option value="100">NF-e Emitidas (SEFAZ)</option>
-              <option value="2">NF-e Emitidas (cofre)</option>
-              <option value="99">Todos os tipos</option>
+              <option value="1">NF-e Recebidas (entradas)</option>
+              <option value="2">NF-e Emitidas (cofre SIEG)</option>
+              <option value="3">CT-e</option>
+              <option value="4">NFS-e</option>
+              <option value="6">NFC-e</option>
             </select>
           </div>
           <div class="fg"><label>CNPJ Emitente</label><input type="text" id="r-cnpj" placeholder="00.000.000/0001-00" style="min-width:170px"></div>
