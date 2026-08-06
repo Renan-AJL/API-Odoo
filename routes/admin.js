@@ -189,33 +189,60 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
     console.log('[ADMIN] sieg/recebidas body:', JSON.stringify(body));
 
     var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
-      headers, timeout: 25000,
+      headers, timeout: 25000, responseType: 'arraybuffer',
     }), 30000);
 
-    console.log('[ADMIN] sieg/recebidas HTTP', resp.status, JSON.stringify(resp.data).slice(0, 300));
+    // A SIEG retorna um arquivo ZIP binário com os XMLs
+    // Precisamos descompactar e extrair dados de cada XML
+    var respBuffer = resp.data; // Buffer (axios com responseType: 'arraybuffer')
+    console.log('[ADMIN] sieg/recebidas HTTP', resp.status, 'bytes:', respBuffer && respBuffer.length);
 
-    var data = resp.data;
-    if (!data.success && data.message) {
-      return res.json({ erro: 'SIEG: ' + data.message, registros: [] });
+    if (!Buffer.isBuffer(respBuffer) && !respBuffer) {
+      return res.json({ erro: 'Resposta vazia da SIEG', registros: [] });
     }
 
-    var items = data.data || data.items || data.Items || [];
-    if (!Array.isArray(items)) items = [];
+    var AdmZip = require('adm-zip');
+    var zip = new AdmZip(respBuffer);
+    var entries = zip.getEntries();
+    console.log('[ADMIN] ZIP entries:', entries.length);
 
-    var registros = items.map(x => ({
-      id: x.id || x.Id || x.ChaveAcesso || '',
-      chave: x.ChaveAcesso || x.chaveAcesso || x.ChNFe || '',
-      numero: x.NNF || x.nNF || x.NumeroDocumento || x.numero || '',
-      serie: x.Serie || x.serie || '',
-      emitente: x.XNomeEmi || x.xNomeEmi || x.RazaoSocialEmitente || x.NomeEmitente || '',
-      cnpjEmitente: x.CNPJEmi || x.cnpjEmi || x.CnpjEmitente || '',
-      destinatario: x.XNomeDest || x.xNomeDest || x.NomeDestinatario || '',
-      cnpjDestinatario: x.CNPJDest || x.cnpjDest || x.CnpjDestinatario || '',
-      dataEmissao: x.DhEmi || x.dhEmi || x.DataEmissao || x.dataEmissao || '',
-      valor: x.VNF || x.vNF || x.ValorTotal || x.valorTotal || 0,
-      status: x.Situacao || x.situacao || x.Status || '',
-      tipoXml: x.TipoXml || x.tipoXml || '',
-    }));
+    var registros = [];
+    for (var entry of entries) {
+      if (entry.isDirectory) continue;
+      try {
+        var xmlStr = zip.readAsText(entry);
+        // Extrair campos do XML com regex simples
+        function xt(tag) {
+          var m = xmlStr.match(new RegExp('<' + tag + '[^>]*>([\s\S]*?)<\/' + tag + '>'));
+          return m ? m[1].replace(/<[^>]+>/g, '').trim() : '';
+        }
+        // Chave está no atributo Id da tag infNFe ou infCte
+        var chaveMatch = xmlStr.match(/Id="NFe(\d{44})"/i) || xmlStr.match(/chNFe>(\d{44})</i);
+        var chave = chaveMatch ? chaveMatch[1] : '';
+        // Emitente fica dentro de <emit>, destinatário dentro de <dest>
+        function xblock(block, tag) {
+          var bm = xmlStr.match(new RegExp('<' + block + '[\s\S]*?<\/' + block + '>'));
+          if (!bm) return '';
+          var m = bm[0].match(new RegExp('<' + tag + '[^>]*>([\s\S]*?)<\/' + tag + '>'));
+          return m ? m[1].replace(/<[^>]+>/g, '').trim() : '';
+        }
+        registros.push({
+          arquivo: entry.entryName,
+          chave: chave,
+          numero: xt('nNF') || xt('nCT'),
+          serie: xt('serie'),
+          emitente: xblock('emit','xNome') || xblock('emit','xFant') || '',
+          cnpjEmitente: xblock('emit','CNPJ') || xblock('emit','CPF') || '',
+          destinatario: xblock('dest','xNome') || '',
+          cnpjDestinatario: xblock('dest','CNPJ') || xblock('dest','CPF') || '',
+          dataEmissao: (xt('dhEmi') || xt('dEmi') || '').slice(0, 10),
+          valor: parseFloat(xt('vNF') || xt('vCT') || xt('vTPrest') || '0') || 0,
+          status: '',
+        });
+      } catch(ezip) {
+        console.warn('[ADMIN] Erro ao parsear entry', entry.entryName, ezip.message);
+      }
+    }
 
     res.json({ total: registros.length, registros, pagina: parseInt(pagina) || 1 });
   } catch(e) {
@@ -587,17 +614,17 @@ async function loadRec(){
   var tot=reg.reduce((a,r)=>a+(parseFloat(r.valor)||0),0);
   document.getElementById('r-sum').innerHTML='<div class="sum">'+reg.length+' nota(s) &nbsp;·&nbsp; Total: <b>'+fmtVal(tot)+'</b></div>';
 
-  var html='<div class="tw"><table><thead><tr><th>#</th><th>Emitente</th><th>CNPJ</th><th>Nº Doc</th><th>Data</th><th>Valor</th><th>Situação</th><th>Chave</th></tr></thead><tbody>';
+  var html='<div class="tw"><table><thead><tr><th>#</th><th>Nº/Série</th><th>Emitente</th><th>CNPJ Emit.</th><th>Destinatário</th><th>Data</th><th>Valor</th><th>Chave</th></tr></thead><tbody>';
   reg.forEach((r,i)=>{
     html+='<tr>';
     html+='<td style="color:var(--tx2);font-size:12px">'+(i+1)+'</td>';
+    html+='<td style="font-family:monospace;font-size:12px">'+(r.numero||'—')+(r.serie?'/'+r.serie:'')+'</td>';
     html+='<td>'+r.emitente+'</td>';
     html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjEmitente||'—')+'</td>';
-    html+='<td style="font-family:monospace">'+(r.numero||'—')+'</td>';
+    html+='<td>'+(r.destinatario||'—')+'</td>';
     html+='<td>'+fmtDate(r.dataEmissao)+'</td>';
     html+='<td>'+fmtVal(r.valor)+'</td>';
-    html+='<td>'+badge(r.status)+'</td>';
-    html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)" title="'+r.chave+'">'+fmtChave(r.chave)+'</td>';
+    html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)" title="'+(r.chave||'')+'">'+fmtChave(r.chave)+'</td>';
     html+='</tr>';
   });
   html+='</tbody></table></div>';

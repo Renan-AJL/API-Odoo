@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.6",
+    "adm-zip": "^0.6.0",
     "axios": "^1.7.0",
     "bwip-js": "^4.1.0",
     "cookie-parser": "^1.4.7",
