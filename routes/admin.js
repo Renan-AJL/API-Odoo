@@ -281,6 +281,55 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
 });
 
 
+// Download XML individual por chave — refaz a chamada com filtro de 1 nota
+// Usa CNPJemit + período amplo e extrai a nota pelo chave do ZIP
+router.get('/api/sieg/xml/:chave', auth, async (req, res) => {
+  try {
+    var axios  = require('axios');
+    var AdmZip = require('adm-zip');
+    var { getAuthHeaders } = require('../services/sieg-auth');
+    var headers = await withTimeout(getAuthHeaders(), 15000);
+    var chave  = req.params.chave;
+    var tipoXml = parseInt(req.query.tipoXml) || 1;
+
+    // Extrair data da chave (posição 2-9 = cAMO = AAMM + DD)
+    // Chave NF-e: cUF(2)+AAMM(4)+CNPJ(14)+mod(2)+serie(3)+nNF(9)+tpEmis(1)+cNF(8)+cDV(1) = 44 dígitos
+    var aamm = chave.slice(2, 6); // ex: "2608" = agosto 2026
+    var ano  = '20' + aamm.slice(0, 2);
+    var mes  = aamm.slice(2, 4);
+    var di   = ano + '-' + mes + '-01';
+    var dfDate = new Date(parseInt(ano), parseInt(mes), 0); // último dia do mês
+    var df   = ano + '-' + mes + '-' + String(dfDate.getDate()).padStart(2,'0');
+
+    var body = { TipoXml: tipoXml, Take: 200, Skip: 0,
+      DataEmissaoInicio: di + 'T00:00:00Z',
+      DataEmissaoFim:    df + 'T23:59:59Z',
+    };
+
+    var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+      headers, timeout: 30000, responseType: 'arraybuffer',
+    }), 35000);
+
+    var zip     = new AdmZip(resp.data);
+    var entries = zip.getEntries();
+    var found   = null;
+
+    for (var entry of entries) {
+      if (entry.isDirectory) continue;
+      var xmlStr = zip.readAsText(entry);
+      if (xmlStr.indexOf(chave) !== -1) { found = xmlStr; break; }
+    }
+
+    if (!found) return res.status(404).json({ erro: 'XML com chave ' + chave + ' não encontrado no período' });
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.xml"');
+    res.send(found);
+  } catch(e) {
+    res.status(500).json({ erro: e.message });
+  }
+});
+
 // Download ZIP direto da SIEG
 router.get('/api/sieg/download-zip', auth, async (req, res) => {
   try {
@@ -699,7 +748,7 @@ async function loadRec(){
   var tot=reg.reduce((a,r)=>a+(parseFloat(r.valor)||0),0);
   document.getElementById('r-sum').innerHTML='<div class="sum">'+reg.length+' nota(s) &nbsp;·&nbsp; Total: <b>'+fmtVal(tot)+'</b></div>';
 
-  var html='<div class="tw"><table><thead><tr><th>#</th><th>Nº/Série</th><th>Emitente</th><th>CNPJ Emit.</th><th>Destinatário</th><th>Data</th><th>Valor</th><th>Chave</th></tr></thead><tbody>';
+  var html='<div class="tw"><table><thead><tr><th>#</th><th>Nº/Série</th><th>Emitente</th><th>CNPJ Emit.</th><th>Destinatário</th><th>Data</th><th>Valor</th><th>Chave</th><th>XML</th></tr></thead><tbody>';
   reg.forEach((r,i)=>{
     html+='<tr>';
     html+='<td style="color:var(--tx2);font-size:12px">'+(i+1)+'</td>';
@@ -710,6 +759,8 @@ async function loadRec(){
     html+='<td>'+fmtDate(r.dataEmissao)+'</td>';
     html+='<td>'+fmtVal(r.valor)+'</td>';
     html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)" title="'+(r.chave||'')+'">'+fmtChave(r.chave)+'</td>';
+    var tipoAtual=document.getElementById('r-tipo')?document.getElementById('r-tipo').value:'1';
+    html+='<td>'+(r.chave?'<a href="/admin/api/sieg/xml/'+r.chave+'?tipoXml='+tipoAtual+'" download="NFe_'+r.chave+'.xml" class="btn btn-o" style="padding:3px 8px;font-size:11px;text-decoration:none">⬇ XML</a>':'—')+'</td>';
     html+='</tr>';
   });
   html+='</tbody></table></div>';
