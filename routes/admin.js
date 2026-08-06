@@ -702,7 +702,7 @@ async function api(url){
   try {
     var ctrl=new AbortController();
     var tid=setTimeout(()=>ctrl.abort(),25000);
-    var r=await fetch(url,{signal:ctrl.signal});
+    var r=await fetch(url,{signal:ctrl.signal,credentials:'include'});
     clearTimeout(tid);
     var txt=await r.text();
     try{ return JSON.parse(txt); }

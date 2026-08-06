@@ -65,7 +65,7 @@ if (config.nodeEnv !== 'test') {
 }
 
 // --- Routes ---
-const cookieParser = require('./node_modules/cookie-parser');
+const cookieParser = require('cookie-parser');
 const adminRoutes  = require('./routes/admin');
 const healthRoutes = require('./routes/health');
 const cnpjRoutes = require('./routes/cnpj');
