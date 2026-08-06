@@ -1,5 +1,5 @@
 /**
- * routes/admin.js — Painel Admin AJL (v3 — sem dependência cookie-parser)
+ * routes/admin.js — Painel Admin AJL (v4 — filtros SIEG estilo imagem)
  */
 'use strict';
 const express = require('express');
@@ -18,7 +18,6 @@ function cacheGet(chave) {
   if (Date.now() - e.ts > ZIP_CACHE_TTL) { delete _zipCache[chave]; return null; }
   return e.xml;
 }
-// Limpar entradas expiradas a cada 10 min
 setInterval(function() {
   var now = Date.now();
   Object.keys(_zipCache).forEach(function(k) { if (now - _zipCache[k].ts > ZIP_CACHE_TTL) delete _zipCache[k]; });
@@ -70,14 +69,12 @@ function validateToken(token) {
 function auth(req, res, next) {
   var cookies = parseCookies(req);
   if (validateToken(cookies[COOKIE_NAME])) return next();
-  // Aceita também via header Authorization para testes
   var ah = req.headers['authorization'] || '';
   if (ah.startsWith('Bearer ') && validateToken(ah.slice(7))) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ erro: 'Não autenticado' });
   res.redirect('/admin/login');
 }
 
-// ── Odoo helpers ──────────────────────────────────────────────────
 function withTimeout(p, ms) {
   return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout ' + ms + 'ms')), ms))]);
 }
@@ -133,30 +130,25 @@ router.get('/logout', (req, res) => {
   res.redirect('/admin/login');
 });
 
-// ── Dashboard (HTML) ──────────────────────────────────────────────
 router.get('/', auth, (req, res) => res.send(dashHtml()));
 
 // ════════════════════════════════════════════════════════════════
 // APIs — SIEG
 // ════════════════════════════════════════════════════════════════
 
-// NF-e emitidas — lidas do Odoo (têm chave autorizada)
 router.get('/api/sieg/emitidas', auth, async (req, res) => {
   try {
     var cfg = config.odoo;
     if (!cfg.url) return res.json({ erro: 'ODOO_URL não configurada', registros: [] });
     var { dataInicio, dataFim, status: st, busca } = req.query;
-
     var c   = odooClient(cfg.url);
     var uid = await odooAuth(c, cfg.db, cfg.user, cfg.password);
     var ekw = (m, mt, a, k) => odooKw(c, cfg.db, uid, cfg.password, m, mt, a, k);
-
     var domain = [['move_type', '=', 'out_invoice'], ['x_studio_nfe_chave', '!=', false]];
     if (st && st !== 'todos') domain.push(['x_studio_nfe_status', '=', st]);
     if (dataInicio) domain.push(['invoice_date', '>=', dataInicio]);
     if (dataFim)    domain.push(['invoice_date', '<=', dataFim]);
     if (busca)      domain.push(['name', 'ilike', busca]);
-
     var ids = await ekw('account.move', 'search', [domain], { order: 'invoice_date desc', limit: 200 });
     var registros = [];
     if (ids.length) {
@@ -182,14 +174,13 @@ router.get('/api/sieg/emitidas', auth, async (req, res) => {
   }
 });
 
-// NF-e recebidas — POST /api/v1/baixar-xmls (TipoXml=1 = NF-e entrada)
-// TipoXml: 1=NFe recebida, 2=NFe emitida cofre, 3=CTe, 4=NFSe, 5=CFe, 6=NFCe, 7=CTe OS, 8=CTe emitido, 10=MDFe, 99=todos, 100=NFe emitida SEFAZ
+// NF-e recebidas — idêntico ao bcc8d068, + filtro nomeDestinatario
 router.get('/api/sieg/recebidas', auth, async (req, res) => {
   try {
     var axios = require('axios');
     var { getAuthHeaders } = require('../services/sieg-auth');
     var headers = await withTimeout(getAuthHeaders(), 15000);
-    var { dataInicio, dataFim, cnpjEmitente, cnpjDestinatario, pagina, tipoXml, nomeEmitente } = req.query;
+    var { dataInicio, dataFim, cnpjEmitente, cnpjDestinatario, pagina, tipoXml, nomeEmitente, nomeDestinatario } = req.query;
 
     var skip = ((parseInt(pagina) || 1) - 1) * 50;
     var body = {
@@ -208,9 +199,7 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
       headers, timeout: 25000, responseType: 'arraybuffer',
     }), 30000);
 
-    // A SIEG retorna um arquivo ZIP binário com os XMLs
-    // Precisamos descompactar e extrair dados de cada XML
-    var respBuffer = resp.data; // Buffer (axios com responseType: 'arraybuffer')
+    var respBuffer = resp.data;
     console.log('[ADMIN] sieg/recebidas HTTP', resp.status, 'bytes:', respBuffer && respBuffer.length);
 
     if (!Buffer.isBuffer(respBuffer) && !respBuffer) {
@@ -228,20 +217,16 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
       if (entry.isDirectory) continue;
       try {
         var xmlStr = zip.readAsText(entry);
-
-        // Remover prefixos de namespace (ex: <nfe:infNFe> -> <infNFe>)
         var xml = xmlStr
           .replace(/\s+xmlns(?::[^=]+)?="[^"]*"/g, '')
           .replace(/<([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '<'; })
           .replace(/<\/([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '</'; });
 
-        // Extrai texto de uma tag
         function xt(tag) {
           var re = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + tag + '>', 'i');
           var m = xml.match(re);
           return m ? m[1].replace(/<[^>]+>/g, '').trim() : '';
         }
-        // Extrai texto de uma tag dentro de um bloco pai
         function xb(parent, tag) {
           var rp = new RegExp('<' + parent + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + parent + '>', 'i');
           var mp = xml.match(rp);
@@ -251,16 +236,13 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
           return m2 ? m2[1].replace(/<[^>]+>/g, '').trim() : '';
         }
 
-        // Chave de acesso — atributo Id ou tag chNFe/chCTe
         var chaveM = xml.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i)
                   || xml.match(/<chNFe>(\d{44})</)
                   || xml.match(/<chCTe>(\d{44})</);
         var chave = chaveM ? chaveM[1] : '';
 
-        // Deduplicar por chave
         if (chave && chavesVistas[chave]) continue;
         if (chave) chavesVistas[chave] = true;
-        // Popular cache para download individual
         if (chave) cacheSet(chave, xmlStr);
 
         var emitNome = xb('emit','xFant') || xb('emit','xNome') || '';
@@ -273,15 +255,10 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
         var serie    = xt('serie') || '';
 
         registros.push({
-          chave,
-          numero: nNF,
-          serie,
-          emitente: emitNome,
-          cnpjEmitente: emitCNPJ,
-          destinatario: destNome,
-          cnpjDestinatario: destCNPJ,
-          dataEmissao: dhEmi.slice(0, 10),
-          valor: vNF,
+          chave, numero: nNF, serie,
+          emitente: emitNome, cnpjEmitente: emitCNPJ,
+          destinatario: destNome, cnpjDestinatario: destCNPJ,
+          dataEmissao: dhEmi.slice(0, 10), valor: vNF,
         });
         if (registros.length <= 2) {
           console.log('[ADMIN] XML parse sample — emit:', emitNome, 'dest:', destNome, 'nNF:', nNF, 'vNF:', vNF, 'chave:', chave.slice(0,10));
@@ -291,12 +268,13 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
       }
     }
 
-    // Filtro por nome do emitente (após parse do ZIP)
     if (nomeEmitente) {
       var ne = nomeEmitente.toUpperCase();
-      registros = registros.filter(function(r) {
-        return (r.emitente || '').toUpperCase().indexOf(ne) !== -1;
-      });
+      registros = registros.filter(function(r) { return (r.emitente || '').toUpperCase().indexOf(ne) !== -1; });
+    }
+    if (nomeDestinatario) {
+      var nd = nomeDestinatario.toUpperCase();
+      registros = registros.filter(function(r) { return (r.destinatario || '').toUpperCase().indexOf(nd) !== -1; });
     }
     res.json({ total: registros.length, registros, pagina: parseInt(pagina) || 1 });
   } catch(e) {
@@ -305,19 +283,16 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
   }
 });
 
-
-// Download XML individual por chave — usa cache do ZIP já baixado
+// Download XML individual
 router.get('/api/sieg/xml/:chave', auth, async (req, res) => {
   try {
     var chave = req.params.chave;
-    // 1. Tentar cache (populado quando a tabela foi consultada)
     var cached = cacheGet(chave);
     if (cached) {
       res.setHeader('Content-Type', 'application/xml; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.xml"');
       return res.send(cached);
     }
-    // 2. Fallback: buscar o mês inteiro da chave na SIEG
     var axios  = require('axios');
     var AdmZip = require('adm-zip');
     var { getAuthHeaders } = require('../services/sieg-auth');
@@ -329,13 +304,9 @@ router.get('/api/sieg/xml/:chave', auth, async (req, res) => {
     var di   = ano + '-' + mes + '-01';
     var dfDate = new Date(parseInt(ano), parseInt(mes), 0);
     var df   = ano + '-' + mes + '-' + String(dfDate.getDate()).padStart(2,'0');
-
     console.log('[ADMIN] xml/chave fallback SIEG — chave:', chave.slice(0,10)+'...', 'período:', di, '-', df);
-
-    // Buscar sem filtro de CNPJ para garantir achar (tanto emitida quanto recebida)
     var body = { TipoXml: tipoXml, Take: 500, Skip: 0,
-      DataEmissaoInicio: di + 'T00:00:00Z',
-      DataEmissaoFim:    df + 'T23:59:59Z',
+      DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
     };
     var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
       headers, timeout: 30000, responseType: 'arraybuffer',
@@ -346,7 +317,6 @@ router.get('/api/sieg/xml/:chave', auth, async (req, res) => {
     for (var entry of entries) {
       if (entry.isDirectory) continue;
       var xmlStr = zip.readAsText(entry);
-      // popular cache para todas as entradas encontradas
       var km = xmlStr.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
       if (km) cacheSet(km[1], xmlStr);
       if (xmlStr.indexOf(chave) !== -1) found = xmlStr;
@@ -361,20 +331,57 @@ router.get('/api/sieg/xml/:chave', auth, async (req, res) => {
   }
 });
 
-// Download PDF individual por chave — endpoint SIEG /api/v1/GetPdf
+// Download PDF — gera DANFE local via danfe-pdf.js (GetPdf SIEG retorna 404)
 router.get('/api/sieg/pdf/:chave', auth, async (req, res) => {
   try {
-    var axios  = require('axios');
-    var { getAuthHeaders } = require('../services/sieg-auth');
-    var headers = await withTimeout(getAuthHeaders(), 15000);
     var chave   = req.params.chave;
-    // SIEG endpoint para PDF individual
-    var resp = await withTimeout(axios.get('https://api.sieg.com/api/v1/GetPdf?chaveAcesso=' + chave, {
-      headers, timeout: 30000, responseType: 'arraybuffer',
-    }), 35000);
+    var tipoXml = parseInt(req.query.tipoXml) || 1;
+
+    // 1. Tentar cache XML (populado na listagem)
+    var xmlStr = cacheGet(chave);
+
+    // 2. Fallback: buscar mês da chave no cofre SIEG
+    if (!xmlStr) {
+      var axios  = require('axios');
+      var AdmZip = require('adm-zip');
+      var { getAuthHeaders } = require('../services/sieg-auth');
+      var headers = await withTimeout(getAuthHeaders(), 15000);
+      var aamm = chave.slice(2, 6);
+      var ano  = '20' + aamm.slice(0, 2);
+      var mes  = aamm.slice(2, 4);
+      var di   = ano + '-' + mes + '-01';
+      var dfD  = new Date(parseInt(ano), parseInt(mes), 0);
+      var df   = ano + '-' + mes + '-' + String(dfD.getDate()).padStart(2,'0');
+      console.log('[ADMIN] pdf fallback SIEG — chave:', chave.slice(0,10)+'...', 'período:', di, '-', df);
+      var zResp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', {
+        TipoXml: tipoXml, Take: 500, Skip: 0,
+        DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
+      }, { headers, timeout: 30000, responseType: 'arraybuffer' }), 35000);
+      var zip = new AdmZip(zResp.data);
+      for (var entry of zip.getEntries()) {
+        if (entry.isDirectory) continue;
+        var xs = zip.readAsText(entry);
+        var km = xs.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
+        if (km) cacheSet(km[1], xs);
+        if (xs.indexOf(chave) !== -1) xmlStr = xs;
+      }
+    }
+
+    if (!xmlStr) {
+      return res.status(404).json({
+        erro: 'XML não encontrado no cofre SIEG — não é possível gerar o DANFE.',
+        dica: 'Recarregue a listagem antes de baixar o PDF (popula o cache do XML).',
+        chave,
+      });
+    }
+
+    // 3. Gerar DANFE localmente (pdfkit + bwip-js)
+    var { gerarDanfePdf } = require('../services/danfe-pdf');
+    var pdfBuf = await gerarDanfePdf(xmlStr);
+    console.log('[ADMIN] pdf DANFE local OK —', pdfBuf.length, 'bytes, chave:', chave.slice(0,10)+'...');
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.pdf"');
-    res.send(Buffer.from(resp.data));
+    res.send(pdfBuf);
   } catch(e) {
     console.error('[ADMIN] pdf/chave erro:', e.message);
     res.status(500).json({ erro: e.message });
@@ -388,24 +395,19 @@ router.get('/api/sieg/download-zip', auth, async (req, res) => {
     var { getAuthHeaders } = require('../services/sieg-auth');
     var headers = await withTimeout(getAuthHeaders(), 15000);
     var { dataInicio, dataFim, tipoXml } = req.query;
-
     var hoje = new Date();
-    var tresAtrás = new Date(hoje); tresAtrás.setDate(hoje.getDate() - 3);
-    var di = dataInicio || tresAtrás.toISOString().slice(0,10);
+    var tresAtras = new Date(hoje); tresAtras.setDate(hoje.getDate() - 3);
+    var di = dataInicio || tresAtras.toISOString().slice(0,10);
     var df = dataFim    || hoje.toISOString().slice(0,10);
-
     var body = {
       TipoXml: parseInt(tipoXml) || 1,
-      Take: 200,
-      Skip: 0,
+      Take: 200, Skip: 0,
       DataEmissaoInicio: di + 'T00:00:00Z',
       DataEmissaoFim:    df + 'T23:59:59Z',
     };
-
     var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
       headers, timeout: 30000, responseType: 'arraybuffer',
     }), 35000);
-
     var tipoLabel = { 1:'recebidas', 2:'emitidas-cofre', 3:'cte', 4:'nfse', 6:'nfce' };
     var nome = 'sieg-nfe-' + (tipoLabel[parseInt(tipoXml)||1] || 'docs') + '-' + di + '-a-' + df + '.zip';
     res.setHeader('Content-Type', 'application/zip');
@@ -416,7 +418,6 @@ router.get('/api/sieg/download-zip', auth, async (req, res) => {
   }
 });
 
-// Status geral (leve — sem Odoo)
 router.get('/api/status', auth, (req, res) => {
   var sieg = { tpAmb: process.env.SIEG_TP_AMB === '1' ? 'Produção' : 'Homologação' };
   res.json({
@@ -475,26 +476,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .tag-hom{background:#3a2e1f;color:#d29922;border:1px solid #bb8009}
 .ml{margin-left:auto}.topbar a{color:var(--tx2);font-size:13px;text-decoration:none}
 .topbar a:hover{color:var(--tx)}
-
-/* tabs */
 .tabs{background:var(--bg2);border-bottom:1px solid var(--bd);padding:0 20px;display:flex;overflow-x:auto}
 .tab{padding:14px 18px;font-size:13px;font-weight:500;color:var(--tx2);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;user-select:none}
 .tab:hover{color:var(--tx)}.tab.on{color:var(--ac);border-bottom-color:var(--ac)}
-
-/* sub-tabs (dentro de SIEG) */
 .subtabs{display:flex;gap:0;margin-bottom:20px;background:var(--bg3);border-radius:8px;padding:4px;width:fit-content}
 .stab{padding:7px 18px;border-radius:6px;font-size:13px;font-weight:500;color:var(--tx2);cursor:pointer;transition:all .15s;user-select:none}
 .stab:hover{color:var(--tx)}.stab.on{background:var(--bg2);color:var(--ac);box-shadow:0 1px 4px rgba(0,0,0,.3)}
-
-/* main */
 .main{padding:24px;max-width:1400px;margin:0 auto}
 .pane{display:none}.pane.on{display:block}
 .panel{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;overflow:hidden;margin-bottom:20px}
 .ph{padding:16px 20px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .ph h3{font-size:14px;font-weight:600;color:#fff;flex:1}
 .pb{padding:20px}
-
-/* filtros */
 .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
 .fg{display:flex;flex-direction:column;gap:4px}
 .fg label{font-size:11px;color:var(--tx2);text-transform:uppercase;letter-spacing:.4px}
@@ -503,24 +496,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .btn{padding:7px 14px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:500}
 .btn-p{background:var(--ac);color:#fff}.btn-p:hover{background:#79b8ff}
 .btn-o{background:transparent;color:var(--tx2);border:1px solid var(--bd)}.btn-o:hover{border-color:var(--tx);color:var(--tx)}
+.btn-xl{background:#1e3a1e;color:#3fb950;border:1px solid #238636;padding:7px 14px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer}.btn-xl:hover{background:#1a5c1a}
 .bgroup{display:flex;gap:6px;flex-wrap:wrap}
-
-/* table */
 .tw{overflow-x:auto;margin-top:16px}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--tx2);border-bottom:1px solid var(--bd);white-space:nowrap}
 td{padding:11px 12px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:middle}
 tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)}
-
-/* badges */
 .b{display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.3px}
 .b-ok{background:#1a3a1a;color:#3fb950;border:1px solid #238636}
 .b-warn{background:#3a2e1f;color:#d29922;border:1px solid #bb8009}
 .b-err{background:#3a1a1a;color:#f85149;border:1px solid #b91c1c}
 .b-can{background:#1f1a3a;color:#bc8cff;border:1px solid #6e40c9}
 .b-gray{background:#21262d;color:#8b949e;border:1px solid #30363d}
-
-/* misc */
 .sum{font-size:13px;color:var(--tx2);margin-top:12px;padding:10px 12px;background:var(--bg3);border-radius:6px;border:1px solid var(--bd)}
 .loading,.empty{text-align:center;padding:48px;color:var(--tx2);font-size:14px}
 .spin{display:inline-block;width:18px;height:18px;border:2px solid var(--bd);border-top-color:var(--ac);border-radius:50%;animation:sp .7s linear infinite;margin-right:8px;vertical-align:middle}
@@ -531,6 +519,16 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
 .row-dropdown a{display:block;padding:10px 14px;font-size:13px;color:var(--tx);text-decoration:none;white-space:nowrap}
 .row-dropdown a:hover{background:var(--bg3)}
 .row-dropdown.open{display:block}
+/* novos estilos */
+input[type=checkbox]{width:15px;height:15px;accent-color:var(--ac);cursor:pointer;vertical-align:middle}
+th.chk,td.chk{width:32px;padding-left:10px}
+td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
+.mais-opcoes{font-size:12px;color:var(--ac);cursor:pointer;user-select:none;white-space:nowrap}
+.mais-opcoes:hover{text-decoration:underline}
+.extra-filters{display:none;flex-wrap:wrap;gap:10px;margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)}
+.extra-filters.open{display:flex}
+.sel-bar{display:none;align-items:center;gap:10px;padding:9px 12px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;margin-top:10px;font-size:13px}
+.sel-bar.on{display:flex}
 @media(max-width:600px){.main{padding:12px}.filters{flex-direction:column}.fg{width:100%}}
 </style>
 </head><body>
@@ -560,7 +558,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
     <div class="stab" onclick="stab('rec',this)">📥 NF-e Recebidas</div>
   </div>
 
-  <!-- Emitidas -->
+  <!-- Emitidas (sem alteração) -->
   <div id="sp-emit">
     <div class="panel">
       <div class="ph"><h3>NF-e Emitidas pela AJL</h3><button class="btn btn-o" onclick="loadEmit()">↻</button></div>
@@ -594,18 +592,17 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
     </div>
   </div>
 
-  <!-- Recebidas -->
+  <!-- Recebidas — filtros no estilo SIEG -->
   <div id="sp-rec" style="display:none">
     <div class="panel">
       <div class="ph"><h3>Consulta SIEG — NF-e / Documentos Fiscais</h3>
         <button class="btn btn-o" onclick="loadRec()">↻</button>
+        <button class="btn btn-xl" onclick="exportarExcel()" title="Exportar para Excel/CSV">📊 Exportar Excel</button>
         <button class="btn btn-o" id="btn-zip" onclick="downloadZip()" title="Baixar ZIP com os XMLs">⬇ ZIP</button>
       </div>
       <div class="pb">
         <div class="filters">
-          <div class="fg"><label>De</label><input type="date" id="r-di"></div>
-          <div class="fg"><label>Até</label><input type="date" id="r-df"></div>
-          <div class="fg"><label>Tipo</label>
+          <div class="fg"><label>Tipo do Arquivo</label>
             <select id="r-tipo">
               <option value="1">NF-e Recebidas (entradas)</option>
               <option value="2">NF-e Emitidas (cofre SIEG)</option>
@@ -614,17 +611,27 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
               <option value="6">NFC-e</option>
             </select>
           </div>
-          <div class="fg"><label>CNPJ Emitente</label><input type="text" id="r-cnpj" placeholder="00.000.000/0001-00" style="min-width:170px"></div>
-          <div class="fg"><label>Nome Emitente</label><input type="text" id="r-emit" placeholder="Ex: Maximus, Ferragens..." style="min-width:180px"></div>
+          <div class="fg"><label>Data Emissão (Inicial)</label><input type="date" id="r-di"></div>
+          <div class="fg"><label>Data Emissão (Final)</label><input type="date" id="r-df"></div>
+          <div class="fg"><label>CNPJ Dest.</label><input type="text" id="r-cnpj-dest" placeholder="00000000000000" style="min-width:150px"></div>
+          <div class="fg"><label>CNPJ Emit.</label><input type="text" id="r-cnpj" placeholder="00000000000000" style="min-width:150px"></div>
+          <div class="fg" style="align-self:flex-end">
+            <a class="mais-opcoes" id="mais-link" onclick="toggleMaisOpcoes()">Mais Opções ▾</a>
+          </div>
           <div class="fg"><label>&nbsp;</label>
             <div class="bgroup">
               <button class="btn btn-o" onclick="preset('r',0)">Hoje</button>
               <button class="btn btn-o" onclick="preset('r',7)">7d</button>
               <button class="btn btn-o" onclick="preset('r',30)">30d</button>
               <button class="btn btn-o" onclick="preset('r',365)">Ano</button>
-              <button class="btn btn-p" onclick="loadRec()">Filtrar</button>
+              <button class="btn btn-p" onclick="loadRec()">🔍 Pesquisar</button>
             </div>
           </div>
+        </div>
+        <!-- Mais Opções (oculto por padrão) -->
+        <div class="extra-filters" id="extra-filters">
+          <div class="fg"><label>Nome Emitente</label><input type="text" id="r-emit" placeholder="Ex: Maximus, Ferragens..." style="min-width:180px"></div>
+          <div class="fg"><label>Nome Destinatário</label><input type="text" id="r-dest-nome" placeholder="Ex: AJL, Comercio..." style="min-width:180px"></div>
         </div>
         <div id="r-info" style="font-size:12px;color:var(--tx2);margin-top:10px">
           Padrão: últimos 3 dias. Use os filtros ou botões para ampliar o período.
@@ -636,17 +643,17 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
   </div>
 </div>
 
-<!-- ══ ODOO (placeholder) ════════════════════════════════════════ -->
+<!-- ══ ODOO ══════════════════════════════════════════════════════ -->
 <div id="p-odoo" class="pane">
   <div class="panel"><div class="pb"><div class="empty">Em breve — Odoo</div></div></div>
 </div>
 
-<!-- ══ ITAÚ (placeholder) ════════════════════════════════════════ -->
+<!-- ══ ITAÚ ══════════════════════════════════════════════════════ -->
 <div id="p-itau" class="pane">
   <div class="panel"><div class="pb"><div class="empty">Em breve — Itaú</div></div></div>
 </div>
 
-<!-- ══ TE (placeholder) ══════════════════════════════════════════ -->
+<!-- ══ TE ════════════════════════════════════════════════════════ -->
 <div id="p-te" class="pane">
   <div class="panel"><div class="pb"><div class="empty">Em breve — TudoEntregue</div></div></div>
 </div>
@@ -662,7 +669,6 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
 </div><!-- /main -->
 
 <script>
-// ── util ──────────────────────────────────────────────────────────
 function today(){ return new Date().toISOString().slice(0,10); }
 function daysAgo(n){ var d=new Date(); d.setDate(d.getDate()-n); return d.toISOString().slice(0,10); }
 function fmtDate(s){ if(!s) return '—'; return new Date(s+'T12:00:00').toLocaleDateString('pt-BR'); }
@@ -693,7 +699,6 @@ function preset(pfx, days){
   di.value=days===0?today():daysAgo(days);
 }
 
-// ── Tab logic ──────────────────────────────────────────────────────
 var loaded={};
 function tab(name, el){
   document.querySelectorAll('.pane').forEach(p=>p.classList.remove('on'));
@@ -715,15 +720,12 @@ function stab(name, el){
   if(name==='rec' && !loaded['rec']){ loaded['rec']=true; loadRec(); }
 }
 
-// ── Status (topbar + aba) ────────────────────────────────────────
 async function loadStatus(){
   var d=await get('/admin/api/status');
-  // topbar
   document.getElementById('env-tag').textContent=d.ambiente||'?';
   document.getElementById('env-tag').className='tag '+(d.ambiente==='Produção'?'tag-prod':'tag-hom');
   var h=Math.floor((d.uptime_s||0)/3600), m=Math.floor(((d.uptime_s||0)%3600)/60);
   document.getElementById('up').textContent='Uptime '+h+'h '+m+'m';
-  // aba
   if(d.erro){document.getElementById('st-body').innerHTML='<div class="err-box">'+d.erro+'</div>';return;}
   document.getElementById('st-body').innerHTML=
     '<table><tr><th>Chave</th><th>Valor</th></tr>'+
@@ -733,7 +735,6 @@ async function loadStatus(){
     '</table>';
 }
 
-// ── NF-e Emitidas ────────────────────────────────────────────────
 async function loadEmit(){
   document.getElementById('e-tbl').innerHTML='<div class="loading"><span class="spin"></span>Buscando no Odoo...</div>';
   document.getElementById('e-sum').innerHTML='';
@@ -745,15 +746,12 @@ async function loadEmit(){
   if(di) url+='&dataInicio='+di;
   if(df) url+='&dataFim='+df;
   if(bq) url+='&busca='+encodeURIComponent(bq);
-
   var d=await get(url);
   if(d.erro){ document.getElementById('e-tbl').innerHTML='<div class="err-box">❌ '+d.erro+'</div>'; return; }
   var reg=d.registros||[];
   if(!reg.length){ document.getElementById('e-tbl').innerHTML='<div class="empty">Nenhuma NF-e encontrada.</div>'; return; }
-
   var tot=reg.reduce((a,r)=>a+(parseFloat(r.valor)||0),0);
   document.getElementById('e-sum').innerHTML='<div class="sum">'+reg.length+' nota(s) &nbsp;·&nbsp; Total: <b>'+fmtVal(tot)+'</b></div>';
-
   var html='<div class="tw"><table><thead><tr><th>#</th><th>Fatura</th><th>Cliente</th><th>Data</th><th>Valor</th><th>Status</th><th>Protocolo</th><th>Chave</th></tr></thead><tbody>';
   reg.forEach((r,i)=>{
     html+='<tr>';
@@ -771,7 +769,6 @@ async function loadEmit(){
   document.getElementById('e-tbl').innerHTML=html;
 }
 
-// ── Download ZIP ─────────────────────────────────────────────────
 function downloadZip(){
   var di=document.getElementById('r-di').value;
   var df=document.getElementById('r-df').value;
@@ -779,68 +776,85 @@ function downloadZip(){
   var url='/admin/api/sieg/download-zip?tipoXml='+tipo;
   if(di) url+='&dataInicio='+di;
   if(df) url+='&dataFim='+df;
-  // Criar link oculto e clicar para download
   var a=document.createElement('a');
   a.href=url; a.download=''; document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
-// ── NF-e Recebidas ───────────────────────────────────────────────
 async function loadRec(){
   document.getElementById('r-tbl').innerHTML='<div class="loading"><span class="spin"></span>Consultando SIEG...</div>';
   document.getElementById('r-sum').innerHTML='';
   var di=document.getElementById('r-di').value;
   var df=document.getElementById('r-df').value;
-  var cnpj=document.getElementById('r-cnpj').value;
   var tipo=document.getElementById('r-tipo').value;
+  var cnpj=(document.getElementById('r-cnpj')||{}).value||'';
+  var cnpjDest=(document.getElementById('r-cnpj-dest')||{}).value||'';
+  var emitNome=(document.getElementById('r-emit')||{}).value||'';
+  var destNome=(document.getElementById('r-dest-nome')||{}).value||'';
   var url='/admin/api/sieg/recebidas?tipoXml='+tipo;
   if(di) url+='&dataInicio='+di;
   if(df) url+='&dataFim='+df;
-  if(cnpj) url+='&cnpjEmitente='+encodeURIComponent(cnpj);
-  var emitNome=document.getElementById('r-emit')?document.getElementById('r-emit').value.trim():'';
-  if(emitNome) url+='&nomeEmitente='+encodeURIComponent(emitNome);
+  if(cnpj.replace(/\D/g,'')) url+='&cnpjEmitente='+encodeURIComponent(cnpj.replace(/\D/g,''));
+  if(cnpjDest.replace(/\D/g,'')) url+='&cnpjDestinatario='+encodeURIComponent(cnpjDest.replace(/\D/g,''));
+  if(emitNome.trim()) url+='&nomeEmitente='+encodeURIComponent(emitNome.trim());
+  if(destNome.trim()) url+='&nomeDestinatario='+encodeURIComponent(destNome.trim());
 
   var d=await get(url);
   if(d.erro){ document.getElementById('r-tbl').innerHTML='<div class="err-box">⚠️ '+d.erro+'</div>'; return; }
   var reg=d.registros||[];
-  if(!reg.length){ document.getElementById('r-tbl').innerHTML='<div class="empty">Nenhuma NF-e recebida encontrada.</div>'; return; }
+  if(!reg.length){ document.getElementById('r-tbl').innerHTML='<div class="empty">Nenhuma NF-e encontrada.</div>'; return; }
 
   var tot=reg.reduce((a,r)=>a+(parseFloat(r.valor)||0),0);
   document.getElementById('r-sum').innerHTML='<div class="sum">'+reg.length+' nota(s) &nbsp;·&nbsp; Total: <b>'+fmtVal(tot)+'</b></div>';
 
-  var tipoAtual=document.getElementById('r-tipo')?document.getElementById('r-tipo').value:'1';
-  var html='<div class="tw"><table><thead><tr>'
-    +'<th>Emitente</th><th>Tipo</th><th>Número</th><th>Data Emissão</th>'
-    +'<th>CNPJ Destinatário</th><th>Destinatário</th><th>Valor</th><th>Chave</th><th>Ações</th>'
+  var tipoAtual=tipo;
+  var dtDl=new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+
+  var html='<div class="sel-bar" id="sel-bar">'
+    +'<span id="sel-count">0 selecionado(s)</span>'
+    +'<button class="btn btn-o" style="font-size:12px" onclick="dlSelecionados()">⬇ XML Selecionados</button>'
+    +'<button class="btn btn-o" style="font-size:12px" onclick="deselectAll()">✕ Limpar</button>'
+    +'</div>';
+
+  html+='<div class="tw"><table id="r-table"><thead><tr>'
+    +'<th class="chk"><input type="checkbox" id="chk-all" onclick="toggleAll(this)" title="Selecionar todos"></th>'
+    +'<th>Tipo</th><th>Nº</th><th>Rz. Emit.</th><th>CNPJ Emit.</th>'
+    +'<th>Data de Emi.</th><th>CNPJ Dest.</th><th>Destinatário</th>'
+    +'<th>Valor</th><th>Dt. do Download</th><th>Chave</th><th>+Detalhes</th>'
     +'</tr></thead><tbody>';
-  reg.forEach((r,i)=>{
+
+  reg.forEach(function(r){
     var xmlUrl='/admin/api/sieg/xml/'+(r.chave||'')+'?tipoXml='+tipoAtual;
+    var pdfUrl='/admin/api/sieg/pdf/'+(r.chave||'')+'?tipoXml='+tipoAtual;
+    var ce=(r.chave||'').replace(/"/g,'');
     html+='<tr>';
-    html+='<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+r.emitente+'">'+(r.emitente||'—')+'</td>';
-    html+='<td><span class="b b-ok" style="font-size:10px">NF-e</span></td>';
+    html+='<td class="chk"><input type="checkbox" class="row-chk" data-chave="'+ce+'" data-tipo="'+tipoAtual+'" onchange="updateSelBar()"></td>';
+    html+='<td><span class="b b-ok" style="font-size:10px">'+(r.tipo||'NF-e')+'</span></td>';
     html+='<td style="font-family:monospace;font-weight:600">'+(r.numero||'—')+'</td>';
+    html+='<td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.emitente||'')+'">'+(r.emitente||'—')+'</td>';
+    html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjEmitente||'—')+'</td>';
     html+='<td>'+fmtDate(r.dataEmissao)+'</td>';
-    html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjDestinatario||r.cnpjEmitente||'—')+'</td>';
-    html+='<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.destinatario||'')+'">'+(r.destinatario||'—')+'</td>';
+    html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjDestinatario||'—')+'</td>';
+    html+='<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.destinatario||'')+'">'+(r.destinatario||'—')+'</td>';
     html+='<td style="font-weight:600">'+fmtVal(r.valor)+'</td>';
+    html+='<td class="dt-dl">'+dtDl+'</td>';
     html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)" title="'+(r.chave||'')+'">'+fmtChave(r.chave)+'</td>';
     html+='<td>';
     if(r.chave){
       html+='<div class="row-menu">'
         +'<button class="btn btn-o" style="padding:4px 10px;font-size:12px" onclick="toggleMenu(this)">⋯</button>'
         +'<div class="row-dropdown">'
-        +'<a href="#" class="dl-link" data-url="'+xmlUrl+'" data-file="NFe_'+r.chave+'.xml">⬇ Baixar XML</a>'
-        +'<a href="#" class="dl-link" data-url="/admin/api/sieg/pdf/'+r.chave+'" data-file="NFe_'+r.chave+'.pdf">⬇ Baixar PDF</a>'
-        +'</div>'
-        +'</div>';
+        +'<a href="#" class="dl-link" data-url="'+xmlUrl+'" data-file="NFe_'+ce+'.xml">⬇ Baixar XML</a>'
+        +'<a href="#" class="dl-link" data-url="'+pdfUrl+'" data-file="NFe_'+ce+'.pdf">⬇ Baixar PDF</a>'
+        +'</div></div>';
     } else { html+='—'; }
-    html+='</td>';
-    html+='</tr>';
+    html+='</td></tr>';
   });
   html+='</tbody></table></div>';
   document.getElementById('r-tbl').innerHTML=html;
+  updateSelBar();
 }
 
-// ── Download via fetch (evita bloqueio de cookie em <a> direto) ──
+// ── Download via fetch ────────────────────────────────────────────
 async function downloadFile(url, filename){
   try {
     var r = await fetch(url, { credentials: 'include' });
@@ -854,17 +868,71 @@ async function downloadFile(url, filename){
   } catch(e){ alert('Erro ao baixar: '+e.message); }
 }
 
-// ── Menu dropdown por linha ──────────────────────────────────────
+// ── Mais Opções ───────────────────────────────────────────────────
+function toggleMaisOpcoes(){
+  var ef=document.getElementById('extra-filters');
+  var ml=document.getElementById('mais-link');
+  if(!ef) return;
+  var open=ef.classList.toggle('open');
+  if(ml) ml.textContent=open?'Menos Opções ▴':'Mais Opções ▾';
+}
+
+// ── Seleção de linhas ─────────────────────────────────────────────
+function updateSelBar(){
+  var chks=document.querySelectorAll('.row-chk:checked');
+  var bar=document.getElementById('sel-bar');
+  var cnt=document.getElementById('sel-count');
+  if(cnt) cnt.textContent=chks.length+' selecionado(s)';
+  if(bar) bar.classList.toggle('on', chks.length>0);
+}
+function toggleAll(chkAll){
+  document.querySelectorAll('.row-chk').forEach(function(c){c.checked=chkAll.checked;});
+  updateSelBar();
+}
+function deselectAll(){
+  document.querySelectorAll('.row-chk').forEach(function(c){c.checked=false;});
+  var a=document.getElementById('chk-all'); if(a) a.checked=false;
+  updateSelBar();
+}
+async function dlSelecionados(){
+  var chks=Array.from(document.querySelectorAll('.row-chk:checked'));
+  if(!chks.length){alert('Nenhuma nota selecionada.');return;}
+  for(var c of chks){
+    var chave=c.dataset.chave, tipo=c.dataset.tipo||'1';
+    await downloadFile('/admin/api/sieg/xml/'+chave+'?tipoXml='+tipo,'NFe_'+chave+'.xml');
+    await new Promise(function(r){setTimeout(r,400);});
+  }
+}
+
+// ── Exportar Excel (CSV UTF-8) ────────────────────────────────────
+function exportarExcel(){
+  var tbl=document.getElementById('r-table');
+  if(!tbl){alert('Faça uma consulta primeiro.');return;}
+  var rows=tbl.querySelectorAll('tr'), csv=[];
+  rows.forEach(function(row){
+    var cells=row.querySelectorAll('th,td'), line=[];
+    cells.forEach(function(cell,idx){
+      if(idx===0||idx===cells.length-1) return;
+      line.push('"'+cell.innerText.replace(/"/g,'""').replace(/\\n/g,' ')+'"');
+    });
+    if(line.length) csv.push(line.join(';'));
+  });
+  var blob=new Blob(['\\uFEFF'+csv.join('\\n')],{type:'text/csv;charset=utf-8;'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='sieg-nfe-'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);document.body.removeChild(a);},1000);
+}
+
+// ── Menu dropdown por linha ───────────────────────────────────────
 function toggleMenu(btn){
   var dd=btn.nextElementSibling;
   var isOpen=dd.classList.contains('open');
-  // Fechar todos os menus abertos
   document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
   if(!isOpen) dd.classList.add('open');
 }
-// Fechar ao clicar fora
 document.addEventListener('click',function(e){
-  // Download via fetch ao clicar em link de download
   var dlLink = e.target.closest('.dl-link');
   if(dlLink){
     e.preventDefault();
@@ -884,41 +952,3 @@ loadStatus();
 }
 
 module.exports = router;
-
-// Diagnóstico SIEG — testa endpoints e retorna o que responde 2xx
-// REMOVER APÓS IDENTIFICAR O ENDPOINT CORRETO
-router.get('/api/sieg/diagnostico', auth, async (req, res) => {
-  try {
-    var axios  = require('axios');
-    var { getAuthHeaders } = require('../services/sieg-auth');
-    var headers = await withTimeout(getAuthHeaders(), 15000);
-    var resultados = [];
-    var candidatos = [
-      'GET https://api.sieg.com/api/v1/GetXmls',
-      'GET https://api.sieg.com/api/v1/xmls',
-      'GET https://api.sieg.com/api/v1/xml-documents',
-      'GET https://api.sieg.com/api/v1/documents',
-      'GET https://api.sieg.com/api/v1/GetDocuments',
-      'GET https://api.sieg.com/api/v1/nfe',
-      'GET https://api.sieg.com/api/v1/GetNfe',
-      'POST https://api.sieg.com/api/v1/GetXmls',
-    ];
-    for (var c of candidatos) {
-      var parts = c.split(' ');
-      var method = parts[0].toLowerCase();
-      var url = parts[1];
-      try {
-        var r = await withTimeout(axios({ method, url, headers,
-          params: method==='get' ? { Take: 1, TipoDocumento: 'NFe' } : undefined,
-          data:   method==='post' ? { Take: 1, TipoDocumento: 'NFe' } : undefined,
-          validateStatus: () => true, timeout: 8000 }), 10000);
-        resultados.push({ endpoint: c, status: r.status, body: JSON.stringify(r.data).slice(0, 200) });
-      } catch(e) {
-        resultados.push({ endpoint: c, status: 'ERR', body: e.message });
-      }
-    }
-    res.json(resultados);
-  } catch(e) {
-    res.json({ erro: e.message });
-  }
-});
