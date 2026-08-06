@@ -475,6 +475,11 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
 .spin{display:inline-block;width:18px;height:18px;border:2px solid var(--bd);border-top-color:var(--ac);border-radius:50%;animation:sp .7s linear infinite;margin-right:8px;vertical-align:middle}
 @keyframes sp{to{transform:rotate(360deg)}}
 .err-box{background:#1a0a0a;border:1px solid #5a2020;border-radius:8px;padding:16px;color:#f85149;font-size:13px;margin-top:12px}
+.row-menu{position:relative;display:inline-block}
+.row-dropdown{display:none;position:absolute;right:0;top:100%;background:var(--bg2);border:1px solid var(--bd);border-radius:8px;min-width:150px;z-index:50;box-shadow:0 4px 20px rgba(0,0,0,.4);overflow:hidden}
+.row-dropdown a{display:block;padding:10px 14px;font-size:13px;color:var(--tx);text-decoration:none;white-space:nowrap}
+.row-dropdown a:hover{background:var(--bg3)}
+.row-dropdown.open{display:block}
 @media(max-width:600px){.main{padding:12px}.filters{flex-direction:column}.fg{width:100%}}
 </style>
 </head><body>
@@ -748,24 +753,50 @@ async function loadRec(){
   var tot=reg.reduce((a,r)=>a+(parseFloat(r.valor)||0),0);
   document.getElementById('r-sum').innerHTML='<div class="sum">'+reg.length+' nota(s) &nbsp;·&nbsp; Total: <b>'+fmtVal(tot)+'</b></div>';
 
-  var html='<div class="tw"><table><thead><tr><th>#</th><th>Nº/Série</th><th>Emitente</th><th>CNPJ Emit.</th><th>Destinatário</th><th>Data</th><th>Valor</th><th>Chave</th><th>XML</th></tr></thead><tbody>';
+  var tipoAtual=document.getElementById('r-tipo')?document.getElementById('r-tipo').value:'1';
+  var html='<div class="tw"><table><thead><tr>'
+    +'<th>Emitente</th><th>Tipo</th><th>Número</th><th>Data Emissão</th>'
+    +'<th>CNPJ Destinatário</th><th>Destinatário</th><th>Valor</th><th>Chave</th><th>Ações</th>'
+    +'</tr></thead><tbody>';
   reg.forEach((r,i)=>{
+    var xmlUrl='/admin/api/sieg/xml/'+(r.chave||'')+'?tipoXml='+tipoAtual;
     html+='<tr>';
-    html+='<td style="color:var(--tx2);font-size:12px">'+(i+1)+'</td>';
-    html+='<td style="font-family:monospace;font-size:12px">'+(r.numero||'—')+(r.serie?'/'+r.serie:'')+'</td>';
-    html+='<td>'+r.emitente+'</td>';
-    html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjEmitente||'—')+'</td>';
-    html+='<td>'+(r.destinatario||'—')+'</td>';
+    html+='<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+r.emitente+'">'+(r.emitente||'—')+'</td>';
+    html+='<td><span class="b b-ok" style="font-size:10px">NF-e</span></td>';
+    html+='<td style="font-family:monospace;font-weight:600">'+(r.numero||'—')+'</td>';
     html+='<td>'+fmtDate(r.dataEmissao)+'</td>';
-    html+='<td>'+fmtVal(r.valor)+'</td>';
+    html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjDestinatario||r.cnpjEmitente||'—')+'</td>';
+    html+='<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.destinatario||'')+'">'+(r.destinatario||'—')+'</td>';
+    html+='<td style="font-weight:600">'+fmtVal(r.valor)+'</td>';
     html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)" title="'+(r.chave||'')+'">'+fmtChave(r.chave)+'</td>';
-    var tipoAtual=document.getElementById('r-tipo')?document.getElementById('r-tipo').value:'1';
-    html+='<td>'+(r.chave?'<a href="/admin/api/sieg/xml/'+r.chave+'?tipoXml='+tipoAtual+'" download="NFe_'+r.chave+'.xml" class="btn btn-o" style="padding:3px 8px;font-size:11px;text-decoration:none">⬇ XML</a>':'—')+'</td>';
+    html+='<td>';
+    if(r.chave){
+      html+='<div class="row-menu">'
+        +'<button class="btn btn-o" style="padding:4px 10px;font-size:12px" onclick="toggleMenu(this)">⋯</button>'
+        +'<div class="row-dropdown">'
+        +'<a href="'+xmlUrl+'" download="NFe_'+r.chave+'.xml">⬇ Baixar XML</a>'
+        +'</div>'
+        +'</div>';
+    } else { html+='—'; }
+    html+='</td>';
     html+='</tr>';
   });
   html+='</tbody></table></div>';
   document.getElementById('r-tbl').innerHTML=html;
 }
+
+// ── Menu dropdown por linha ──────────────────────────────────────
+function toggleMenu(btn){
+  var dd=btn.nextElementSibling;
+  var isOpen=dd.classList.contains('open');
+  // Fechar todos os menus abertos
+  document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
+  if(!isOpen) dd.classList.add('open');
+}
+// Fechar ao clicar fora
+document.addEventListener('click',function(e){
+  if(!e.target.closest('.row-menu')) document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
+});
 
 // ── Init ──────────────────────────────────────────────────────────
 preset('e',3);
