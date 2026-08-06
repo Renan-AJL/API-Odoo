@@ -95,6 +95,14 @@ services:
         value: "local"
       - key: SIEG_IMPORT_XML
         value: "0"
+      # --- Admin Panel ---
+      - key: ADMIN_USER
+        value: "admin"
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_TOKEN_SECRET
+        generateValue: true
+        sync: false
     healthCheckPath: /api/v1/health
     disk:
       name: nfe-cert
