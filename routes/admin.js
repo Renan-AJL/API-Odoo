@@ -8,6 +8,22 @@ const router  = express.Router();
 const config  = require('../config');
 const xmlrpc  = require('xmlrpc');
 
+// ── Cache ZIP em memória (chave -> xmlString, TTL 30min) ─────────
+var _zipCache = {}; // { chave: { xml: string, ts: number } }
+var ZIP_CACHE_TTL = 30 * 60 * 1000;
+function cacheSet(chave, xml) { _zipCache[chave] = { xml, ts: Date.now() }; }
+function cacheGet(chave) {
+  var e = _zipCache[chave];
+  if (!e) return null;
+  if (Date.now() - e.ts > ZIP_CACHE_TTL) { delete _zipCache[chave]; return null; }
+  return e.xml;
+}
+// Limpar entradas expiradas a cada 10 min
+setInterval(function() {
+  var now = Date.now();
+  Object.keys(_zipCache).forEach(function(k) { if (now - _zipCache[k].ts > ZIP_CACHE_TTL) delete _zipCache[k]; });
+}, 10 * 60 * 1000);
+
 // ── Auth ──────────────────────────────────────────────────────────
 const ADMIN_USER   = process.env.ADMIN_USER     || 'admin';
 const ADMIN_PASS   = process.env.ADMIN_PASSWORD || 'ajl2025';
@@ -244,6 +260,8 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
         // Deduplicar por chave
         if (chave && chavesVistas[chave]) continue;
         if (chave) chavesVistas[chave] = true;
+        // Popular cache para download individual
+        if (chave) cacheSet(chave, xmlStr);
 
         var emitNome = xb('emit','xFant') || xb('emit','xNome') || '';
         var emitCNPJ = xb('emit','CNPJ')  || xb('emit','CPF')   || '';
@@ -281,51 +299,77 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
 });
 
 
-// Download XML individual por chave — refaz a chamada com filtro de 1 nota
-// Usa CNPJemit + período amplo e extrai a nota pelo chave do ZIP
+// Download XML individual por chave — usa cache do ZIP já baixado
 router.get('/api/sieg/xml/:chave', auth, async (req, res) => {
   try {
+    var chave = req.params.chave;
+    // 1. Tentar cache (populado quando a tabela foi consultada)
+    var cached = cacheGet(chave);
+    if (cached) {
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.xml"');
+      return res.send(cached);
+    }
+    // 2. Fallback: buscar o mês inteiro da chave na SIEG
     var axios  = require('axios');
     var AdmZip = require('adm-zip');
     var { getAuthHeaders } = require('../services/sieg-auth');
     var headers = await withTimeout(getAuthHeaders(), 15000);
-    var chave  = req.params.chave;
     var tipoXml = parseInt(req.query.tipoXml) || 1;
-
-    // Extrair data da chave (posição 2-9 = cAMO = AAMM + DD)
-    // Chave NF-e: cUF(2)+AAMM(4)+CNPJ(14)+mod(2)+serie(3)+nNF(9)+tpEmis(1)+cNF(8)+cDV(1) = 44 dígitos
-    var aamm = chave.slice(2, 6); // ex: "2608" = agosto 2026
+    var aamm = chave.slice(2, 6);
     var ano  = '20' + aamm.slice(0, 2);
     var mes  = aamm.slice(2, 4);
     var di   = ano + '-' + mes + '-01';
-    var dfDate = new Date(parseInt(ano), parseInt(mes), 0); // último dia do mês
+    var dfDate = new Date(parseInt(ano), parseInt(mes), 0);
     var df   = ano + '-' + mes + '-' + String(dfDate.getDate()).padStart(2,'0');
 
-    var body = { TipoXml: tipoXml, Take: 200, Skip: 0,
+    console.log('[ADMIN] xml/chave fallback SIEG — chave:', chave.slice(0,10)+'...', 'período:', di, '-', df);
+
+    // Buscar sem filtro de CNPJ para garantir achar (tanto emitida quanto recebida)
+    var body = { TipoXml: tipoXml, Take: 500, Skip: 0,
       DataEmissaoInicio: di + 'T00:00:00Z',
       DataEmissaoFim:    df + 'T23:59:59Z',
     };
-
     var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
       headers, timeout: 30000, responseType: 'arraybuffer',
     }), 35000);
-
     var zip     = new AdmZip(resp.data);
     var entries = zip.getEntries();
     var found   = null;
-
     for (var entry of entries) {
       if (entry.isDirectory) continue;
       var xmlStr = zip.readAsText(entry);
-      if (xmlStr.indexOf(chave) !== -1) { found = xmlStr; break; }
+      // popular cache para todas as entradas encontradas
+      var km = xmlStr.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
+      if (km) cacheSet(km[1], xmlStr);
+      if (xmlStr.indexOf(chave) !== -1) found = xmlStr;
     }
-
-    if (!found) return res.status(404).json({ erro: 'XML com chave ' + chave + ' não encontrado no período' });
-
+    if (!found) return res.status(404).json({ erro: 'XML não encontrado no cofre SIEG para esta chave' });
     res.setHeader('Content-Type', 'application/xml; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.xml"');
     res.send(found);
   } catch(e) {
+    console.error('[ADMIN] xml/chave erro:', e.message);
+    res.status(500).json({ erro: e.message });
+  }
+});
+
+// Download PDF individual por chave — endpoint SIEG /api/v1/GetPdf
+router.get('/api/sieg/pdf/:chave', auth, async (req, res) => {
+  try {
+    var axios  = require('axios');
+    var { getAuthHeaders } = require('../services/sieg-auth');
+    var headers = await withTimeout(getAuthHeaders(), 15000);
+    var chave   = req.params.chave;
+    // SIEG endpoint para PDF individual
+    var resp = await withTimeout(axios.get('https://api.sieg.com/api/v1/GetPdf?chaveAcesso=' + chave, {
+      headers, timeout: 30000, responseType: 'arraybuffer',
+    }), 35000);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.pdf"');
+    res.send(Buffer.from(resp.data));
+  } catch(e) {
+    console.error('[ADMIN] pdf/chave erro:', e.message);
     res.status(500).json({ erro: e.message });
   }
 });
@@ -775,6 +819,7 @@ async function loadRec(){
         +'<button class="btn btn-o" style="padding:4px 10px;font-size:12px" onclick="toggleMenu(this)">⋯</button>'
         +'<div class="row-dropdown">'
         +'<a href="'+xmlUrl+'" download="NFe_'+r.chave+'.xml">⬇ Baixar XML</a>'
+        +'<a href="/admin/api/sieg/pdf/'+r.chave+'" download="NFe_'+r.chave+'.pdf">⬇ Baixar PDF</a>'
         +'</div>'
         +'</div>';
     } else { html+='—'; }
