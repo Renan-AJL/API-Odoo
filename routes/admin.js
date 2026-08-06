@@ -280,6 +280,42 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
   }
 });
 
+
+// Download ZIP direto da SIEG
+router.get('/api/sieg/download-zip', auth, async (req, res) => {
+  try {
+    var axios = require('axios');
+    var { getAuthHeaders } = require('../services/sieg-auth');
+    var headers = await withTimeout(getAuthHeaders(), 15000);
+    var { dataInicio, dataFim, tipoXml } = req.query;
+
+    var hoje = new Date();
+    var tresAtrás = new Date(hoje); tresAtrás.setDate(hoje.getDate() - 3);
+    var di = dataInicio || tresAtrás.toISOString().slice(0,10);
+    var df = dataFim    || hoje.toISOString().slice(0,10);
+
+    var body = {
+      TipoXml: parseInt(tipoXml) || 1,
+      Take: 200,
+      Skip: 0,
+      DataEmissaoInicio: di + 'T00:00:00Z',
+      DataEmissaoFim:    df + 'T23:59:59Z',
+    };
+
+    var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+      headers, timeout: 30000, responseType: 'arraybuffer',
+    }), 35000);
+
+    var tipoLabel = { 1:'recebidas', 2:'emitidas-cofre', 3:'cte', 4:'nfse', 6:'nfce' };
+    var nome = 'sieg-nfe-' + (tipoLabel[parseInt(tipoXml)||1] || 'docs') + '-' + di + '-a-' + df + '.zip';
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + nome + '"');
+    res.send(Buffer.from(resp.data));
+  } catch(e) {
+    res.status(500).json({ erro: e.message });
+  }
+});
+
 // Status geral (leve — sem Odoo)
 router.get('/api/status', auth, (req, res) => {
   var sieg = { tpAmb: process.env.SIEG_TP_AMB === '1' ? 'Produção' : 'Homologação' };
@@ -456,7 +492,10 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
   <!-- Recebidas -->
   <div id="sp-rec" style="display:none">
     <div class="panel">
-      <div class="ph"><h3>Consulta SIEG — NF-e / Documentos Fiscais</h3><button class="btn btn-o" onclick="loadRec()">↻</button></div>
+      <div class="ph"><h3>Consulta SIEG — NF-e / Documentos Fiscais</h3>
+        <button class="btn btn-o" onclick="loadRec()">↻</button>
+        <button class="btn btn-o" id="btn-zip" onclick="downloadZip()" title="Baixar ZIP com os XMLs">⬇ ZIP</button>
+      </div>
       <div class="pb">
         <div class="filters">
           <div class="fg"><label>De</label><input type="date" id="r-di"></div>
@@ -480,6 +519,9 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
               <button class="btn btn-p" onclick="loadRec()">Filtrar</button>
             </div>
           </div>
+        </div>
+        <div id="r-info" style="font-size:12px;color:var(--tx2);margin-top:10px">
+          Padrão: últimos 3 dias. Use os filtros ou botões para ampliar o período.
         </div>
         <div id="r-sum"></div>
         <div id="r-tbl"><div class="loading"><span class="spin"></span>Aguardando...</div></div>
@@ -623,6 +665,19 @@ async function loadEmit(){
   document.getElementById('e-tbl').innerHTML=html;
 }
 
+// ── Download ZIP ─────────────────────────────────────────────────
+function downloadZip(){
+  var di=document.getElementById('r-di').value;
+  var df=document.getElementById('r-df').value;
+  var tipo=document.getElementById('r-tipo').value;
+  var url='/admin/api/sieg/download-zip?tipoXml='+tipo;
+  if(di) url+='&dataInicio='+di;
+  if(df) url+='&dataFim='+df;
+  // Criar link oculto e clicar para download
+  var a=document.createElement('a');
+  a.href=url; a.download=''; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
 // ── NF-e Recebidas ───────────────────────────────────────────────
 async function loadRec(){
   document.getElementById('r-tbl').innerHTML='<div class="loading"><span class="spin"></span>Consultando SIEG...</div>';
@@ -662,8 +717,8 @@ async function loadRec(){
 }
 
 // ── Init ──────────────────────────────────────────────────────────
-preset('e',30);
-preset('r',30);
+preset('e',3);
+preset('r',3);
 loadStatus();
 </script>
 </body></html>`;
