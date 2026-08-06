@@ -650,39 +650,7 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
 
 <!-- ══ ITAÚ ══════════════════════════════════════════════════════ -->
 <div id="p-itau" class="pane">
-  <div class="panel">
-    <div class="ph">
-      <h3>🏦 Demonstrativo Itaú — Pagamentos por Fatura</h3>
-      <button class="btn btn-o" onclick="loadItau()">↻</button>
-      <button class="btn btn-xl" onclick="exportarExcelItau()">📊 Exportar Excel</button>
-    </div>
-    <div class="pb">
-      <div class="filters">
-        <div class="fg"><label>De</label><input type="date" id="i-di"></div>
-        <div class="fg"><label>Até</label><input type="date" id="i-df"></div>
-        <div class="fg"><label>Status NF-e</label>
-          <select id="i-st">
-            <option value="todos">Todos</option>
-            <option value="autorizada">Autorizada</option>
-            <option value="cancelada">Cancelada</option>
-            <option value="pendente">Pendente</option>
-          </select>
-        </div>
-        <div class="fg"><label>Cliente</label><input type="text" id="i-cli" placeholder="Nome do cliente..."></div>
-        <div class="fg"><label>&nbsp;</label>
-          <div class="bgroup">
-            <button class="btn btn-o" onclick="preset('i',0)">Hoje</button>
-            <button class="btn btn-o" onclick="preset('i',7)">7d</button>
-            <button class="btn btn-o" onclick="preset('i',30)">30d</button>
-            <button class="btn btn-o" onclick="preset('i',365)">Ano</button>
-            <button class="btn btn-p" onclick="loadItau()">🔍 Pesquisar</button>
-          </div>
-        </div>
-      </div>
-      <div id="i-sum"></div>
-      <div id="i-tbl"><div class="loading"><span class="spin"></span>Aguardando...</div></div>
-    </div>
-  </div>
+  <div class="panel"><div class="pb"><div class="empty">Em breve — Itaú</div></div></div>
 </div>
 
 <!-- ══ TE ════════════════════════════════════════════════════════ -->
@@ -740,7 +708,6 @@ function tab(name, el){
   if(!loaded[name]){
     loaded[name]=true;
     if(name==='sieg') loadEmit();
-    if(name==='itau') loadItau();
     if(name==='status') loadStatus();
   }
 }
@@ -976,88 +943,9 @@ document.addEventListener('click',function(e){
   if(!e.target.closest('.row-menu')) document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
 });
 
-// ── Itaú — Demonstrativo por Fatura ─────────────────────────────
-async function loadItau(){
-  var tblEl=document.getElementById('i-tbl');
-  var sumEl=document.getElementById('i-sum');
-  tblEl.innerHTML='<div class="loading"><span class="spin"></span>Buscando faturas no Odoo...</div>';
-  sumEl.innerHTML='';
-  var di=document.getElementById('i-di').value;
-  var df=document.getElementById('i-df').value;
-  var st=document.getElementById('i-st').value;
-  var cli=document.getElementById('i-cli').value;
-  var url='/admin/api/sieg/emitidas?status='+encodeURIComponent(st||'todos');
-  if(di) url+='&dataInicio='+di;
-  if(df) url+='&dataFim='+df;
-  if(cli.trim()) url+='&busca='+encodeURIComponent(cli.trim());
-  var d=await get(url);
-  if(d.erro){ tblEl.innerHTML='<div class="err-box">❌ '+d.erro+'</div>'; return; }
-  var reg=d.registros||[];
-  // filtro extra por nome de cliente (frontend)
-  if(cli.trim()){
-    var cf=cli.trim().toUpperCase();
-    reg=reg.filter(function(r){ return (r.cliente||'').toUpperCase().indexOf(cf)!==-1; });
-  }
-  if(!reg.length){ tblEl.innerHTML='<div class="empty">Nenhuma fatura encontrada.</div>'; return; }
-
-  var totVal=reg.reduce(function(a,r){return a+(parseFloat(r.valor)||0);},0);
-  var totPago=reg.filter(function(r){return (r.status||'').toLowerCase()==='autorizada';})
-                 .reduce(function(a,r){return a+(parseFloat(r.valor)||0);},0);
-  sumEl.innerHTML='<div class="sum">'
-    +reg.length+' fatura(s)'
-    +' &nbsp;·&nbsp; Total emitido: <b>'+fmtVal(totVal)+'</b>'
-    +' &nbsp;·&nbsp; Autorizadas: <b>'+fmtVal(totPago)+'</b>'
-    +'</div>';
-
-  var html='<div class="tw"><table id="itau-table"><thead><tr>'
-    +'<th>#</th><th>Fatura (Odoo)</th><th>Cliente</th>'
-    +'<th>Data Emissão</th><th>Valor</th>'
-    +'<th>Status NF-e</th><th>Tipo Pag.</th><th>Protocolo</th><th>Chave NF-e</th>'
-    +'</tr></thead><tbody>';
-
-  reg.forEach(function(r,i){
-    var tipoPag = r.valor >= 5000 ? 'Transferência' : r.valor >= 1000 ? 'Boleto' : 'PIX';
-    var statusLow=(r.status||'').toLowerCase();
-    var clsPag = statusLow==='autorizada'?'b-ok':statusLow==='cancelada'?'b-can':'b-warn';
-    html+='<tr>';
-    html+='<td style="color:var(--tx2);font-size:12px">'+(i+1)+'</td>';
-    html+='<td style="font-family:monospace;font-size:12px">'+(r.numero||'—')+'</td>';
-    html+='<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.cliente||'')+'">'+(r.cliente||'—')+'</td>';
-    html+='<td>'+fmtDate(r.data)+'</td>';
-    html+='<td style="font-weight:600">'+fmtVal(r.valor)+'</td>';
-    html+='<td>'+badge(r.status)+'</td>';
-    html+='<td><span class="b '+clsPag+'">'+tipoPag+'</span></td>';
-    html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)">'+(r.protocolo||'—')+'</td>';
-    html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)" title="'+(r.chave||'')+'">'+fmtChave(r.chave)+'</td>';
-    html+='</tr>';
-  });
-  html+='</tbody></table></div>';
-  tblEl.innerHTML=html;
-}
-
-function exportarExcelItau(){
-  var tbl=document.getElementById('itau-table');
-  if(!tbl){alert('Faça uma consulta primeiro.');return;}
-  var rows=tbl.querySelectorAll('tr'), csv=[];
-  rows.forEach(function(row){
-    var cells=row.querySelectorAll('th,td'), line=[];
-    cells.forEach(function(cell){
-      line.push('"'+cell.innerText.replace(/"/g,'""').replace(/\n/g,' ')+'"');
-    });
-    if(line.length) csv.push(line.join(';'));
-  });
-  var blob=new Blob(['\uFEFF'+csv.join('\n')],{type:'text/csv;charset=utf-8;'});
-  var a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='itau-faturas-'+new Date().toISOString().slice(0,10)+'.csv';
-  document.body.appendChild(a);a.click();
-  setTimeout(function(){URL.revokeObjectURL(a.href);document.body.removeChild(a);},1000);
-}
-
 // ── Init ──────────────────────────────────────────────────────────
 preset('e',3);
 preset('r',3);
-preset('i',30);
 loadStatus();
 </script>
 </body></html>`;
