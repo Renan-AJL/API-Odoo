@@ -9,6 +9,47 @@ const crypto    = require('crypto');
 const router    = express.Router();
 const config    = require('../config');
 
+// ── Odoo XML-RPC helpers (com timeout de 15s) ────────────────────
+const xmlrpc = require('xmlrpc');
+
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout ' + ms + 'ms')), ms)),
+  ]);
+}
+
+function odooClient(url) {
+  var base = (url || '').replace(/\/+$/, '');
+  var host = base.replace('https://', '').replace('http://', '');
+  var isSecure = base.startsWith('https');
+  var fn = isSecure ? xmlrpc.createSecureClient : xmlrpc.createClient;
+  return {
+    common: fn({ host, path: '/xmlrpc/2/common', port: isSecure ? 443 : 80 }),
+    models: fn({ host, path: '/xmlrpc/2/object', port: isSecure ? 443 : 80 }),
+  };
+}
+
+function odooAuth(client, db, user, password) {
+  return withTimeout(new Promise((resolve, reject) => {
+    client.common.methodCall('authenticate', [db, user, password, {}], (err, uid) => {
+      if (err || !uid) reject(new Error('Auth Odoo falhou: ' + (err && (err.faultString || err.message) || 'uid nulo')));
+      else resolve(uid);
+    });
+  }), 15000);
+}
+
+function odooKw(client, db, uid, password, model, method, args, kwargs) {
+  var params = [db, uid, password, model, method, args || []];
+  if (kwargs) params.push(kwargs);
+  return withTimeout(new Promise((resolve, reject) => {
+    client.models.methodCall('execute_kw', params, (err, r) => {
+      if (err) reject(new Error(err.faultString || err.message));
+      else resolve(r);
+    });
+  }), 20000);
+}
+
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'ajl2025';
 const TOKEN_SECRET = process.env.ADMIN_TOKEN_SECRET || process.env.API_SECRET_KEY || 'ajl-admin-secret';
@@ -132,35 +173,12 @@ router.get('/api/status', authMiddleware, async (req, res) => {
 // ── API SIEG: NF-e emitidas (Odoo) ───────────────────────────────────────
 router.get('/api/sieg/emitidas', authMiddleware, async (req, res) => {
   try {
-    var xmlrpc = require('xmlrpc');
     var cfg = config.odoo;
     if (!cfg.url) return res.json({ erro: 'Odoo não configurado', registros: [] });
-
     var { dataInicio, dataFim, status: filtroStatus, busca } = req.query;
-
-    // Conectar ao Odoo via XML-RPC
-    var base = cfg.url.replace(/\/+$/, '');
-    var host = base.replace('https://', '').replace('http://', '');
-    var isSecure = base.startsWith('https');
-    var fn = isSecure ? xmlrpc.createSecureClient : xmlrpc.createClient;
-    var client = {
-      common: fn({ host, path: '/xmlrpc/2/common', port: isSecure ? 443 : 80 }),
-      models: fn({ host, path: '/xmlrpc/2/object', port: isSecure ? 443 : 80 }),
-    };
-
-    var uid = await new Promise((resolve, reject) => {
-      client.common.methodCall('authenticate', [cfg.db, cfg.user, cfg.password, {}], (err, r) => {
-        if (err || !r) reject(new Error('Auth Odoo falhou')); else resolve(r);
-      });
-    });
-
-    var ekw = (model, method, args, kwargs) => new Promise((resolve, reject) => {
-      var params = [cfg.db, uid, cfg.password, model, method, args || []];
-      if (kwargs) params.push(kwargs);
-      client.models.methodCall('execute_kw', params, (err, r) => {
-        if (err) reject(new Error(err.faultString || err.message)); else resolve(r);
-      });
-    });
+    var client = odooClient(cfg.url);
+    var uid = await odooAuth(client, cfg.db, cfg.user, cfg.password);
+    var ekw = (model, method, args, kwargs) => odooKw(client, cfg.db, uid, cfg.password, model, method, args, kwargs);
 
     // Montar domain
     var domain = [
@@ -242,30 +260,11 @@ router.get('/api/sieg/recebidas', authMiddleware, async (req, res) => {
 // ── API Odoo: resumo faturas ──────────────────────────────────────────────
 router.get('/api/odoo/resumo', authMiddleware, async (req, res) => {
   try {
-    var xmlrpc = require('xmlrpc');
     var cfg = config.odoo;
     if (!cfg.url) return res.json({ erro: 'Odoo não configurado' });
-
-    var base = cfg.url.replace(/\/+$/, '');
-    var host = base.replace('https://', '').replace('http://', '');
-    var isSecure = base.startsWith('https');
-    var fn = isSecure ? xmlrpc.createSecureClient : xmlrpc.createClient;
-    var client = {
-      common: fn({ host, path: '/xmlrpc/2/common', port: isSecure ? 443 : 80 }),
-      models: fn({ host, path: '/xmlrpc/2/object', port: isSecure ? 443 : 80 }),
-    };
-    var uid = await new Promise((resolve, reject) => {
-      client.common.methodCall('authenticate', [cfg.db, cfg.user, cfg.password, {}], (err, r) => {
-        if (err || !r) reject(new Error('Auth Odoo')); else resolve(r);
-      });
-    });
-    var ekw = (model, method, args, kwargs) => new Promise((resolve, reject) => {
-      var params = [cfg.db, uid, cfg.password, model, method, args || []];
-      if (kwargs) params.push(kwargs);
-      client.models.methodCall('execute_kw', params, (err, r) => {
-        if (err) reject(new Error(err.faultString || err.message)); else resolve(r);
-      });
-    });
+    var client = odooClient(cfg.url);
+    var uid = await odooAuth(client, cfg.db, cfg.user, cfg.password);
+    var ekw = (model, method, args, kwargs) => odooKw(client, cfg.db, uid, cfg.password, model, method, args, kwargs);
 
     // Contar por status NF-e
     var statusList = ['pendente', 'processando', 'autorizada', 'cancelada', 'erro'];
@@ -700,7 +699,17 @@ function badge(s){
 }
 
 async function api(url){
-  var r=await fetch(url); return r.json();
+  try {
+    var ctrl=new AbortController();
+    var tid=setTimeout(()=>ctrl.abort(),25000);
+    var r=await fetch(url,{signal:ctrl.signal});
+    clearTimeout(tid);
+    var txt=await r.text();
+    try{ return JSON.parse(txt); }
+    catch(e){ return {erro:'Resposta inválida do servidor: '+txt.slice(0,100)}; }
+  } catch(e) {
+    return {erro: e.name==='AbortError' ? 'Timeout — servidor demorou demais' : e.message};
+  }
 }
 
 // ════════════════════════════════════════════════
@@ -732,10 +741,16 @@ function switchTab(name){
 // DASHBOARD
 // ════════════════════════════════════════════════
 async function loadDashboard(){
+  document.getElementById('dashboard-cards').innerHTML='<div class="card" style="grid-column:1/-1"><div class="loading"><span class="spin"></span>Conectando...</div></div>';
+  document.getElementById('faturas-recentes-table').innerHTML='<div class="loading"><span class="spin"></span>Carregando...</div>';
   var [status, resumo] = await Promise.all([
     api('/admin/api/status'),
-    api('/admin/api/odoo/resumo').catch(()=>({erro:'indisponível'})),
+    api('/admin/api/odoo/resumo'),
   ]);
+
+  // Tratar erro
+  if(status.erro){ document.getElementById('dashboard-cards').innerHTML='<div class="card card-red" style="grid-column:1/-1"><div class="card-title">Erro ao carregar status</div><div class="card-value" style="font-size:14px">'+status.erro+'</div></div>'; }
+  if(resumo.erro){ document.getElementById('faturas-recentes-table').innerHTML='<div class="empty">❌ Odoo: '+resumo.erro+'</div>'; }
 
   // Env badge
   var sieg=status.servicos&&status.servicos.sieg||{};
