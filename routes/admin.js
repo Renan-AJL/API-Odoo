@@ -218,7 +218,7 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
     // Cache de 5 min para evitar rate-limit 429 em consultas repetidas
     var _listKey = JSON.stringify(body);
     var _cached  = listagemCacheGet(_listKey);
-    var registros;
+    var registros = [];
 
     if (_cached) {
       console.log('[ADMIN] sieg/recebidas CACHE HIT —', _cached.length, 'registros');
@@ -229,91 +229,83 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
       }), 30000);
 
       // A SIEG retorna um arquivo ZIP binário com os XMLs
-      // Precisamos descompactar e extrair dados de cada XML
-      var respBuffer = resp.data; // Buffer (axios com responseType: 'arraybuffer')
+      var respBuffer = resp.data;
       console.log('[ADMIN] sieg/recebidas HTTP', resp.status, 'bytes:', respBuffer && respBuffer.length);
 
-    if (!Buffer.isBuffer(respBuffer) && !respBuffer) {
-      return res.json({ erro: 'Resposta vazia da SIEG', registros: [] });
-    }
-
-    var registros = [];
-    var AdmZip = require('adm-zip');
-    var zip = new AdmZip(respBuffer);
-    var entries = zip.getEntries();
-    console.log('[ADMIN] ZIP entries:', entries.length);
-
-    var chavesVistas = {};
-    for (var entry of entries) {
-      if (entry.isDirectory) continue;
-      try {
-        var xmlStr = zip.readAsText(entry);
-
-        // Remover prefixos de namespace (ex: <nfe:infNFe> -> <infNFe>)
-        var xml = xmlStr
-          .replace(/\s+xmlns(?::[^=]+)?="[^"]*"/g, '')
-          .replace(/<([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '<'; })
-          .replace(/<\/([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '</'; });
-
-        // Extrai texto de uma tag
-        function xt(tag) {
-          var re = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + tag + '>', 'i');
-          var m = xml.match(re);
-          return m ? m[1].replace(/<[^>]+>/g, '').trim() : '';
-        }
-        // Extrai texto de uma tag dentro de um bloco pai
-        function xb(parent, tag) {
-          var rp = new RegExp('<' + parent + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + parent + '>', 'i');
-          var mp = xml.match(rp);
-          if (!mp) return '';
-          var re2 = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + tag + '>', 'i');
-          var m2 = mp[1].match(re2);
-          return m2 ? m2[1].replace(/<[^>]+>/g, '').trim() : '';
-        }
-
-        // Chave de acesso — atributo Id ou tag chNFe/chCTe
-        var chaveM = xml.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i)
-                  || xml.match(/<chNFe>(\d{44})</)
-                  || xml.match(/<chCTe>(\d{44})</);
-        var chave = chaveM ? chaveM[1] : '';
-
-        // Deduplicar por chave
-        if (chave && chavesVistas[chave]) continue;
-        if (chave) chavesVistas[chave] = true;
-        // Popular cache para download individual
-        if (chave) cacheSet(chave, xmlStr);
-
-        var emitNome = xb('emit','xFant') || xb('emit','xNome') || '';
-        var emitCNPJ = xb('emit','CNPJ')  || xb('emit','CPF')   || '';
-        var destNome = xb('dest','xNome') || '';
-        var destCNPJ = xb('dest','CNPJ')  || xb('dest','CPF')   || '';
-        var dhEmi    = xt('dhEmi') || xt('dEmi') || '';
-        var vNF      = parseFloat(xt('vNF') || xt('vCT') || xt('vTPrest') || '0') || 0;
-        var nNF      = xt('nNF') || xt('nCT') || xt('nMDF') || '';
-        var serie    = xt('serie') || '';
-
-        registros.push({
-          chave,
-          numero: nNF,
-          serie,
-          emitente: emitNome,
-          cnpjEmitente: emitCNPJ,
-          destinatario: destNome,
-          cnpjDestinatario: destCNPJ,
-          dataEmissao: dhEmi.slice(0, 10),
-          valor: vNF,
-        });
-        if (registros.length <= 2) {
-          console.log('[ADMIN] XML parse sample — emit:', emitNome, 'dest:', destNome, 'nNF:', nNF, 'vNF:', vNF, 'chave:', chave.slice(0,10));
-        }
-      } catch(ezip) {
-        console.warn('[ADMIN] Erro ao parsear entry', entry.entryName, ezip.message);
+      if (!Buffer.isBuffer(respBuffer) && !respBuffer) {
+        return res.json({ erro: 'Resposta vazia da SIEG', registros: [] });
       }
-    }
 
-      // Popular cache de listagem para próximas consultas idênticas
+      var AdmZip = require('adm-zip');
+      var zip = new AdmZip(respBuffer);
+      var entries = zip.getEntries();
+      console.log('[ADMIN] ZIP entries:', entries.length);
+
+      var chavesVistas = {};
+      for (var entry of entries) {
+        if (entry.isDirectory) continue;
+        try {
+          var xmlStr = zip.readAsText(entry);
+
+          var xml = xmlStr
+            .replace(/\s+xmlns(?::[^=]+)?="[^"]*"/g, '')
+            .replace(/<([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '<'; })
+            .replace(/<\/([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '</'; });
+
+          function xt(tag) {
+            var re = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + tag + '>', 'i');
+            var m = xml.match(re);
+            return m ? m[1].replace(/<[^>]+>/g, '').trim() : '';
+          }
+          function xb(parent, tag) {
+            var rp = new RegExp('<' + parent + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + parent + '>', 'i');
+            var mp = xml.match(rp);
+            if (!mp) return '';
+            var re2 = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + tag + '>', 'i');
+            var m2 = mp[1].match(re2);
+            return m2 ? m2[1].replace(/<[^>]+>/g, '').trim() : '';
+          }
+
+          var chaveM = xml.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i)
+                    || xml.match(/<chNFe>(\d{44})</)
+                    || xml.match(/<chCTe>(\d{44})</);
+          var chave = chaveM ? chaveM[1] : '';
+
+          if (chave && chavesVistas[chave]) continue;
+          if (chave) chavesVistas[chave] = true;
+          if (chave) cacheSet(chave, xmlStr);
+
+          var emitNome = xb('emit','xFant') || xb('emit','xNome') || '';
+          var emitCNPJ = xb('emit','CNPJ')  || xb('emit','CPF')   || '';
+          var destNome = xb('dest','xNome') || '';
+          var destCNPJ = xb('dest','CNPJ')  || xb('dest','CPF')   || '';
+          var dhEmi    = xt('dhEmi') || xt('dEmi') || '';
+          var vNF      = parseFloat(xt('vNF') || xt('vCT') || xt('vTPrest') || '0') || 0;
+          var nNF      = xt('nNF') || xt('nCT') || xt('nMDF') || '';
+          var serie    = xt('serie') || '';
+
+          registros.push({
+            chave,
+            numero: nNF,
+            serie,
+            emitente: emitNome,
+            cnpjEmitente: emitCNPJ,
+            destinatario: destNome,
+            cnpjDestinatario: destCNPJ,
+            dataEmissao: dhEmi.slice(0, 10),
+            valor: vNF,
+          });
+          if (registros.length <= 2) {
+            console.log('[ADMIN] XML parse sample — emit:', emitNome, 'dest:', destNome, 'nNF:', nNF, 'vNF:', vNF, 'chave:', chave.slice(0,10));
+          }
+        } catch(ezip) {
+          console.warn('[ADMIN] Erro ao parsear entry', entry.entryName, ezip.message);
+        }
+      }
+
+      // Popular cache para próximas consultas idênticas
       listagemCacheSet(_listKey, registros);
-    } // fim else (resposta SIEG)
+    } // fim else
 
     // Filtro por nome do emitente (após parse do ZIP)
     if (nomeEmitente) {
@@ -1112,6 +1104,7 @@ router.get('/api/sieg/diagnostico', auth, async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 
