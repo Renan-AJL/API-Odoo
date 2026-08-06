@@ -582,3 +582,41 @@ loadStatus();
 }
 
 module.exports = router;
+
+// Diagnóstico SIEG — testa endpoints e retorna o que responde 2xx
+// REMOVER APÓS IDENTIFICAR O ENDPOINT CORRETO
+router.get('/api/sieg/diagnostico', auth, async (req, res) => {
+  try {
+    var axios  = require('axios');
+    var { getAuthHeaders } = require('../services/sieg-auth');
+    var headers = await withTimeout(getAuthHeaders(), 15000);
+    var resultados = [];
+    var candidatos = [
+      'GET https://api.sieg.com/api/v1/GetXmls',
+      'GET https://api.sieg.com/api/v1/xmls',
+      'GET https://api.sieg.com/api/v1/xml-documents',
+      'GET https://api.sieg.com/api/v1/documents',
+      'GET https://api.sieg.com/api/v1/GetDocuments',
+      'GET https://api.sieg.com/api/v1/nfe',
+      'GET https://api.sieg.com/api/v1/GetNfe',
+      'POST https://api.sieg.com/api/v1/GetXmls',
+    ];
+    for (var c of candidatos) {
+      var parts = c.split(' ');
+      var method = parts[0].toLowerCase();
+      var url = parts[1];
+      try {
+        var r = await withTimeout(axios({ method, url, headers,
+          params: method==='get' ? { Take: 1, TipoDocumento: 'NFe' } : undefined,
+          data:   method==='post' ? { Take: 1, TipoDocumento: 'NFe' } : undefined,
+          validateStatus: () => true, timeout: 8000 }), 10000);
+        resultados.push({ endpoint: c, status: r.status, body: JSON.stringify(r.data).slice(0, 200) });
+      } catch(e) {
+        resultados.push({ endpoint: c, status: 'ERR', body: e.message });
+      }
+    }
+    res.json(resultados);
+  } catch(e) {
+    res.json({ erro: e.message });
+  }
+});
