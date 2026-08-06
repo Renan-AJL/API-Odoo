@@ -189,7 +189,7 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
     var axios = require('axios');
     var { getAuthHeaders } = require('../services/sieg-auth');
     var headers = await withTimeout(getAuthHeaders(), 15000);
-    var { dataInicio, dataFim, cnpjEmitente, cnpjDestinatario, nomeEmitente, nomeDestinatario, pagina, tipoXml } = req.query;
+    var { dataInicio, dataFim, cnpjEmitente, cnpjDestinatario, pagina, tipoXml, nomeEmitente } = req.query;
 
     var skip = ((parseInt(pagina) || 1) - 1) * 50;
     var body = {
@@ -298,13 +298,6 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
         return (r.emitente || '').toUpperCase().indexOf(ne) !== -1;
       });
     }
-    // Filtro por nome do destinatário
-    if (nomeDestinatario) {
-      var nd = nomeDestinatario.toUpperCase();
-      registros = registros.filter(function(r) {
-        return (r.destinatario || '').toUpperCase().indexOf(nd) !== -1;
-      });
-    }
     res.json({ total: registros.length, registros, pagina: parseInt(pagina) || 1 });
   } catch(e) {
     console.error('[ADMIN] sieg/recebidas erro:', e.message);
@@ -368,57 +361,20 @@ router.get('/api/sieg/xml/:chave', auth, async (req, res) => {
   }
 });
 
-// Download PDF individual — gera DANFE local via danfe-pdf.js (GetPdf SIEG não existe)
+// Download PDF individual por chave — endpoint SIEG /api/v1/GetPdf
 router.get('/api/sieg/pdf/:chave', auth, async (req, res) => {
   try {
+    var axios  = require('axios');
+    var { getAuthHeaders } = require('../services/sieg-auth');
+    var headers = await withTimeout(getAuthHeaders(), 15000);
     var chave   = req.params.chave;
-    var tipoXml = parseInt(req.query.tipoXml) || 1;
-
-    // 1. Tentar cache XML (populado na listagem)
-    var xmlStr = cacheGet(chave);
-
-    // 2. Fallback: buscar mês da chave no cofre SIEG
-    if (!xmlStr) {
-      var axios  = require('axios');
-      var AdmZip = require('adm-zip');
-      var { getAuthHeaders } = require('../services/sieg-auth');
-      var headers = await withTimeout(getAuthHeaders(), 15000);
-      var aamm = chave.slice(2, 6);
-      var ano  = '20' + aamm.slice(0, 2);
-      var mes  = aamm.slice(2, 4);
-      var di   = ano + '-' + mes + '-01';
-      var dfD  = new Date(parseInt(ano), parseInt(mes), 0);
-      var df   = ano + '-' + mes + '-' + String(dfD.getDate()).padStart(2,'0');
-      console.log('[ADMIN] pdf fallback SIEG — chave:', chave.slice(0,10)+'...', 'período:', di, '-', df);
-      var zResp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', {
-        TipoXml: tipoXml, Take: 500, Skip: 0,
-        DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
-      }, { headers, timeout: 30000, responseType: 'arraybuffer' }), 35000);
-      var zip = new AdmZip(zResp.data);
-      for (var entry of zip.getEntries()) {
-        if (entry.isDirectory) continue;
-        var xs = zip.readAsText(entry);
-        var km = xs.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
-        if (km) cacheSet(km[1], xs);
-        if (xs.indexOf(chave) !== -1) xmlStr = xs;
-      }
-    }
-
-    if (!xmlStr) {
-      return res.status(404).json({
-        erro: 'XML não encontrado no cofre SIEG para gerar o DANFE.',
-        dica: 'Recarregue a listagem antes de baixar o PDF.',
-        chave,
-      });
-    }
-
-    // 3. Gerar DANFE localmente (pdfkit + bwip-js)
-    var { gerarDanfePdf } = require('../services/danfe-pdf');
-    var pdfBuf = await gerarDanfePdf(xmlStr);
-    console.log('[ADMIN] pdf DANFE local —', pdfBuf.length, 'bytes, chave:', chave.slice(0,10)+'...');
+    // SIEG endpoint para PDF individual
+    var resp = await withTimeout(axios.get('https://api.sieg.com/api/v1/GetPdf?chaveAcesso=' + chave, {
+      headers, timeout: 30000, responseType: 'arraybuffer',
+    }), 35000);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.pdf"');
-    res.send(pdfBuf);
+    res.send(Buffer.from(resp.data));
   } catch(e) {
     console.error('[ADMIN] pdf/chave erro:', e.message);
     res.status(500).json({ erro: e.message });
@@ -576,16 +532,6 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
 .row-dropdown a:hover{background:var(--bg3)}
 .row-dropdown.open{display:block}
 @media(max-width:600px){.main{padding:12px}.filters{flex-direction:column}.fg{width:100%}}
-input[type=checkbox]{width:15px;height:15px;accent-color:var(--ac);cursor:pointer;vertical-align:middle}
-th.chk,td.chk{width:32px;padding-left:10px}
-td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
-.mais-opcoes{font-size:12px;color:var(--ac);cursor:pointer;user-select:none;white-space:nowrap}
-.mais-opcoes:hover{text-decoration:underline}
-.extra-filters{display:none;flex-wrap:wrap;gap:10px;margin-top:8px}
-.extra-filters.open{display:flex}
-.sel-bar{display:none;align-items:center;gap:10px;padding:9px 12px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;margin-top:10px;font-size:13px}
-.sel-bar.on{display:flex}
-.btn-xl{background:#1e3a1e;color:#3fb950;border:1px solid #238636}.btn-xl:hover{background:#1a5c1a}
 </style>
 </head><body>
 
@@ -653,12 +599,13 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
     <div class="panel">
       <div class="ph"><h3>Consulta SIEG — NF-e / Documentos Fiscais</h3>
         <button class="btn btn-o" onclick="loadRec()">↻</button>
-        <button class="btn btn-xl" onclick="exportarExcel()" title="Exportar para Excel/CSV">📊 Exportar Excel</button>
         <button class="btn btn-o" id="btn-zip" onclick="downloadZip()" title="Baixar ZIP com os XMLs">⬇ ZIP</button>
       </div>
       <div class="pb">
         <div class="filters">
-          <div class="fg"><label>Tipo do Arquivo</label>
+          <div class="fg"><label>De</label><input type="date" id="r-di"></div>
+          <div class="fg"><label>Até</label><input type="date" id="r-df"></div>
+          <div class="fg"><label>Tipo</label>
             <select id="r-tipo">
               <option value="1">NF-e Recebidas (entradas)</option>
               <option value="2">NF-e Emitidas (cofre SIEG)</option>
@@ -667,24 +614,17 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
               <option value="6">NFC-e</option>
             </select>
           </div>
-          <div class="fg"><label>Data de Emissão (Inicial)</label><input type="date" id="r-di"></div>
-          <div class="fg"><label>Data de Emissão (Final)</label><input type="date" id="r-df"></div>
-          <div class="fg"><label>CNPJ Dest.</label><input type="text" id="r-cnpj-dest" placeholder="00000000000000" style="min-width:150px"></div>
-          <div class="fg"><label>CNPJ Emit.</label><input type="text" id="r-cnpj" placeholder="00000000000000" style="min-width:150px"></div>
-          <div class="fg" style="align-self:flex-end"><a class="mais-opcoes" onclick="toggleMaisOpcoes(this)">Mais Opções ▾</a></div>
+          <div class="fg"><label>CNPJ Emitente</label><input type="text" id="r-cnpj" placeholder="00.000.000/0001-00" style="min-width:170px"></div>
+          <div class="fg"><label>Nome Emitente</label><input type="text" id="r-emit" placeholder="Ex: Maximus, Ferragens..." style="min-width:180px"></div>
           <div class="fg"><label>&nbsp;</label>
             <div class="bgroup">
               <button class="btn btn-o" onclick="preset('r',0)">Hoje</button>
               <button class="btn btn-o" onclick="preset('r',7)">7d</button>
               <button class="btn btn-o" onclick="preset('r',30)">30d</button>
               <button class="btn btn-o" onclick="preset('r',365)">Ano</button>
-              <button class="btn btn-p" onclick="loadRec()">🔍 Pesquisar</button>
+              <button class="btn btn-p" onclick="loadRec()">Filtrar</button>
             </div>
           </div>
-        </div>
-        <div class="extra-filters" id="extra-filters">
-          <div class="fg"><label>Nome Emitente</label><input type="text" id="r-emit" placeholder="Ex: Maximus, Ferragens..." style="min-width:180px"></div>
-          <div class="fg"><label>Nome Destinatário</label><input type="text" id="r-dest-nome" placeholder="Ex: AJL, Comercio..." style="min-width:180px"></div>
         </div>
         <div id="r-info" style="font-size:12px;color:var(--tx2);margin-top:10px">
           Padrão: últimos 3 dias. Use os filtros ou botões para ampliar o período.
@@ -856,12 +796,8 @@ async function loadRec(){
   if(di) url+='&dataInicio='+di;
   if(df) url+='&dataFim='+df;
   if(cnpj) url+='&cnpjEmitente='+encodeURIComponent(cnpj);
-  var cnpjDest=document.getElementById('r-cnpj-dest')?document.getElementById('r-cnpj-dest').value.replace(/\D/g,''):'';
-  if(cnpjDest) url+='&cnpjDestinatario='+encodeURIComponent(cnpjDest);
   var emitNome=document.getElementById('r-emit')?document.getElementById('r-emit').value.trim():'';
   if(emitNome) url+='&nomeEmitente='+encodeURIComponent(emitNome);
-  var destNome=document.getElementById('r-dest-nome')?document.getElementById('r-dest-nome').value.trim():'';
-  if(destNome) url+='&nomeDestinatario='+encodeURIComponent(destNome);
 
   var d=await get(url);
   if(d.erro){ document.getElementById('r-tbl').innerHTML='<div class="err-box">⚠️ '+d.erro+'</div>'; return; }
@@ -872,30 +808,20 @@ async function loadRec(){
   document.getElementById('r-sum').innerHTML='<div class="sum">'+reg.length+' nota(s) &nbsp;·&nbsp; Total: <b>'+fmtVal(tot)+'</b></div>';
 
   var tipoAtual=document.getElementById('r-tipo')?document.getElementById('r-tipo').value:'1';
-  var dtDl=new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-  var selBar='<div class="sel-bar" id="sel-bar"><span id="sel-count">0 selecionado(s)</span>'
-    +'<button class="btn btn-o" style="font-size:12px" onclick="dlSelecionados()">⬇ XML Selecionados</button>'
-    +'<button class="btn btn-o" style="font-size:12px" onclick="deselectAll()">✕ Limpar</button></div>';
-  var html=selBar+'<div class="tw"><table id="r-table"><thead><tr>'
-    +'<th class="chk"><input type="checkbox" id="chk-all" onclick="toggleAll(this)" title="Todos"></th>'
-    +'<th>Tipo</th><th>Nº</th><th>Rz. Emit.</th><th>CNPJ Emit.</th>'
-    +'<th>Data de Emi.</th><th>CNPJ Dest.</th><th>Destinatário</th>'
-    +'<th>Valor</th><th>Dt. do Download</th><th>Chave</th><th>+Detalhes</th>'
+  var html='<div class="tw"><table><thead><tr>'
+    +'<th>Emitente</th><th>Tipo</th><th>Número</th><th>Data Emissão</th>'
+    +'<th>CNPJ Destinatário</th><th>Destinatário</th><th>Valor</th><th>Chave</th><th>Ações</th>'
     +'</tr></thead><tbody>';
   reg.forEach((r,i)=>{
     var xmlUrl='/admin/api/sieg/xml/'+(r.chave||'')+'?tipoXml='+tipoAtual;
-    var ce=(r.chave||'').replace(/"/g,'');
     html+='<tr>';
-    html+='<td class="chk"><input type="checkbox" class="row-chk" data-chave="'+ce+'" data-tipo="'+tipoAtual+'" onchange="updateSelBar()"></td>';
-    html+='<td><span class="b b-ok" style="font-size:10px">'+(r.tipo||'NF-e')+'</span></td>';
+    html+='<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+r.emitente+'">'+(r.emitente||'—')+'</td>';
+    html+='<td><span class="b b-ok" style="font-size:10px">NF-e</span></td>';
     html+='<td style="font-family:monospace;font-weight:600">'+(r.numero||'—')+'</td>';
-    html+='<td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.emitente||'')+'">'+(r.emitente||'—')+'</td>';
-    html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjEmitente||'—')+'</td>';
     html+='<td>'+fmtDate(r.dataEmissao)+'</td>';
-    html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjDestinatario||'—')+'</td>';
-    html+='<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.destinatario||'')+'">'+(r.destinatario||'—')+'</td>';
+    html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjDestinatario||r.cnpjEmitente||'—')+'</td>';
+    html+='<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.destinatario||'')+'">'+(r.destinatario||'—')+'</td>';
     html+='<td style="font-weight:600">'+fmtVal(r.valor)+'</td>';
-    html+='<td class="dt-dl">'+dtDl+'</td>';
     html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)" title="'+(r.chave||'')+'">'+fmtChave(r.chave)+'</td>';
     html+='<td>';
     if(r.chave){
@@ -903,14 +829,15 @@ async function loadRec(){
         +'<button class="btn btn-o" style="padding:4px 10px;font-size:12px" onclick="toggleMenu(this)">⋯</button>'
         +'<div class="row-dropdown">'
         +'<a href="#" class="dl-link" data-url="'+xmlUrl+'" data-file="NFe_'+r.chave+'.xml">⬇ Baixar XML</a>'
-        +'<a href="#" class="dl-link" data-url="/admin/api/sieg/pdf/'+r.chave+'?tipoXml='+tipoAtual+'" data-file="NFe_'+r.chave+'.pdf">⬇ Baixar PDF</a>'
-        +'</div></div>';
+        +'<a href="#" class="dl-link" data-url="/admin/api/sieg/pdf/'+r.chave+'" data-file="NFe_'+r.chave+'.pdf">⬇ Baixar PDF</a>'
+        +'</div>'
+        +'</div>';
     } else { html+='—'; }
-    html+='</td></tr>';
+    html+='</td>';
+    html+='</tr>';
   });
   html+='</tbody></table></div>';
   document.getElementById('r-tbl').innerHTML=html;
-  updateSelBar();
 }
 
 // ── Download via fetch (evita bloqueio de cookie em <a> direto) ──
@@ -925,60 +852,6 @@ async function downloadFile(url, filename){
     document.body.appendChild(a); a.click();
     setTimeout(function(){ URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 1000);
   } catch(e){ alert('Erro ao baixar: '+e.message); }
-}
-
-// ── Mais Opções ───────────────────────────────────────────────────
-function toggleMaisOpcoes(el){
-  var ef=document.getElementById('extra-filters');
-  if(!ef) return;
-  var open=ef.classList.toggle('open');
-  el.textContent=open?'Menos Opções ▴':'Mais Opções ▾';
-}
-
-// ── Seleção de linhas ──────────────────────────────────────────────
-function updateSelBar(){
-  var chks=document.querySelectorAll('.row-chk:checked');
-  var bar=document.getElementById('sel-bar');
-  if(bar){ document.getElementById('sel-count').textContent=chks.length+' selecionado(s)'; bar.classList.toggle('on',chks.length>0); }
-}
-function toggleAll(chkAll){
-  document.querySelectorAll('.row-chk').forEach(function(c){c.checked=chkAll.checked;});
-  updateSelBar();
-}
-function deselectAll(){
-  document.querySelectorAll('.row-chk').forEach(function(c){c.checked=false;});
-  var a=document.getElementById('chk-all'); if(a) a.checked=false;
-  updateSelBar();
-}
-async function dlSelecionados(){
-  var chks=document.querySelectorAll('.row-chk:checked');
-  if(!chks.length){alert('Nenhuma nota selecionada.');return;}
-  for(var c of Array.from(chks)){
-    var chave=c.dataset.chave, tipo=c.dataset.tipo||'1';
-    await downloadFile('/admin/api/sieg/xml/'+chave+'?tipoXml='+tipo,'NFe_'+chave+'.xml');
-    await new Promise(function(r){setTimeout(r,350);});
-  }
-}
-
-// ── Exportar Excel (CSV UTF-8 com BOM) ────────────────────────────
-function exportarExcel(){
-  var tbl=document.getElementById('r-table');
-  if(!tbl){alert('Faça uma consulta primeiro.');return;}
-  var rows=tbl.querySelectorAll('tr'), csv=[];
-  rows.forEach(function(row){
-    var cells=row.querySelectorAll('th,td'), line=[];
-    cells.forEach(function(cell,idx){
-      if(idx===0||idx===cells.length-1) return; // skip checkbox e ações
-      line.push('"'+cell.innerText.replace(/"/g,'""').replace(/\n/g,' ')+'"');
-    });
-    csv.push(line.join(';'));
-  });
-  var blob=new Blob(['\uFEFF'+csv.join('\n')],{type:'text/csv;charset=utf-8;'});
-  var a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='sieg-nfe-'+new Date().toISOString().slice(0,10)+'.csv';
-  document.body.appendChild(a);a.click();
-  setTimeout(function(){URL.revokeObjectURL(a.href);document.body.removeChild(a);},1000);
 }
 
 // ── Menu dropdown por linha ──────────────────────────────────────
@@ -1049,4 +922,3 @@ router.get('/api/sieg/diagnostico', auth, async (req, res) => {
     res.json({ erro: e.message });
   }
 });
-
