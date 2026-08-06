@@ -542,10 +542,7 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
 </div>
 
 <div class="tabs">
-  <div class="tab on" onclick="tab('sieg',this)">📄 SIEG</div>
-  <div class="tab" onclick="tab('odoo',this)">📊 Odoo</div>
-  <div class="tab" onclick="tab('itau',this)">🏦 Itaú</div>
-  <div class="tab" onclick="tab('te',this)">🚚 TudoEntregue</div>
+  <div class="tab on" onclick="tab('sieg',this)">📄 Consulta SIEG</div>
   <div class="tab" onclick="tab('status',this)">⚙️ Status</div>
 </div>
 
@@ -587,7 +584,7 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
           </div>
         </div>
         <div id="e-sum"></div>
-        <div id="e-tbl"><div class="loading"><span class="spin"></span>Aguardando...</div></div>
+        <div id="e-tbl"><div class="empty">Selecione o período e clique em <b>Filtrar</b>.</div></div>
       </div>
     </div>
   </div>
@@ -637,25 +634,10 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
           Padrão: últimos 3 dias. Use os filtros ou botões para ampliar o período.
         </div>
         <div id="r-sum"></div>
-        <div id="r-tbl"><div class="loading"><span class="spin"></span>Aguardando...</div></div>
+        <div id="r-tbl"><div class="empty">Selecione o período e clique em <b>Pesquisar</b>.</div></div>
       </div>
     </div>
   </div>
-</div>
-
-<!-- ══ ODOO ══════════════════════════════════════════════════════ -->
-<div id="p-odoo" class="pane">
-  <div class="panel"><div class="pb"><div class="empty">Em breve — Odoo</div></div></div>
-</div>
-
-<!-- ══ ITAÚ ══════════════════════════════════════════════════════ -->
-<div id="p-itau" class="pane">
-  <div class="panel"><div class="pb"><div class="empty">Em breve — Itaú</div></div></div>
-</div>
-
-<!-- ══ TE ════════════════════════════════════════════════════════ -->
-<div id="p-te" class="pane">
-  <div class="panel"><div class="pb"><div class="empty">Em breve — TudoEntregue</div></div></div>
 </div>
 
 <!-- ══ STATUS ════════════════════════════════════════════════════ -->
@@ -707,7 +689,6 @@ function tab(name, el){
   el.classList.add('on');
   if(!loaded[name]){
     loaded[name]=true;
-    if(name==='sieg') loadEmit();
     if(name==='status') loadStatus();
   }
 }
