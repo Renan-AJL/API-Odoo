@@ -166,36 +166,58 @@ router.get('/api/sieg/emitidas', auth, async (req, res) => {
   }
 });
 
-// NF-e recebidas — cofre SIEG
+// NF-e recebidas — POST /api/v1/baixar-xmls (TipoXml=1 = NF-e entrada)
+// TipoXml: 1=NFe recebida, 2=NFe emitida cofre, 3=CTe, 4=NFSe, 5=CFe, 6=NFCe, 7=CTe OS, 8=CTe emitido, 10=MDFe, 99=todos, 100=NFe emitida SEFAZ
 router.get('/api/sieg/recebidas', auth, async (req, res) => {
   try {
     var axios = require('axios');
     var { getAuthHeaders } = require('../services/sieg-auth');
     var headers = await withTimeout(getAuthHeaders(), 15000);
-    var { dataInicio, dataFim, cnpjEmitente, pagina } = req.query;
-    var params = { Take: 50, Skip: ((parseInt(pagina) || 1) - 1) * 50, TipoDocumento: 'NFe' };
-    if (dataInicio)   params.DataEmissaoInicio = dataInicio;
-    if (dataFim)      params.DataEmissaoFim    = dataFim;
-    if (cnpjEmitente) params.CnpjEmitente      = cnpjEmitente.replace(/\D/g, '');
+    var { dataInicio, dataFim, cnpjEmitente, cnpjDestinatario, pagina, tipoXml } = req.query;
 
-    var resp = await withTimeout(axios.get('https://api.sieg.com/v1/xml-documents', {
-      headers, params, timeout: 20000,
-    }), 25000);
+    var skip = ((parseInt(pagina) || 1) - 1) * 50;
+    var body = {
+      TipoXml: parseInt(tipoXml) || 1,
+      Take: 50,
+      Skip: skip,
+    };
+    if (dataInicio)       body.DataEmissaoInicio = dataInicio + 'T00:00:00Z';
+    if (dataFim)          body.DataEmissaoFim    = dataFim   + 'T23:59:59Z';
+    if (cnpjEmitente)     body.CNPJemit          = cnpjEmitente.replace(/\D/g, '');
+    if (cnpjDestinatario) body.CNPJdest          = cnpjDestinatario.replace(/\D/g, '');
+
+    console.log('[ADMIN] sieg/recebidas body:', JSON.stringify(body));
+
+    var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+      headers, timeout: 25000,
+    }), 30000);
+
+    console.log('[ADMIN] sieg/recebidas HTTP', resp.status, JSON.stringify(resp.data).slice(0, 300));
 
     var data = resp.data;
-    var items = data.items || data.Items || data.xmlDocuments || data.XmlDocuments || data || [];
+    if (!data.success && data.message) {
+      return res.json({ erro: 'SIEG: ' + data.message, registros: [] });
+    }
+
+    var items = data.data || data.items || data.Items || [];
     if (!Array.isArray(items)) items = [];
+
     var registros = items.map(x => ({
-      id: x.id || x.Id,
-      chave: x.chaveAcesso || x.ChaveAcesso || x.accessKey || '',
-      numero: x.numeroDocumento || x.NumeroDocumento || '',
-      emitente: x.razaoSocialEmitente || x.RazaoSocialEmitente || '',
-      cnpjEmitente: x.cnpjEmitente || x.CnpjEmitente || '',
-      dataEmissao: x.dataEmissao || x.DataEmissao || '',
-      valor: x.valorTotal || x.ValorTotal || 0,
-      status: x.situacao || x.Situacao || '',
+      id: x.id || x.Id || x.ChaveAcesso || '',
+      chave: x.ChaveAcesso || x.chaveAcesso || x.ChNFe || '',
+      numero: x.NNF || x.nNF || x.NumeroDocumento || x.numero || '',
+      serie: x.Serie || x.serie || '',
+      emitente: x.XNomeEmi || x.xNomeEmi || x.RazaoSocialEmitente || x.NomeEmitente || '',
+      cnpjEmitente: x.CNPJEmi || x.cnpjEmi || x.CnpjEmitente || '',
+      destinatario: x.XNomeDest || x.xNomeDest || x.NomeDestinatario || '',
+      cnpjDestinatario: x.CNPJDest || x.cnpjDest || x.CnpjDestinatario || '',
+      dataEmissao: x.DhEmi || x.dhEmi || x.DataEmissao || x.dataEmissao || '',
+      valor: x.VNF || x.vNF || x.ValorTotal || x.valorTotal || 0,
+      status: x.Situacao || x.situacao || x.Status || '',
+      tipoXml: x.TipoXml || x.tipoXml || '',
     }));
-    res.json({ total: registros.length, registros });
+
+    res.json({ total: registros.length, registros, pagina: parseInt(pagina) || 1 });
   } catch(e) {
     console.error('[ADMIN] sieg/recebidas erro:', e.message);
     res.json({ erro: 'SIEG: ' + e.message, registros: [] });
@@ -378,12 +400,20 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
   <!-- Recebidas -->
   <div id="sp-rec" style="display:none">
     <div class="panel">
-      <div class="ph"><h3>NF-e Recebidas pela AJL (cofre SIEG)</h3><button class="btn btn-o" onclick="loadRec()">↻</button></div>
+      <div class="ph"><h3>Consulta SIEG — NF-e / Documentos Fiscais</h3><button class="btn btn-o" onclick="loadRec()">↻</button></div>
       <div class="pb">
         <div class="filters">
           <div class="fg"><label>De</label><input type="date" id="r-di"></div>
           <div class="fg"><label>Até</label><input type="date" id="r-df"></div>
-          <div class="fg"><label>CNPJ Emitente</label><input type="text" id="r-cnpj" placeholder="00.000.000/0001-00" style="min-width:180px"></div>
+          <div class="fg"><label>Tipo</label>
+            <select id="r-tipo">
+              <option value="1">NF-e Recebidas</option>
+              <option value="100">NF-e Emitidas (SEFAZ)</option>
+              <option value="2">NF-e Emitidas (cofre)</option>
+              <option value="99">Todos os tipos</option>
+            </select>
+          </div>
+          <div class="fg"><label>CNPJ Emitente</label><input type="text" id="r-cnpj" placeholder="00.000.000/0001-00" style="min-width:170px"></div>
           <div class="fg"><label>&nbsp;</label>
             <div class="bgroup">
               <button class="btn btn-o" onclick="preset('r',0)">Hoje</button>
@@ -543,10 +573,11 @@ async function loadRec(){
   var di=document.getElementById('r-di').value;
   var df=document.getElementById('r-df').value;
   var cnpj=document.getElementById('r-cnpj').value;
-  var url='/admin/api/sieg/recebidas?';
-  if(di) url+='dataInicio='+di+'&';
-  if(df) url+='dataFim='+df+'&';
-  if(cnpj) url+='cnpjEmitente='+encodeURIComponent(cnpj);
+  var tipo=document.getElementById('r-tipo').value;
+  var url='/admin/api/sieg/recebidas?tipoXml='+tipo;
+  if(di) url+='&dataInicio='+di;
+  if(df) url+='&dataFim='+df;
+  if(cnpj) url+='&cnpjEmitente='+encodeURIComponent(cnpj);
 
   var d=await get(url);
   if(d.erro){ document.getElementById('r-tbl').innerHTML='<div class="err-box">⚠️ '+d.erro+'</div>'; return; }
