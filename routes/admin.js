@@ -24,17 +24,6 @@ setInterval(function() {
   Object.keys(_zipCache).forEach(function(k) { if (now - _zipCache[k].ts > ZIP_CACHE_TTL) delete _zipCache[k]; });
 }, 10 * 60 * 1000);
 
-// ── Cache de resposta da listagem /api/sieg/recebidas (evitar 429) ──
-var _listagemCache = {}; // { bodyKey: { registros: [], ts: number } }
-var LISTAGEM_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
-function listagemCacheSet(key, registros) { _listagemCache[key] = { registros: JSON.parse(JSON.stringify(registros)), ts: Date.now() }; }
-function listagemCacheGet(key) {
-  var e = _listagemCache[key];
-  if (!e) return null;
-  if (Date.now() - e.ts > LISTAGEM_CACHE_TTL) { delete _listagemCache[key]; return null; }
-  return e.registros;
-}
-
 // ── Auth ──────────────────────────────────────────────────────────
 const ADMIN_USER   = process.env.ADMIN_USER     || 'admin';
 const ADMIN_PASS   = process.env.ADMIN_PASSWORD || 'ajl2025';
@@ -200,7 +189,7 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
     var axios = require('axios');
     var { getAuthHeaders } = require('../services/sieg-auth');
     var headers = await withTimeout(getAuthHeaders(), 15000);
-    var { dataInicio, dataFim, cnpjEmitente, cnpjDestinatario, nomeDestinatario, pagina, tipoXml, nomeEmitente } = req.query;
+    var { dataInicio, dataFim, cnpjEmitente, cnpjDestinatario, nomeEmitente, nomeDestinatario, pagina, tipoXml } = req.query;
 
     var skip = ((parseInt(pagina) || 1) - 1) * 50;
     var body = {
@@ -215,97 +204,92 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
 
     console.log('[ADMIN] sieg/recebidas body:', JSON.stringify(body));
 
-    // Cache de 5 min para evitar rate-limit 429 em consultas repetidas
-    var _listKey = JSON.stringify(body);
-    var _cached  = listagemCacheGet(_listKey);
+    var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+      headers, timeout: 25000, responseType: 'arraybuffer',
+    }), 30000);
+
+    // A SIEG retorna um arquivo ZIP binário com os XMLs
+    // Precisamos descompactar e extrair dados de cada XML
+    var respBuffer = resp.data; // Buffer (axios com responseType: 'arraybuffer')
+    console.log('[ADMIN] sieg/recebidas HTTP', resp.status, 'bytes:', respBuffer && respBuffer.length);
+
+    if (!Buffer.isBuffer(respBuffer) && !respBuffer) {
+      return res.json({ erro: 'Resposta vazia da SIEG', registros: [] });
+    }
+
+    var AdmZip = require('adm-zip');
+    var zip = new AdmZip(respBuffer);
+    var entries = zip.getEntries();
+    console.log('[ADMIN] ZIP entries:', entries.length);
+
     var registros = [];
+    var chavesVistas = {};
+    for (var entry of entries) {
+      if (entry.isDirectory) continue;
+      try {
+        var xmlStr = zip.readAsText(entry);
 
-    if (_cached) {
-      console.log('[ADMIN] sieg/recebidas CACHE HIT —', _cached.length, 'registros');
-      registros = _cached;
-    } else {
-      var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
-        headers, timeout: 25000, responseType: 'arraybuffer',
-      }), 30000);
+        // Remover prefixos de namespace (ex: <nfe:infNFe> -> <infNFe>)
+        var xml = xmlStr
+          .replace(/\s+xmlns(?::[^=]+)?="[^"]*"/g, '')
+          .replace(/<([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '<'; })
+          .replace(/<\/([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '</'; });
 
-      // A SIEG retorna um arquivo ZIP binário com os XMLs
-      var respBuffer = resp.data;
-      console.log('[ADMIN] sieg/recebidas HTTP', resp.status, 'bytes:', respBuffer && respBuffer.length);
-
-      if (!Buffer.isBuffer(respBuffer) && !respBuffer) {
-        return res.json({ erro: 'Resposta vazia da SIEG', registros: [] });
-      }
-
-      var AdmZip = require('adm-zip');
-      var zip = new AdmZip(respBuffer);
-      var entries = zip.getEntries();
-      console.log('[ADMIN] ZIP entries:', entries.length);
-
-      var chavesVistas = {};
-      for (var entry of entries) {
-        if (entry.isDirectory) continue;
-        try {
-          var xmlStr = zip.readAsText(entry);
-
-          var xml = xmlStr
-            .replace(/\s+xmlns(?::[^=]+)?="[^"]*"/g, '')
-            .replace(/<([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '<'; })
-            .replace(/<\/([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '</'; });
-
-          function xt(tag) {
-            var re = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + tag + '>', 'i');
-            var m = xml.match(re);
-            return m ? m[1].replace(/<[^>]+>/g, '').trim() : '';
-          }
-          function xb(parent, tag) {
-            var rp = new RegExp('<' + parent + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + parent + '>', 'i');
-            var mp = xml.match(rp);
-            if (!mp) return '';
-            var re2 = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + tag + '>', 'i');
-            var m2 = mp[1].match(re2);
-            return m2 ? m2[1].replace(/<[^>]+>/g, '').trim() : '';
-          }
-
-          var chaveM = xml.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i)
-                    || xml.match(/<chNFe>(\d{44})</)
-                    || xml.match(/<chCTe>(\d{44})</);
-          var chave = chaveM ? chaveM[1] : '';
-
-          if (chave && chavesVistas[chave]) continue;
-          if (chave) chavesVistas[chave] = true;
-          if (chave) cacheSet(chave, xmlStr);
-
-          var emitNome = xb('emit','xFant') || xb('emit','xNome') || '';
-          var emitCNPJ = xb('emit','CNPJ')  || xb('emit','CPF')   || '';
-          var destNome = xb('dest','xNome') || '';
-          var destCNPJ = xb('dest','CNPJ')  || xb('dest','CPF')   || '';
-          var dhEmi    = xt('dhEmi') || xt('dEmi') || '';
-          var vNF      = parseFloat(xt('vNF') || xt('vCT') || xt('vTPrest') || '0') || 0;
-          var nNF      = xt('nNF') || xt('nCT') || xt('nMDF') || '';
-          var serie    = xt('serie') || '';
-
-          registros.push({
-            chave,
-            numero: nNF,
-            serie,
-            emitente: emitNome,
-            cnpjEmitente: emitCNPJ,
-            destinatario: destNome,
-            cnpjDestinatario: destCNPJ,
-            dataEmissao: dhEmi.slice(0, 10),
-            valor: vNF,
-          });
-          if (registros.length <= 2) {
-            console.log('[ADMIN] XML parse sample — emit:', emitNome, 'dest:', destNome, 'nNF:', nNF, 'vNF:', vNF, 'chave:', chave.slice(0,10));
-          }
-        } catch(ezip) {
-          console.warn('[ADMIN] Erro ao parsear entry', entry.entryName, ezip.message);
+        // Extrai texto de uma tag
+        function xt(tag) {
+          var re = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + tag + '>', 'i');
+          var m = xml.match(re);
+          return m ? m[1].replace(/<[^>]+>/g, '').trim() : '';
         }
-      }
+        // Extrai texto de uma tag dentro de um bloco pai
+        function xb(parent, tag) {
+          var rp = new RegExp('<' + parent + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + parent + '>', 'i');
+          var mp = xml.match(rp);
+          if (!mp) return '';
+          var re2 = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + tag + '>', 'i');
+          var m2 = mp[1].match(re2);
+          return m2 ? m2[1].replace(/<[^>]+>/g, '').trim() : '';
+        }
 
-      // Popular cache para próximas consultas idênticas
-      listagemCacheSet(_listKey, registros);
-    } // fim else
+        // Chave de acesso — atributo Id ou tag chNFe/chCTe
+        var chaveM = xml.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i)
+                  || xml.match(/<chNFe>(\d{44})</)
+                  || xml.match(/<chCTe>(\d{44})</);
+        var chave = chaveM ? chaveM[1] : '';
+
+        // Deduplicar por chave
+        if (chave && chavesVistas[chave]) continue;
+        if (chave) chavesVistas[chave] = true;
+        // Popular cache para download individual
+        if (chave) cacheSet(chave, xmlStr);
+
+        var emitNome = xb('emit','xFant') || xb('emit','xNome') || '';
+        var emitCNPJ = xb('emit','CNPJ')  || xb('emit','CPF')   || '';
+        var destNome = xb('dest','xNome') || '';
+        var destCNPJ = xb('dest','CNPJ')  || xb('dest','CPF')   || '';
+        var dhEmi    = xt('dhEmi') || xt('dEmi') || '';
+        var vNF      = parseFloat(xt('vNF') || xt('vCT') || xt('vTPrest') || '0') || 0;
+        var nNF      = xt('nNF') || xt('nCT') || xt('nMDF') || '';
+        var serie    = xt('serie') || '';
+
+        registros.push({
+          chave,
+          numero: nNF,
+          serie,
+          emitente: emitNome,
+          cnpjEmitente: emitCNPJ,
+          destinatario: destNome,
+          cnpjDestinatario: destCNPJ,
+          dataEmissao: dhEmi.slice(0, 10),
+          valor: vNF,
+        });
+        if (registros.length <= 2) {
+          console.log('[ADMIN] XML parse sample — emit:', emitNome, 'dest:', destNome, 'nNF:', nNF, 'vNF:', vNF, 'chave:', chave.slice(0,10));
+        }
+      } catch(ezip) {
+        console.warn('[ADMIN] Erro ao parsear entry', entry.entryName, ezip.message);
+      }
+    }
 
     // Filtro por nome do emitente (após parse do ZIP)
     if (nomeEmitente) {
@@ -374,11 +358,7 @@ router.get('/api/sieg/xml/:chave', auth, async (req, res) => {
       if (km) cacheSet(km[1], xmlStr);
       if (xmlStr.indexOf(chave) !== -1) found = xmlStr;
     }
-    if (!found) return res.status(404).json({ 
-      erro: 'XML não encontrado no cofre SIEG para esta chave',
-      chave: chave,
-      dica: 'O cofre SIEG pode não ter este XML. Verifique se é uma NF-e emitida (tipoXml=2) e altere o parâmetro tipoXml na URL.'
-    });
+    if (!found) return res.status(404).json({ erro: 'XML não encontrado no cofre SIEG para esta chave' });
     res.setHeader('Content-Type', 'application/xml; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.xml"');
     res.send(found);
@@ -388,38 +368,33 @@ router.get('/api/sieg/xml/:chave', auth, async (req, res) => {
   }
 });
 
-// Download PDF individual por chave — gera DANFE localmente via danfe-pdf.js
-// GetPdf da SIEG não existe (404). Fluxo: XML do cache → fallback cofre SIEG → danfe-pdf.js
+// Download PDF individual — gera DANFE local via danfe-pdf.js (GetPdf SIEG não existe)
 router.get('/api/sieg/pdf/:chave', auth, async (req, res) => {
   try {
     var chave   = req.params.chave;
     var tipoXml = parseInt(req.query.tipoXml) || 1;
 
-    // 1. Tentar cache (populado quando a tabela de recebidas foi carregada)
+    // 1. Tentar cache XML (populado na listagem)
     var xmlStr = cacheGet(chave);
 
-    // 2. Fallback: buscar o mês inteiro da chave na SIEG
+    // 2. Fallback: buscar mês da chave no cofre SIEG
     if (!xmlStr) {
       var axios  = require('axios');
       var AdmZip = require('adm-zip');
       var { getAuthHeaders } = require('../services/sieg-auth');
       var headers = await withTimeout(getAuthHeaders(), 15000);
-      // Extrair ano/mês da chave (posições 2-5 = AAMM)
-      var aamm    = chave.slice(2, 6);
-      var ano     = '20' + aamm.slice(0, 2);
-      var mes     = aamm.slice(2, 4);
-      var di      = ano + '-' + mes + '-01';
-      var dfDate  = new Date(parseInt(ano), parseInt(mes), 0);
-      var df      = ano + '-' + mes + '-' + String(dfDate.getDate()).padStart(2, '0');
+      var aamm = chave.slice(2, 6);
+      var ano  = '20' + aamm.slice(0, 2);
+      var mes  = aamm.slice(2, 4);
+      var di   = ano + '-' + mes + '-01';
+      var dfD  = new Date(parseInt(ano), parseInt(mes), 0);
+      var df   = ano + '-' + mes + '-' + String(dfD.getDate()).padStart(2,'0');
       console.log('[ADMIN] pdf fallback SIEG — chave:', chave.slice(0,10)+'...', 'período:', di, '-', df);
-      var zipBody = { TipoXml: tipoXml, Take: 500, Skip: 0,
-        DataEmissaoInicio: di + 'T00:00:00Z',
-        DataEmissaoFim:    df + 'T23:59:59Z',
-      };
-      var zipResp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', zipBody, {
-        headers, timeout: 30000, responseType: 'arraybuffer',
-      }), 35000);
-      var zip     = new AdmZip(zipResp.data);
+      var zResp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', {
+        TipoXml: tipoXml, Take: 500, Skip: 0,
+        DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
+      }, { headers, timeout: 30000, responseType: 'arraybuffer' }), 35000);
+      var zip = new AdmZip(zResp.data);
       for (var entry of zip.getEntries()) {
         if (entry.isDirectory) continue;
         var xs = zip.readAsText(entry);
@@ -431,17 +406,16 @@ router.get('/api/sieg/pdf/:chave', auth, async (req, res) => {
 
     if (!xmlStr) {
       return res.status(404).json({
-        erro: 'XML não encontrado no cofre SIEG para esta chave.',
-        dica: 'Verifique o tipo (tipoXml=1 recebidas, tipoXml=2 emitidas cofre) e recarregue a listagem antes de baixar o PDF.',
+        erro: 'XML não encontrado no cofre SIEG para gerar o DANFE.',
+        dica: 'Recarregue a listagem antes de baixar o PDF.',
         chave,
       });
     }
 
-    // 3. Gerar DANFE localmente (pdfkit + bwip-js) — sem depender da SIEG
+    // 3. Gerar DANFE localmente (pdfkit + bwip-js)
     var { gerarDanfePdf } = require('../services/danfe-pdf');
     var pdfBuf = await gerarDanfePdf(xmlStr);
-    console.log('[ADMIN] pdf DANFE local OK —', pdfBuf.length, 'bytes, chave:', chave.slice(0,10)+'...');
-
+    console.log('[ADMIN] pdf DANFE local —', pdfBuf.length, 'bytes, chave:', chave.slice(0,10)+'...');
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.pdf"');
     res.send(pdfBuf);
@@ -601,23 +575,17 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
 .row-dropdown a{display:block;padding:10px 14px;font-size:13px;color:var(--tx);text-decoration:none;white-space:nowrap}
 .row-dropdown a:hover{background:var(--bg3)}
 .row-dropdown.open{display:block}
-/* checkbox */
-input[type=checkbox]{width:16px;height:16px;accent-color:var(--ac);cursor:pointer;vertical-align:middle}
-th.chk,td.chk{width:36px;padding-left:12px}
-/* dt-download */
-td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
-/* mais-opcoes */
-.mais-opcoes{font-size:12px;color:var(--ac);cursor:pointer;text-decoration:none;white-space:nowrap;user-select:none}
-.mais-opcoes:hover{text-decoration:underline}
-.extra-filters{display:none;flex-wrap:wrap;gap:10px;margin-top:10px}
-.extra-filters.open{display:flex}
-/* barra de ações selecionados */
-.sel-bar{display:none;align-items:center;gap:10px;padding:10px 12px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;margin-top:10px;font-size:13px}
-.sel-bar.on{display:flex}
-/* exportar excel */
-.btn-xl{background:#1e3a1e;color:#3fb950;border:1px solid #238636}
-.btn-xl:hover{background:#1a5c1a}
 @media(max-width:600px){.main{padding:12px}.filters{flex-direction:column}.fg{width:100%}}
+input[type=checkbox]{width:15px;height:15px;accent-color:var(--ac);cursor:pointer;vertical-align:middle}
+th.chk,td.chk{width:32px;padding-left:10px}
+td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
+.mais-opcoes{font-size:12px;color:var(--ac);cursor:pointer;user-select:none;white-space:nowrap}
+.mais-opcoes:hover{text-decoration:underline}
+.extra-filters{display:none;flex-wrap:wrap;gap:10px;margin-top:8px}
+.extra-filters.open{display:flex}
+.sel-bar{display:none;align-items:center;gap:10px;padding:9px 12px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;margin-top:10px;font-size:13px}
+.sel-bar.on{display:flex}
+.btn-xl{background:#1e3a1e;color:#3fb950;border:1px solid #238636}.btn-xl:hover{background:#1a5c1a}
 </style>
 </head><body>
 
@@ -685,8 +653,8 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
     <div class="panel">
       <div class="ph"><h3>Consulta SIEG — NF-e / Documentos Fiscais</h3>
         <button class="btn btn-o" onclick="loadRec()">↻</button>
-        <button class="btn btn-xl" onclick="exportarExcel()" title="Exportar listagem para Excel">📊 Exportar para Excel</button>
-        <button class="btn btn-o" id="btn-zip" onclick="downloadZip()" title="Baixar ZIP com todos os XMLs do período">⬇ ZIP</button>
+        <button class="btn btn-xl" onclick="exportarExcel()" title="Exportar para Excel/CSV">📊 Exportar Excel</button>
+        <button class="btn btn-o" id="btn-zip" onclick="downloadZip()" title="Baixar ZIP com os XMLs">⬇ ZIP</button>
       </div>
       <div class="pb">
         <div class="filters">
@@ -701,11 +669,9 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
           </div>
           <div class="fg"><label>Data de Emissão (Inicial)</label><input type="date" id="r-di"></div>
           <div class="fg"><label>Data de Emissão (Final)</label><input type="date" id="r-df"></div>
-          <div class="fg"><label>CNPJ Dest.</label><input type="text" id="r-cnpj-dest" placeholder="00000000000000" style="min-width:155px"></div>
-          <div class="fg"><label>CNPJ Emit.</label><input type="text" id="r-cnpj" placeholder="00000000000000" style="min-width:155px"></div>
-          <div class="fg" style="align-self:flex-end">
-            <a class="mais-opcoes" onclick="toggleMaisOpcoes()">Mais Opções ▾</a>
-          </div>
+          <div class="fg"><label>CNPJ Dest.</label><input type="text" id="r-cnpj-dest" placeholder="00000000000000" style="min-width:150px"></div>
+          <div class="fg"><label>CNPJ Emit.</label><input type="text" id="r-cnpj" placeholder="00000000000000" style="min-width:150px"></div>
+          <div class="fg" style="align-self:flex-end"><a class="mais-opcoes" onclick="toggleMaisOpcoes(this)">Mais Opções ▾</a></div>
           <div class="fg"><label>&nbsp;</label>
             <div class="bgroup">
               <button class="btn btn-o" onclick="preset('r',0)">Hoje</button>
@@ -716,7 +682,6 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
             </div>
           </div>
         </div>
-        <!-- Mais Opções (oculto por padrão) -->
         <div class="extra-filters" id="extra-filters">
           <div class="fg"><label>Nome Emitente</label><input type="text" id="r-emit" placeholder="Ex: Maximus, Ferragens..." style="min-width:180px"></div>
           <div class="fg"><label>Nome Destinatário</label><input type="text" id="r-dest-nome" placeholder="Ex: AJL, Comercio..." style="min-width:180px"></div>
@@ -907,31 +872,30 @@ async function loadRec(){
   document.getElementById('r-sum').innerHTML='<div class="sum">'+reg.length+' nota(s) &nbsp;·&nbsp; Total: <b>'+fmtVal(tot)+'</b></div>';
 
   var tipoAtual=document.getElementById('r-tipo')?document.getElementById('r-tipo').value:'1';
-  var dtDlNow = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-  var html='<div class="sel-bar" id="sel-bar"><span id="sel-count">0 selecionados</span>'
-    +'<button class="btn btn-o" style="font-size:12px" onclick="dlSelecionados()">⬇ Baixar XML(s) Selecionados</button>'
-    +'<button class="btn btn-o" style="font-size:12px" onclick="deselectAll()">✕ Limpar</button>'
-    +'</div>';
-  html+='<div class="tw"><table id="r-table"><thead><tr>'
-    +'<th class="chk"><input type="checkbox" id="chk-all" title="Selecionar todos" onclick="toggleAll(this)"></th>'
+  var dtDl=new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  var selBar='<div class="sel-bar" id="sel-bar"><span id="sel-count">0 selecionado(s)</span>'
+    +'<button class="btn btn-o" style="font-size:12px" onclick="dlSelecionados()">⬇ XML Selecionados</button>'
+    +'<button class="btn btn-o" style="font-size:12px" onclick="deselectAll()">✕ Limpar</button></div>';
+  var html=selBar+'<div class="tw"><table id="r-table"><thead><tr>'
+    +'<th class="chk"><input type="checkbox" id="chk-all" onclick="toggleAll(this)" title="Todos"></th>'
     +'<th>Tipo</th><th>Nº</th><th>Rz. Emit.</th><th>CNPJ Emit.</th>'
-    +'<th>Data de Emi.</th><th>CNPJ Dest.</th><th>Destinatário</th><th>Valor</th>'
-    +'<th>Dt. do Download</th><th>Chave</th><th>+Detalhes</th>'
+    +'<th>Data de Emi.</th><th>CNPJ Dest.</th><th>Destinatário</th>'
+    +'<th>Valor</th><th>Dt. do Download</th><th>Chave</th><th>+Detalhes</th>'
     +'</tr></thead><tbody>';
   reg.forEach((r,i)=>{
     var xmlUrl='/admin/api/sieg/xml/'+(r.chave||'')+'?tipoXml='+tipoAtual;
-    var chaveEsc=(r.chave||'').replace(/"/g,'');
+    var ce=(r.chave||'').replace(/"/g,'');
     html+='<tr>';
-    html+='<td class="chk"><input type="checkbox" class="row-chk" data-chave="'+chaveEsc+'" data-tipo="'+tipoAtual+'" data-num="'+(r.numero||'')+'" onchange="updateSelBar()"></td>';
+    html+='<td class="chk"><input type="checkbox" class="row-chk" data-chave="'+ce+'" data-tipo="'+tipoAtual+'" onchange="updateSelBar()"></td>';
     html+='<td><span class="b b-ok" style="font-size:10px">'+(r.tipo||'NF-e')+'</span></td>';
     html+='<td style="font-family:monospace;font-weight:600">'+(r.numero||'—')+'</td>';
-    html+='<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+r.emitente+'">'+(r.emitente||'—')+'</td>';
+    html+='<td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.emitente||'')+'">'+(r.emitente||'—')+'</td>';
     html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjEmitente||'—')+'</td>';
     html+='<td>'+fmtDate(r.dataEmissao)+'</td>';
     html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjDestinatario||'—')+'</td>';
     html+='<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.destinatario||'')+'">'+(r.destinatario||'—')+'</td>';
     html+='<td style="font-weight:600">'+fmtVal(r.valor)+'</td>';
-    html+='<td class="dt-dl">'+dtDlNow+'</td>';
+    html+='<td class="dt-dl">'+dtDl+'</td>';
     html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)" title="'+(r.chave||'')+'">'+fmtChave(r.chave)+'</td>';
     html+='<td>';
     if(r.chave){
@@ -939,16 +903,13 @@ async function loadRec(){
         +'<button class="btn btn-o" style="padding:4px 10px;font-size:12px" onclick="toggleMenu(this)">⋯</button>'
         +'<div class="row-dropdown">'
         +'<a href="#" class="dl-link" data-url="'+xmlUrl+'" data-file="NFe_'+r.chave+'.xml">⬇ Baixar XML</a>'
-        +'<a href="#" class="dl-link" data-url="/admin/api/sieg/pdf/'+r.chave+'" data-file="NFe_'+r.chave+'.pdf">⬇ Baixar PDF</a>'
-        +'</div>'
-        +'</div>';
+        +'<a href="#" class="dl-link" data-url="/admin/api/sieg/pdf/'+r.chave+'?tipoXml='+tipoAtual+'" data-file="NFe_'+r.chave+'.pdf">⬇ Baixar PDF</a>'
+        +'</div></div>';
     } else { html+='—'; }
-    html+='</td>';
-    html+='</tr>';
+    html+='</td></tr>';
   });
   html+='</tbody></table></div>';
   document.getElementById('r-tbl').innerHTML=html;
-  // resetar sel-bar
   updateSelBar();
 }
 
@@ -966,66 +927,53 @@ async function downloadFile(url, filename){
   } catch(e){ alert('Erro ao baixar: '+e.message); }
 }
 
-// ── Mais Opções ──────────────────────────────────────────────────
-function toggleMaisOpcoes(){
-  var el=document.getElementById('extra-filters');
-  if(el) el.classList.toggle('open');
+// ── Mais Opções ───────────────────────────────────────────────────
+function toggleMaisOpcoes(el){
+  var ef=document.getElementById('extra-filters');
+  if(!ef) return;
+  var open=ef.classList.toggle('open');
+  el.textContent=open?'Menos Opções ▴':'Mais Opções ▾';
 }
 
-// ── Seleção de linhas ─────────────────────────────────────────────
+// ── Seleção de linhas ──────────────────────────────────────────────
 function updateSelBar(){
   var chks=document.querySelectorAll('.row-chk:checked');
   var bar=document.getElementById('sel-bar');
-  if(bar){
-    document.getElementById('sel-count').textContent=chks.length+' selecionado(s)';
-    bar.classList.toggle('on', chks.length>0);
-  }
+  if(bar){ document.getElementById('sel-count').textContent=chks.length+' selecionado(s)'; bar.classList.toggle('on',chks.length>0); }
 }
 function toggleAll(chkAll){
   document.querySelectorAll('.row-chk').forEach(function(c){c.checked=chkAll.checked;});
   updateSelBar();
 }
 function deselectAll(){
-  document.querySelectorAll('.row-chk,.chk-all').forEach(function(c){c.checked=false;});
+  document.querySelectorAll('.row-chk').forEach(function(c){c.checked=false;});
   var a=document.getElementById('chk-all'); if(a) a.checked=false;
   updateSelBar();
 }
 async function dlSelecionados(){
   var chks=document.querySelectorAll('.row-chk:checked');
   if(!chks.length){alert('Nenhuma nota selecionada.');return;}
-  var total=chks.length, done=0, erros=[];
-  for(var c of chks){
-    var chave=c.dataset.chave, tipo=c.dataset.tipo||'1', num=c.dataset.num||chave;
-    var url='/admin/api/sieg/xml/'+chave+'?tipoXml='+tipo;
-    try{
-      await downloadFile(url,'NFe_'+chave+'.xml');
-      done++;
-      // pequena pausa para não sobrecarregar
-      await new Promise(function(r){setTimeout(r,400);});
-    }catch(e){erros.push(num+': '+e.message);}
+  for(var c of Array.from(chks)){
+    var chave=c.dataset.chave, tipo=c.dataset.tipo||'1';
+    await downloadFile('/admin/api/sieg/xml/'+chave+'?tipoXml='+tipo,'NFe_'+chave+'.xml');
+    await new Promise(function(r){setTimeout(r,350);});
   }
-  if(erros.length) alert('Baixados: '+done+'/'+total+'\nErros:\n'+erros.join('\n'));
 }
 
-// ── Exportar para Excel (CSV simples) ────────────────────────────
+// ── Exportar Excel (CSV UTF-8 com BOM) ────────────────────────────
 function exportarExcel(){
   var tbl=document.getElementById('r-table');
   if(!tbl){alert('Faça uma consulta primeiro.');return;}
-  var rows=tbl.querySelectorAll('tr');
-  var csv=[];
+  var rows=tbl.querySelectorAll('tr'), csv=[];
   rows.forEach(function(row){
-    var cells=row.querySelectorAll('th,td');
-    var line=[];
+    var cells=row.querySelectorAll('th,td'), line=[];
     cells.forEach(function(cell,idx){
-      if(idx===0) return; // skip checkbox
-      if(idx===cells.length-1) return; // skip ações
-      var txt=cell.innerText.replace(/"/g,'""').replace(/\n/g,' ');
-      line.push('"'+txt+'"');
+      if(idx===0||idx===cells.length-1) return; // skip checkbox e ações
+      line.push('"'+cell.innerText.replace(/"/g,'""').replace(/\n/g,' ')+'"');
     });
     csv.push(line.join(';'));
   });
-  var bom='\uFEFF';
-  var blob=new Blob([bom+csv.join('\n')],{type:'text/csv;charset=utf-8;'});
+  var blob=new Blob(['\uFEFF'+csv.join('\n')],{type:'text/csv;charset=utf-8;'});
   var a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
   a.download='sieg-nfe-'+new Date().toISOString().slice(0,10)+'.csv';
@@ -1062,49 +1010,43 @@ loadStatus();
 </body></html>`;
 }
 
-// Diagnóstico SIEG — testa GetPdf e GetXmls e retorna status
+module.exports = router;
+
+// Diagnóstico SIEG — testa endpoints e retorna o que responde 2xx
+// REMOVER APÓS IDENTIFICAR O ENDPOINT CORRETO
 router.get('/api/sieg/diagnostico', auth, async (req, res) => {
   try {
     var axios  = require('axios');
     var { getAuthHeaders } = require('../services/sieg-auth');
     var headers = await withTimeout(getAuthHeaders(), 15000);
     var resultados = [];
-    var chaveTest = req.query.chave || null;
-
     var candidatos = [
-      { method: 'post', url: 'https://api.sieg.com/api/v1/baixar-xmls',       data: { TipoXml: 1, Take: 1, Skip: 0 } },
-      { method: 'post', url: 'https://api.sieg.com/api/v1/baixar-xmls',       data: { TipoXml: 2, Take: 1, Skip: 0 } },
+      'GET https://api.sieg.com/api/v1/GetXmls',
+      'GET https://api.sieg.com/api/v1/xmls',
+      'GET https://api.sieg.com/api/v1/xml-documents',
+      'GET https://api.sieg.com/api/v1/documents',
+      'GET https://api.sieg.com/api/v1/GetDocuments',
+      'GET https://api.sieg.com/api/v1/nfe',
+      'GET https://api.sieg.com/api/v1/GetNfe',
+      'POST https://api.sieg.com/api/v1/GetXmls',
     ];
-    if (chaveTest) {
-      candidatos.push({ method: 'get', url: 'https://api.sieg.com/api/v1/GetPdf?chaveAcesso=' + chaveTest, responseType: 'arraybuffer' });
-    }
-
     for (var c of candidatos) {
+      var parts = c.split(' ');
+      var method = parts[0].toLowerCase();
+      var url = parts[1];
       try {
-        var reqCfg = { method: c.method, url: c.url, headers, validateStatus: () => true, timeout: 10000 };
-        if (c.data) reqCfg.data = c.data;
-        if (c.responseType) reqCfg.responseType = c.responseType;
-        var r = await withTimeout(axios(reqCfg), 12000);
-        var bodyPreview;
-        if (c.responseType === 'arraybuffer') {
-          var buf = Buffer.from(r.data);
-          bodyPreview = buf.slice(0,5).toString('ascii') + ' (' + buf.length + ' bytes)';
-        } else {
-          bodyPreview = JSON.stringify(r.data).slice(0, 200);
-        }
-        resultados.push({ endpoint: c.method.toUpperCase() + ' ' + c.url + (c.data ? ' body:'+JSON.stringify(c.data) : ''), status: r.status, body: bodyPreview });
+        var r = await withTimeout(axios({ method, url, headers,
+          params: method==='get' ? { Take: 1, TipoDocumento: 'NFe' } : undefined,
+          data:   method==='post' ? { Take: 1, TipoDocumento: 'NFe' } : undefined,
+          validateStatus: () => true, timeout: 8000 }), 10000);
+        resultados.push({ endpoint: c, status: r.status, body: JSON.stringify(r.data).slice(0, 200) });
       } catch(e) {
-        resultados.push({ endpoint: c.url, status: 'ERR', body: e.message });
+        resultados.push({ endpoint: c, status: 'ERR', body: e.message });
       }
     }
-    res.json({ headers_usados: { tem_jwt: !!headers.Authorization, tem_oauth: !!headers['X-OAuth-Token'], tem_apikey: !!headers['X-API-Key'] }, resultados });
+    res.json(resultados);
   } catch(e) {
     res.json({ erro: e.message });
   }
 });
-
-module.exports = router;
-
-
-
 
