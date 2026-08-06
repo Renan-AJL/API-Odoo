@@ -189,7 +189,7 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
     var axios = require('axios');
     var { getAuthHeaders } = require('../services/sieg-auth');
     var headers = await withTimeout(getAuthHeaders(), 15000);
-    var { dataInicio, dataFim, cnpjEmitente, cnpjDestinatario, pagina, tipoXml, nomeEmitente } = req.query;
+    var { dataInicio, dataFim, cnpjEmitente, cnpjDestinatario, nomeDestinatario, pagina, tipoXml, nomeEmitente } = req.query;
 
     var skip = ((parseInt(pagina) || 1) - 1) * 50;
     var body = {
@@ -296,6 +296,13 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
       var ne = nomeEmitente.toUpperCase();
       registros = registros.filter(function(r) {
         return (r.emitente || '').toUpperCase().indexOf(ne) !== -1;
+      });
+    }
+    // Filtro por nome do destinatário
+    if (nomeDestinatario) {
+      var nd = nomeDestinatario.toUpperCase();
+      registros = registros.filter(function(r) {
+        return (r.destinatario || '').toUpperCase().indexOf(nd) !== -1;
       });
     }
     res.json({ total: registros.length, registros, pagina: parseInt(pagina) || 1 });
@@ -562,6 +569,22 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
 .row-dropdown a{display:block;padding:10px 14px;font-size:13px;color:var(--tx);text-decoration:none;white-space:nowrap}
 .row-dropdown a:hover{background:var(--bg3)}
 .row-dropdown.open{display:block}
+/* checkbox */
+input[type=checkbox]{width:16px;height:16px;accent-color:var(--ac);cursor:pointer;vertical-align:middle}
+th.chk,td.chk{width:36px;padding-left:12px}
+/* dt-download */
+td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
+/* mais-opcoes */
+.mais-opcoes{font-size:12px;color:var(--ac);cursor:pointer;text-decoration:none;white-space:nowrap;user-select:none}
+.mais-opcoes:hover{text-decoration:underline}
+.extra-filters{display:none;flex-wrap:wrap;gap:10px;margin-top:10px}
+.extra-filters.open{display:flex}
+/* barra de ações selecionados */
+.sel-bar{display:none;align-items:center;gap:10px;padding:10px 12px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;margin-top:10px;font-size:13px}
+.sel-bar.on{display:flex}
+/* exportar excel */
+.btn-xl{background:#1e3a1e;color:#3fb950;border:1px solid #238636}
+.btn-xl:hover{background:#1a5c1a}
 @media(max-width:600px){.main{padding:12px}.filters{flex-direction:column}.fg{width:100%}}
 </style>
 </head><body>
@@ -630,13 +653,12 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
     <div class="panel">
       <div class="ph"><h3>Consulta SIEG — NF-e / Documentos Fiscais</h3>
         <button class="btn btn-o" onclick="loadRec()">↻</button>
-        <button class="btn btn-o" id="btn-zip" onclick="downloadZip()" title="Baixar ZIP com os XMLs">⬇ ZIP</button>
+        <button class="btn btn-xl" onclick="exportarExcel()" title="Exportar listagem para Excel">📊 Exportar para Excel</button>
+        <button class="btn btn-o" id="btn-zip" onclick="downloadZip()" title="Baixar ZIP com todos os XMLs do período">⬇ ZIP</button>
       </div>
       <div class="pb">
         <div class="filters">
-          <div class="fg"><label>De</label><input type="date" id="r-di"></div>
-          <div class="fg"><label>Até</label><input type="date" id="r-df"></div>
-          <div class="fg"><label>Tipo</label>
+          <div class="fg"><label>Tipo do Arquivo</label>
             <select id="r-tipo">
               <option value="1">NF-e Recebidas (entradas)</option>
               <option value="2">NF-e Emitidas (cofre SIEG)</option>
@@ -645,17 +667,27 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
               <option value="6">NFC-e</option>
             </select>
           </div>
-          <div class="fg"><label>CNPJ Emitente</label><input type="text" id="r-cnpj" placeholder="00.000.000/0001-00" style="min-width:170px"></div>
-          <div class="fg"><label>Nome Emitente</label><input type="text" id="r-emit" placeholder="Ex: Maximus, Ferragens..." style="min-width:180px"></div>
+          <div class="fg"><label>Data de Emissão (Inicial)</label><input type="date" id="r-di"></div>
+          <div class="fg"><label>Data de Emissão (Final)</label><input type="date" id="r-df"></div>
+          <div class="fg"><label>CNPJ Dest.</label><input type="text" id="r-cnpj-dest" placeholder="00000000000000" style="min-width:155px"></div>
+          <div class="fg"><label>CNPJ Emit.</label><input type="text" id="r-cnpj" placeholder="00000000000000" style="min-width:155px"></div>
+          <div class="fg" style="align-self:flex-end">
+            <a class="mais-opcoes" onclick="toggleMaisOpcoes()">Mais Opções ▾</a>
+          </div>
           <div class="fg"><label>&nbsp;</label>
             <div class="bgroup">
               <button class="btn btn-o" onclick="preset('r',0)">Hoje</button>
               <button class="btn btn-o" onclick="preset('r',7)">7d</button>
               <button class="btn btn-o" onclick="preset('r',30)">30d</button>
               <button class="btn btn-o" onclick="preset('r',365)">Ano</button>
-              <button class="btn btn-p" onclick="loadRec()">Filtrar</button>
+              <button class="btn btn-p" onclick="loadRec()">🔍 Pesquisar</button>
             </div>
           </div>
+        </div>
+        <!-- Mais Opções (oculto por padrão) -->
+        <div class="extra-filters" id="extra-filters">
+          <div class="fg"><label>Nome Emitente</label><input type="text" id="r-emit" placeholder="Ex: Maximus, Ferragens..." style="min-width:180px"></div>
+          <div class="fg"><label>Nome Destinatário</label><input type="text" id="r-dest-nome" placeholder="Ex: AJL, Comercio..." style="min-width:180px"></div>
         </div>
         <div id="r-info" style="font-size:12px;color:var(--tx2);margin-top:10px">
           Padrão: últimos 3 dias. Use os filtros ou botões para ampliar o período.
@@ -827,8 +859,12 @@ async function loadRec(){
   if(di) url+='&dataInicio='+di;
   if(df) url+='&dataFim='+df;
   if(cnpj) url+='&cnpjEmitente='+encodeURIComponent(cnpj);
+  var cnpjDest=document.getElementById('r-cnpj-dest')?document.getElementById('r-cnpj-dest').value.replace(/\D/g,''):'';
+  if(cnpjDest) url+='&cnpjDestinatario='+encodeURIComponent(cnpjDest);
   var emitNome=document.getElementById('r-emit')?document.getElementById('r-emit').value.trim():'';
   if(emitNome) url+='&nomeEmitente='+encodeURIComponent(emitNome);
+  var destNome=document.getElementById('r-dest-nome')?document.getElementById('r-dest-nome').value.trim():'';
+  if(destNome) url+='&nomeDestinatario='+encodeURIComponent(destNome);
 
   var d=await get(url);
   if(d.erro){ document.getElementById('r-tbl').innerHTML='<div class="err-box">⚠️ '+d.erro+'</div>'; return; }
@@ -839,20 +875,31 @@ async function loadRec(){
   document.getElementById('r-sum').innerHTML='<div class="sum">'+reg.length+' nota(s) &nbsp;·&nbsp; Total: <b>'+fmtVal(tot)+'</b></div>';
 
   var tipoAtual=document.getElementById('r-tipo')?document.getElementById('r-tipo').value:'1';
-  var html='<div class="tw"><table><thead><tr>'
-    +'<th>Emitente</th><th>Tipo</th><th>Número</th><th>Data Emissão</th>'
-    +'<th>CNPJ Destinatário</th><th>Destinatário</th><th>Valor</th><th>Chave</th><th>Ações</th>'
+  var dtDlNow = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  var html='<div class="sel-bar" id="sel-bar"><span id="sel-count">0 selecionados</span>'
+    +'<button class="btn btn-o" style="font-size:12px" onclick="dlSelecionados()">⬇ Baixar XML(s) Selecionados</button>'
+    +'<button class="btn btn-o" style="font-size:12px" onclick="deselectAll()">✕ Limpar</button>'
+    +'</div>';
+  html+='<div class="tw"><table id="r-table"><thead><tr>'
+    +'<th class="chk"><input type="checkbox" id="chk-all" title="Selecionar todos" onclick="toggleAll(this)"></th>'
+    +'<th>Tipo</th><th>Nº</th><th>Rz. Emit.</th><th>CNPJ Emit.</th>'
+    +'<th>Data de Emi.</th><th>CNPJ Dest.</th><th>Destinatário</th><th>Valor</th>'
+    +'<th>Dt. do Download</th><th>Chave</th><th>+Detalhes</th>'
     +'</tr></thead><tbody>';
   reg.forEach((r,i)=>{
     var xmlUrl='/admin/api/sieg/xml/'+(r.chave||'')+'?tipoXml='+tipoAtual;
+    var chaveEsc=(r.chave||'').replace(/"/g,'');
     html+='<tr>';
-    html+='<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+r.emitente+'">'+(r.emitente||'—')+'</td>';
-    html+='<td><span class="b b-ok" style="font-size:10px">NF-e</span></td>';
+    html+='<td class="chk"><input type="checkbox" class="row-chk" data-chave="'+chaveEsc+'" data-tipo="'+tipoAtual+'" data-num="'+(r.numero||'')+'" onchange="updateSelBar()"></td>';
+    html+='<td><span class="b b-ok" style="font-size:10px">'+(r.tipo||'NF-e')+'</span></td>';
     html+='<td style="font-family:monospace;font-weight:600">'+(r.numero||'—')+'</td>';
+    html+='<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+r.emitente+'">'+(r.emitente||'—')+'</td>';
+    html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjEmitente||'—')+'</td>';
     html+='<td>'+fmtDate(r.dataEmissao)+'</td>';
-    html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjDestinatario||r.cnpjEmitente||'—')+'</td>';
-    html+='<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.destinatario||'')+'">'+(r.destinatario||'—')+'</td>';
+    html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjDestinatario||'—')+'</td>';
+    html+='<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.destinatario||'')+'">'+(r.destinatario||'—')+'</td>';
     html+='<td style="font-weight:600">'+fmtVal(r.valor)+'</td>';
+    html+='<td class="dt-dl">'+dtDlNow+'</td>';
     html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)" title="'+(r.chave||'')+'">'+fmtChave(r.chave)+'</td>';
     html+='<td>';
     if(r.chave){
@@ -869,6 +916,8 @@ async function loadRec(){
   });
   html+='</tbody></table></div>';
   document.getElementById('r-tbl').innerHTML=html;
+  // resetar sel-bar
+  updateSelBar();
 }
 
 // ── Download via fetch (evita bloqueio de cookie em <a> direto) ──
@@ -883,6 +932,73 @@ async function downloadFile(url, filename){
     document.body.appendChild(a); a.click();
     setTimeout(function(){ URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 1000);
   } catch(e){ alert('Erro ao baixar: '+e.message); }
+}
+
+// ── Mais Opções ──────────────────────────────────────────────────
+function toggleMaisOpcoes(){
+  var el=document.getElementById('extra-filters');
+  if(el) el.classList.toggle('open');
+}
+
+// ── Seleção de linhas ─────────────────────────────────────────────
+function updateSelBar(){
+  var chks=document.querySelectorAll('.row-chk:checked');
+  var bar=document.getElementById('sel-bar');
+  if(bar){
+    document.getElementById('sel-count').textContent=chks.length+' selecionado(s)';
+    bar.classList.toggle('on', chks.length>0);
+  }
+}
+function toggleAll(chkAll){
+  document.querySelectorAll('.row-chk').forEach(function(c){c.checked=chkAll.checked;});
+  updateSelBar();
+}
+function deselectAll(){
+  document.querySelectorAll('.row-chk,.chk-all').forEach(function(c){c.checked=false;});
+  var a=document.getElementById('chk-all'); if(a) a.checked=false;
+  updateSelBar();
+}
+async function dlSelecionados(){
+  var chks=document.querySelectorAll('.row-chk:checked');
+  if(!chks.length){alert('Nenhuma nota selecionada.');return;}
+  var total=chks.length, done=0, erros=[];
+  for(var c of chks){
+    var chave=c.dataset.chave, tipo=c.dataset.tipo||'1', num=c.dataset.num||chave;
+    var url='/admin/api/sieg/xml/'+chave+'?tipoXml='+tipo;
+    try{
+      await downloadFile(url,'NFe_'+chave+'.xml');
+      done++;
+      // pequena pausa para não sobrecarregar
+      await new Promise(function(r){setTimeout(r,400);});
+    }catch(e){erros.push(num+': '+e.message);}
+  }
+  if(erros.length) alert('Baixados: '+done+'/'+total+'\nErros:\n'+erros.join('\n'));
+}
+
+// ── Exportar para Excel (CSV simples) ────────────────────────────
+function exportarExcel(){
+  var tbl=document.getElementById('r-table');
+  if(!tbl){alert('Faça uma consulta primeiro.');return;}
+  var rows=tbl.querySelectorAll('tr');
+  var csv=[];
+  rows.forEach(function(row){
+    var cells=row.querySelectorAll('th,td');
+    var line=[];
+    cells.forEach(function(cell,idx){
+      if(idx===0) return; // skip checkbox
+      if(idx===cells.length-1) return; // skip ações
+      var txt=cell.innerText.replace(/"/g,'""').replace(/\n/g,' ');
+      line.push('"'+txt+'"');
+    });
+    csv.push(line.join(';'));
+  });
+  var bom='\uFEFF';
+  var blob=new Blob([bom+csv.join('\n')],{type:'text/csv;charset=utf-8;'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='sieg-nfe-'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);document.body.removeChild(a);},1000);
 }
 
 // ── Menu dropdown por linha ──────────────────────────────────────
@@ -956,4 +1072,5 @@ router.get('/api/sieg/diagnostico', auth, async (req, res) => {
 });
 
 module.exports = router;
+
 
