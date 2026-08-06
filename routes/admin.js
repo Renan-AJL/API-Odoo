@@ -174,54 +174,6 @@ router.get('/api/sieg/emitidas', auth, async (req, res) => {
   }
 });
 
-
-// ════════════════════════════════════════════════════════════════
-// APIs — ODOO extras
-// ════════════════════════════════════════════════════════════════
-
-// Faturas Odoo — usa apenas search + read (mesmo padrão de emitidas)
-router.get('/api/odoo/faturas', auth, async (req, res) => {
-  try {
-    var cfg = config.odoo;
-    if (!cfg.url) return res.json({ erro: 'ODOO_URL não configurada', registros: [] });
-    var { dataInicio, dataFim, status: st, busca, tipo } = req.query;
-    var c   = odooClient(cfg.url);
-    var uid = await odooAuth(c, cfg.db, cfg.user, cfg.password);
-    var ekw = function(m, mt, a, k) { return odooKw(c, cfg.db, uid, cfg.password, m, mt, a, k); };
-
-    var moveType = tipo === 'entrada' ? 'in_invoice' : 'out_invoice';
-    var domain = [['move_type','=', moveType], ['state','=','posted']];
-    if (st && st !== 'todos') domain.push(['payment_state','=', st]);
-    if (dataInicio) domain.push(['invoice_date','>=', dataInicio]);
-    if (dataFim)    domain.push(['invoice_date','<=', dataFim]);
-    if (busca)      domain.push(['name','ilike', busca]);
-
-    var ids = await ekw('account.move', 'search', [domain], { order: 'invoice_date desc', limit: 200 });
-    var registros = [];
-    if (ids.length) {
-      var rows = await ekw('account.move', 'read', [ids, [
-        'name','partner_id','invoice_date','invoice_date_due',
-        'amount_total','amount_residual','payment_state','ref',
-      ]]);
-      registros = rows.map(function(r) { return {
-        id: r.id,
-        numero: r.name,
-        ref: r.ref || '',
-        parceiro: Array.isArray(r.partner_id) ? r.partner_id[1] : String(r.partner_id||''),
-        dataEmissao: r.invoice_date,
-        dataVencimento: r.invoice_date_due,
-        total: r.amount_total,
-        saldo: r.amount_residual,
-        statusPagamento: r.payment_state,
-      }; });
-    }
-    res.json({ total: registros.length, registros });
-  } catch(e) {
-    console.error('[ADMIN] odoo/faturas erro:', e.message);
-    res.json({ erro: e.message, registros: [] });
-  }
-});
-
 // NF-e recebidas — idêntico ao bcc8d068, + filtro nomeDestinatario
 router.get('/api/sieg/recebidas', auth, async (req, res) => {
   try {
@@ -568,9 +520,6 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)
 .row-dropdown a:hover{background:var(--bg3)}
 .row-dropdown.open{display:block}
 /* novos estilos */
-/* Faturas — vencimento */
-td.venc-ok{color:var(--tx)}
-td.venc-late{color:var(--rd);font-weight:600}
 input[type=checkbox]{width:15px;height:15px;accent-color:var(--ac);cursor:pointer;vertical-align:middle}
 th.chk,td.chk{width:32px;padding-left:10px}
 td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
@@ -696,92 +645,7 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
 
 <!-- ══ ODOO ══════════════════════════════════════════════════════ -->
 <div id="p-odoo" class="pane">
-  <div class="subtabs">
-    <div class="stab on" onclick="stabOdoo('emit',this)">📤 NF-e Emitidas</div>
-    <div class="stab" onclick="stabOdoo('fat',this)">🧾 Faturas</div>
-  </div>
-
-  <!-- NF-e Emitidas (Odoo) -->
-  <div id="op-emit">
-    <div class="panel">
-      <div class="ph">
-        <h3>NF-e Emitidas pela AJL</h3>
-        <button class="btn btn-o" onclick="loadEmit()">↻</button>
-        <button class="btn btn-xl" onclick="exportarExcelEmit()" title="Exportar para Excel/CSV">📊 Exportar Excel</button>
-      </div>
-      <div class="pb">
-        <div class="filters">
-          <div class="fg"><label>De</label><input type="date" id="e-di"></div>
-          <div class="fg"><label>Até</label><input type="date" id="e-df"></div>
-          <div class="fg"><label>Status NF-e</label>
-            <select id="e-st">
-              <option value="todos">Todos</option>
-              <option value="autorizada">Autorizada</option>
-              <option value="cancelada">Cancelada</option>
-              <option value="pendente">Pendente</option>
-              <option value="erro">Erro</option>
-            </select>
-          </div>
-          <div class="fg"><label>Busca</label><input type="text" id="e-bq" placeholder="INV/2025/..."></div>
-          <div class="fg"><label>&nbsp;</label>
-            <div class="bgroup">
-              <button class="btn btn-o" onclick="preset('e',0)">Hoje</button>
-              <button class="btn btn-o" onclick="preset('e',7)">7d</button>
-              <button class="btn btn-o" onclick="preset('e',30)">30d</button>
-              <button class="btn btn-o" onclick="preset('e',365)">Ano</button>
-              <button class="btn btn-p" onclick="loadEmit()">🔍 Pesquisar</button>
-            </div>
-          </div>
-        </div>
-        <div id="e-sum"></div>
-        <div id="e-tbl"><div class="loading"><span class="spin"></span>Aguardando...</div></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Faturas Odoo -->
-  <div id="op-fat" style="display:none">
-    <div class="panel">
-      <div class="ph">
-        <h3>Faturas / Contas a Receber</h3>
-        <button class="btn btn-o" onclick="loadFat()">↻</button>
-        <button class="btn btn-xl" onclick="exportarExcelFat()" title="Exportar para Excel/CSV">📊 Exportar Excel</button>
-      </div>
-      <div class="pb">
-        <div class="filters">
-          <div class="fg"><label>Tipo</label>
-            <select id="f-tipo">
-              <option value="saida">Saída (Clientes)</option>
-              <option value="entrada">Entrada (Fornecedores)</option>
-            </select>
-          </div>
-          <div class="fg"><label>De</label><input type="date" id="f-di"></div>
-          <div class="fg"><label>Até</label><input type="date" id="f-df"></div>
-          <div class="fg"><label>Status Pag.</label>
-            <select id="f-st">
-              <option value="todos">Todos</option>
-              <option value="not_paid">Não pago</option>
-              <option value="partial">Parcial</option>
-              <option value="paid">Pago</option>
-              <option value="in_payment">Em pagamento</option>
-            </select>
-          </div>
-          <div class="fg"><label>Busca</label><input type="text" id="f-bq" placeholder="INV/2025/..."></div>
-          <div class="fg"><label>&nbsp;</label>
-            <div class="bgroup">
-              <button class="btn btn-o" onclick="preset('f',0)">Hoje</button>
-              <button class="btn btn-o" onclick="preset('f',7)">7d</button>
-              <button class="btn btn-o" onclick="preset('f',30)">30d</button>
-              <button class="btn btn-o" onclick="preset('f',365)">Ano</button>
-              <button class="btn btn-p" onclick="loadFat()">🔍 Pesquisar</button>
-            </div>
-          </div>
-        </div>
-        <div id="f-sum"></div>
-        <div id="f-tbl"><div class="loading"><span class="spin"></span>Aguardando...</div></div>
-      </div>
-    </div>
-  </div>
+  <div class="panel"><div class="pb"><div class="empty">Em breve — Odoo</div></div></div>
 </div>
 
 <!-- ══ ITAÚ ══════════════════════════════════════════════════════ -->
@@ -844,25 +708,16 @@ function tab(name, el){
   if(!loaded[name]){
     loaded[name]=true;
     if(name==='sieg') loadEmit();
-    if(name==='odoo' && !loaded['emit']){ loaded['emit']=true; loadEmit(); }
     if(name==='status') loadStatus();
   }
 }
 
 function stab(name, el){
-  document.querySelectorAll('#p-sieg .stab').forEach(t=>t.classList.remove('on'));
+  document.querySelectorAll('.stab').forEach(t=>t.classList.remove('on'));
   el.classList.add('on');
   document.getElementById('sp-emit').style.display = name==='emit'?'':'none';
   document.getElementById('sp-rec').style.display  = name==='rec' ?'':'none';
   if(name==='rec' && !loaded['rec']){ loaded['rec']=true; loadRec(); }
-}
-
-function stabOdoo(name, el){
-  document.querySelectorAll('#p-odoo .stab').forEach(t=>t.classList.remove('on'));
-  el.classList.add('on');
-  document.getElementById('op-emit').style.display = name==='emit'?'':'none';
-  document.getElementById('op-fat').style.display  = name==='fat' ?'':'none';
-  if(name==='fat' && !loaded['fat']){ loaded['fat']=true; loadFat(); }
 }
 
 async function loadStatus(){
@@ -897,7 +752,7 @@ async function loadEmit(){
   if(!reg.length){ document.getElementById('e-tbl').innerHTML='<div class="empty">Nenhuma NF-e encontrada.</div>'; return; }
   var tot=reg.reduce((a,r)=>a+(parseFloat(r.valor)||0),0);
   document.getElementById('e-sum').innerHTML='<div class="sum">'+reg.length+' nota(s) &nbsp;·&nbsp; Total: <b>'+fmtVal(tot)+'</b></div>';
-  var html='<div class="tw"><table id="emit-table"><thead><tr><th>#</th><th>Fatura</th><th>Cliente</th><th>Data</th><th>Valor</th><th>Status</th><th>Protocolo</th><th>Chave</th></tr></thead><tbody>';
+  var html='<div class="tw"><table><thead><tr><th>#</th><th>Fatura</th><th>Cliente</th><th>Data</th><th>Valor</th><th>Status</th><th>Protocolo</th><th>Chave</th></tr></thead><tbody>';
   reg.forEach((r,i)=>{
     html+='<tr>';
     html+='<td style="color:var(--tx2);font-size:12px">'+(i+1)+'</td>';
@@ -912,49 +767,6 @@ async function loadEmit(){
   });
   html+='</tbody></table></div>';
   document.getElementById('e-tbl').innerHTML=html;
-}
-
-
-async function loadFat(){
-  document.getElementById('f-tbl').innerHTML='<div class="loading"><span class="spin"></span>Buscando faturas no Odoo...</div>';
-  document.getElementById('f-sum').innerHTML='';
-  var di=document.getElementById('f-di').value;
-  var df=document.getElementById('f-df').value;
-  var st=document.getElementById('f-st').value;
-  var bq=document.getElementById('f-bq').value;
-  var tipo=document.getElementById('f-tipo').value;
-  var url='/admin/api/odoo/faturas?tipo='+tipo+'&status='+encodeURIComponent(st||'todos');
-  if(di) url+='&dataInicio='+di;
-  if(df) url+='&dataFim='+df;
-  if(bq) url+='&busca='+encodeURIComponent(bq);
-  var d=await get(url);
-  if(d.erro){ document.getElementById('f-tbl').innerHTML='<div class="err-box">❌ '+d.erro+'</div>'; return; }
-  var reg=d.registros||[];
-  if(!reg.length){ document.getElementById('f-tbl').innerHTML='<div class="empty">Nenhuma fatura encontrada.</div>'; return; }
-  var totTotal=reg.reduce(function(a,r){return a+(parseFloat(r.total)||0);},0);
-  var totSaldo=reg.reduce(function(a,r){return a+(parseFloat(r.saldo)||0);},0);
-  document.getElementById('f-sum').innerHTML='<div class="sum">'+reg.length+' fatura(s) &nbsp;·&nbsp; Total: <b>'+fmtVal(totTotal)+'</b> &nbsp;·&nbsp; Em aberto: <b>'+fmtVal(totSaldo)+'</b></div>';
-  var hoje=new Date().toISOString().slice(0,10);
-  var html='<div class="tw"><table id="fat-table"><thead><tr><th>#</th><th>Fatura</th><th>Ref.</th><th>Parceiro</th><th>Emissão</th><th>Vencimento</th><th>Total</th><th>Saldo</th><th>Status Pag.</th></tr></thead><tbody>';
-  reg.forEach(function(r,i){
-    var map={paid:'ok',in_payment:'ok',not_paid:'err',partial:'warn'};
-    var label={paid:'Pago',in_payment:'Em pag.',not_paid:'Não pago',partial:'Parcial'};
-    var cls=map[r.statusPagamento]||'gray';
-    var atrasada=r.saldo>0 && r.dataVencimento && r.dataVencimento<hoje;
-    html+='<tr>';
-    html+='<td style="color:var(--tx2);font-size:12px">'+(i+1)+'</td>';
-    html+='<td style="font-family:monospace;font-size:12px">'+r.numero+'</td>';
-    html+='<td style="font-size:12px;color:var(--tx2)">'+(r.ref||'—')+'</td>';
-    html+='<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+r.parceiro+'">'+r.parceiro+'</td>';
-    html+='<td>'+fmtDate(r.dataEmissao)+'</td>';
-    html+='<td style="'+(atrasada?'color:var(--rd);font-weight:600':'')+'">'+fmtDate(r.dataVencimento)+(atrasada?' ⚠️':'')+'</td>';
-    html+='<td style="font-weight:600">'+fmtVal(r.total)+'</td>';
-    html+='<td style="'+(r.saldo>0?'color:var(--yw)':'color:var(--gr)')+'">'+fmtVal(r.saldo)+'</td>';
-    html+='<td><span class="b b-'+cls+'">'+(label[r.statusPagamento]||r.statusPagamento||'—')+'</span></td>';
-    html+='</tr>';
-  });
-  html+='</tbody></table></div>';
-  document.getElementById('f-tbl').innerHTML=html;
 }
 
 function downloadZip(){
@@ -1093,30 +905,7 @@ async function dlSelecionados(){
 }
 
 // ── Exportar Excel (CSV UTF-8) ────────────────────────────────────
-function exportarCsv(tableId, filename){
-  var tbl=document.getElementById(tableId);
-  if(!tbl){alert('Faça uma consulta primeiro.');return;}
-  var rows=tbl.querySelectorAll('tr'), csv=[];
-  rows.forEach(function(row){
-    var cells=row.querySelectorAll('th,td'), line=[];
-    cells.forEach(function(cell){
-      if(cell.querySelector('input[type=checkbox]')) return;
-      if(cell.querySelector('.row-menu')) return;
-      line.push('"'+cell.innerText.replace(/"/g,'""').replace(/\n/g,' ')+'"');
-    });
-    if(line.length) csv.push(line.join(';'));
-  });
-  var blob=new Blob(['\uFEFF'+csv.join('\n')],{type:'text/csv;charset=utf-8;'});
-  var a=document.createElement('a');
-  a.href=URL.createObjectURL(blob); a.download=filename;
-  document.body.appendChild(a);a.click();
-  setTimeout(function(){URL.revokeObjectURL(a.href);document.body.removeChild(a);},1000);
-}
-function exportarExcel(){ exportarCsv('r-table','sieg-recebidas-'+today()+'.csv'); }
-function exportarExcelEmit(){ exportarCsv('emit-table','odoo-emitidas-'+today()+'.csv'); }
-function exportarExcelFat(){ exportarCsv('fat-table','odoo-faturas-'+today()+'.csv'); }
-// kept for backward compat
-function _exportarExcelOld(){
+function exportarExcel(){
   var tbl=document.getElementById('r-table');
   if(!tbl){alert('Faça uma consulta primeiro.');return;}
   var rows=tbl.querySelectorAll('tr'), csv=[];
@@ -1155,9 +944,8 @@ document.addEventListener('click',function(e){
 });
 
 // ── Init ──────────────────────────────────────────────────────────
-preset('e',30);
+preset('e',3);
 preset('r',3);
-preset('f',30);
 loadStatus();
 </script>
 </body></html>`;
