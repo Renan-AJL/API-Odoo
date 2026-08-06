@@ -65,7 +65,6 @@ if (config.nodeEnv !== 'test') {
 }
 
 // --- Routes ---
-const cookieParser = require('cookie-parser');
 const adminRoutes  = require('./routes/admin');
 const healthRoutes = require('./routes/health');
 const cnpjRoutes = require('./routes/cnpj');
@@ -79,7 +78,6 @@ const itauPagamentosRoutes = require('./routes/itau-pagamentos');
 const siegRoutes = require('./routes/sieg');
 const nfeCertRoutes = require('./routes/nfe-cert');
 
-app.use(cookieParser());
 app.use('/admin', adminRoutes);
 app.get('/', (req, res) => res.redirect('/admin'));
 app.use('/api/v1/health', healthRoutes);
