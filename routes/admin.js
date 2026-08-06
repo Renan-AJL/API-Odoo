@@ -351,7 +351,11 @@ router.get('/api/sieg/xml/:chave', auth, async (req, res) => {
       if (km) cacheSet(km[1], xmlStr);
       if (xmlStr.indexOf(chave) !== -1) found = xmlStr;
     }
-    if (!found) return res.status(404).json({ erro: 'XML não encontrado no cofre SIEG para esta chave' });
+    if (!found) return res.status(404).json({ 
+      erro: 'XML não encontrado no cofre SIEG para esta chave',
+      chave: chave,
+      dica: 'O cofre SIEG pode não ter este XML. Verifique se é uma NF-e emitida (tipoXml=2) e altere o parâmetro tipoXml na URL.'
+    });
     res.setHeader('Content-Type', 'application/xml; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.xml"');
     res.send(found);
@@ -370,11 +374,38 @@ router.get('/api/sieg/pdf/:chave', auth, async (req, res) => {
     var chave   = req.params.chave;
     // SIEG endpoint para PDF individual
     var resp = await withTimeout(axios.get('https://api.sieg.com/api/v1/GetPdf?chaveAcesso=' + chave, {
-      headers, timeout: 30000, responseType: 'arraybuffer',
+      headers: Object.assign({}, headers, { 'Accept': 'application/pdf,application/octet-stream,*/*' }),
+      timeout: 30000,
+      responseType: 'arraybuffer',
+      validateStatus: function(s) { return true; }, // nunca lança exceção por status
     }), 35000);
+
+    var buf = Buffer.from(resp.data);
+    // Detectar se a SIEG retornou JSON de erro em vez de PDF
+    var isJsonError = false;
+    if (resp.status !== 200 || buf.length < 100) {
+      isJsonError = true;
+    } else {
+      // PDF começa com %PDF-
+      var magic = buf.slice(0, 5).toString('ascii');
+      if (magic !== '%PDF-') isJsonError = true;
+    }
+
+    if (isJsonError) {
+      var errMsg;
+      try { errMsg = JSON.parse(buf.toString('utf-8')); } catch(pe) { errMsg = buf.toString('utf-8').slice(0, 500); }
+      console.error('[ADMIN] pdf/chave SIEG retornou erro HTTP', resp.status, ':', typeof errMsg === 'object' ? JSON.stringify(errMsg).slice(0, 300) : errMsg);
+      return res.status(resp.status >= 400 ? resp.status : 502).json({
+        erro: (typeof errMsg === 'object') ? (errMsg.ErrorMessage || errMsg.Message || errMsg.message || JSON.stringify(errMsg)) : errMsg,
+        chave: chave,
+        http_sieg: resp.status,
+        dica: 'O endpoint SIEG /api/v1/GetPdf pode nao estar disponivel para NF-e. Tente baixar o XML.'
+      });
+    }
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.pdf"');
-    res.send(Buffer.from(resp.data));
+    res.send(buf);
   } catch(e) {
     console.error('[ADMIN] pdf/chave erro:', e.message);
     res.status(500).json({ erro: e.message });
@@ -883,42 +914,46 @@ loadStatus();
 </body></html>`;
 }
 
-module.exports = router;
-
-// Diagnóstico SIEG — testa endpoints e retorna o que responde 2xx
-// REMOVER APÓS IDENTIFICAR O ENDPOINT CORRETO
+// Diagnóstico SIEG — testa GetPdf e GetXmls e retorna status
 router.get('/api/sieg/diagnostico', auth, async (req, res) => {
   try {
     var axios  = require('axios');
     var { getAuthHeaders } = require('../services/sieg-auth');
     var headers = await withTimeout(getAuthHeaders(), 15000);
     var resultados = [];
+    var chaveTest = req.query.chave || null;
+
     var candidatos = [
-      'GET https://api.sieg.com/api/v1/GetXmls',
-      'GET https://api.sieg.com/api/v1/xmls',
-      'GET https://api.sieg.com/api/v1/xml-documents',
-      'GET https://api.sieg.com/api/v1/documents',
-      'GET https://api.sieg.com/api/v1/GetDocuments',
-      'GET https://api.sieg.com/api/v1/nfe',
-      'GET https://api.sieg.com/api/v1/GetNfe',
-      'POST https://api.sieg.com/api/v1/GetXmls',
+      { method: 'post', url: 'https://api.sieg.com/api/v1/baixar-xmls',       data: { TipoXml: 1, Take: 1, Skip: 0 } },
+      { method: 'post', url: 'https://api.sieg.com/api/v1/baixar-xmls',       data: { TipoXml: 2, Take: 1, Skip: 0 } },
     ];
+    if (chaveTest) {
+      candidatos.push({ method: 'get', url: 'https://api.sieg.com/api/v1/GetPdf?chaveAcesso=' + chaveTest, responseType: 'arraybuffer' });
+    }
+
     for (var c of candidatos) {
-      var parts = c.split(' ');
-      var method = parts[0].toLowerCase();
-      var url = parts[1];
       try {
-        var r = await withTimeout(axios({ method, url, headers,
-          params: method==='get' ? { Take: 1, TipoDocumento: 'NFe' } : undefined,
-          data:   method==='post' ? { Take: 1, TipoDocumento: 'NFe' } : undefined,
-          validateStatus: () => true, timeout: 8000 }), 10000);
-        resultados.push({ endpoint: c, status: r.status, body: JSON.stringify(r.data).slice(0, 200) });
+        var reqCfg = { method: c.method, url: c.url, headers, validateStatus: () => true, timeout: 10000 };
+        if (c.data) reqCfg.data = c.data;
+        if (c.responseType) reqCfg.responseType = c.responseType;
+        var r = await withTimeout(axios(reqCfg), 12000);
+        var bodyPreview;
+        if (c.responseType === 'arraybuffer') {
+          var buf = Buffer.from(r.data);
+          bodyPreview = buf.slice(0,5).toString('ascii') + ' (' + buf.length + ' bytes)';
+        } else {
+          bodyPreview = JSON.stringify(r.data).slice(0, 200);
+        }
+        resultados.push({ endpoint: c.method.toUpperCase() + ' ' + c.url + (c.data ? ' body:'+JSON.stringify(c.data) : ''), status: r.status, body: bodyPreview });
       } catch(e) {
-        resultados.push({ endpoint: c, status: 'ERR', body: e.message });
+        resultados.push({ endpoint: c.url, status: 'ERR', body: e.message });
       }
     }
-    res.json(resultados);
+    res.json({ headers_usados: { tem_jwt: !!headers.Authorization, tem_oauth: !!headers['X-OAuth-Token'], tem_apikey: !!headers['X-API-Key'] }, resultados });
   } catch(e) {
     res.json({ erro: e.message });
   }
 });
+
+module.exports = router;
+
