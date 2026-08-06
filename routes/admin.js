@@ -24,6 +24,17 @@ setInterval(function() {
   Object.keys(_zipCache).forEach(function(k) { if (now - _zipCache[k].ts > ZIP_CACHE_TTL) delete _zipCache[k]; });
 }, 10 * 60 * 1000);
 
+// ── Cache de resposta da listagem /api/sieg/recebidas (evitar 429) ──
+var _listagemCache = {}; // { bodyKey: { registros: [], ts: number } }
+var LISTAGEM_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+function listagemCacheSet(key, registros) { _listagemCache[key] = { registros: JSON.parse(JSON.stringify(registros)), ts: Date.now() }; }
+function listagemCacheGet(key) {
+  var e = _listagemCache[key];
+  if (!e) return null;
+  if (Date.now() - e.ts > LISTAGEM_CACHE_TTL) { delete _listagemCache[key]; return null; }
+  return e.registros;
+}
+
 // ── Auth ──────────────────────────────────────────────────────────
 const ADMIN_USER   = process.env.ADMIN_USER     || 'admin';
 const ADMIN_PASS   = process.env.ADMIN_PASSWORD || 'ajl2025';
@@ -204,25 +215,34 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
 
     console.log('[ADMIN] sieg/recebidas body:', JSON.stringify(body));
 
-    var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
-      headers, timeout: 25000, responseType: 'arraybuffer',
-    }), 30000);
+    // Cache de 5 min para evitar rate-limit 429 em consultas repetidas
+    var _listKey = JSON.stringify(body);
+    var _cached  = listagemCacheGet(_listKey);
+    var registros;
 
-    // A SIEG retorna um arquivo ZIP binário com os XMLs
-    // Precisamos descompactar e extrair dados de cada XML
-    var respBuffer = resp.data; // Buffer (axios com responseType: 'arraybuffer')
-    console.log('[ADMIN] sieg/recebidas HTTP', resp.status, 'bytes:', respBuffer && respBuffer.length);
+    if (_cached) {
+      console.log('[ADMIN] sieg/recebidas CACHE HIT —', _cached.length, 'registros');
+      registros = _cached;
+    } else {
+      var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+        headers, timeout: 25000, responseType: 'arraybuffer',
+      }), 30000);
+
+      // A SIEG retorna um arquivo ZIP binário com os XMLs
+      // Precisamos descompactar e extrair dados de cada XML
+      var respBuffer = resp.data; // Buffer (axios com responseType: 'arraybuffer')
+      console.log('[ADMIN] sieg/recebidas HTTP', resp.status, 'bytes:', respBuffer && respBuffer.length);
 
     if (!Buffer.isBuffer(respBuffer) && !respBuffer) {
       return res.json({ erro: 'Resposta vazia da SIEG', registros: [] });
     }
 
+    var registros = [];
     var AdmZip = require('adm-zip');
     var zip = new AdmZip(respBuffer);
     var entries = zip.getEntries();
     console.log('[ADMIN] ZIP entries:', entries.length);
 
-    var registros = [];
     var chavesVistas = {};
     for (var entry of entries) {
       if (entry.isDirectory) continue;
@@ -290,6 +310,10 @@ router.get('/api/sieg/recebidas', auth, async (req, res) => {
         console.warn('[ADMIN] Erro ao parsear entry', entry.entryName, ezip.message);
       }
     }
+
+      // Popular cache de listagem para próximas consultas idênticas
+      listagemCacheSet(_listKey, registros);
+    } // fim else (resposta SIEG)
 
     // Filtro por nome do emitente (após parse do ZIP)
     if (nomeEmitente) {
@@ -372,47 +396,63 @@ router.get('/api/sieg/xml/:chave', auth, async (req, res) => {
   }
 });
 
-// Download PDF individual por chave — endpoint SIEG /api/v1/GetPdf
+// Download PDF individual por chave — gera DANFE localmente via danfe-pdf.js
+// GetPdf da SIEG não existe (404). Fluxo: XML do cache → fallback cofre SIEG → danfe-pdf.js
 router.get('/api/sieg/pdf/:chave', auth, async (req, res) => {
   try {
-    var axios  = require('axios');
-    var { getAuthHeaders } = require('../services/sieg-auth');
-    var headers = await withTimeout(getAuthHeaders(), 15000);
     var chave   = req.params.chave;
-    // SIEG endpoint para PDF individual
-    var resp = await withTimeout(axios.get('https://api.sieg.com/api/v1/GetPdf?chaveAcesso=' + chave, {
-      headers: Object.assign({}, headers, { 'Accept': 'application/pdf,application/octet-stream,*/*' }),
-      timeout: 30000,
-      responseType: 'arraybuffer',
-      validateStatus: function(s) { return true; }, // nunca lança exceção por status
-    }), 35000);
+    var tipoXml = parseInt(req.query.tipoXml) || 1;
 
-    var buf = Buffer.from(resp.data);
-    // Detectar se a SIEG retornou JSON de erro em vez de PDF
-    var isJsonError = false;
-    if (resp.status !== 200 || buf.length < 100) {
-      isJsonError = true;
-    } else {
-      // PDF começa com %PDF-
-      var magic = buf.slice(0, 5).toString('ascii');
-      if (magic !== '%PDF-') isJsonError = true;
+    // 1. Tentar cache (populado quando a tabela de recebidas foi carregada)
+    var xmlStr = cacheGet(chave);
+
+    // 2. Fallback: buscar o mês inteiro da chave na SIEG
+    if (!xmlStr) {
+      var axios  = require('axios');
+      var AdmZip = require('adm-zip');
+      var { getAuthHeaders } = require('../services/sieg-auth');
+      var headers = await withTimeout(getAuthHeaders(), 15000);
+      // Extrair ano/mês da chave (posições 2-5 = AAMM)
+      var aamm    = chave.slice(2, 6);
+      var ano     = '20' + aamm.slice(0, 2);
+      var mes     = aamm.slice(2, 4);
+      var di      = ano + '-' + mes + '-01';
+      var dfDate  = new Date(parseInt(ano), parseInt(mes), 0);
+      var df      = ano + '-' + mes + '-' + String(dfDate.getDate()).padStart(2, '0');
+      console.log('[ADMIN] pdf fallback SIEG — chave:', chave.slice(0,10)+'...', 'período:', di, '-', df);
+      var zipBody = { TipoXml: tipoXml, Take: 500, Skip: 0,
+        DataEmissaoInicio: di + 'T00:00:00Z',
+        DataEmissaoFim:    df + 'T23:59:59Z',
+      };
+      var zipResp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', zipBody, {
+        headers, timeout: 30000, responseType: 'arraybuffer',
+      }), 35000);
+      var zip     = new AdmZip(zipResp.data);
+      for (var entry of zip.getEntries()) {
+        if (entry.isDirectory) continue;
+        var xs = zip.readAsText(entry);
+        var km = xs.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
+        if (km) cacheSet(km[1], xs);
+        if (xs.indexOf(chave) !== -1) xmlStr = xs;
+      }
     }
 
-    if (isJsonError) {
-      var errMsg;
-      try { errMsg = JSON.parse(buf.toString('utf-8')); } catch(pe) { errMsg = buf.toString('utf-8').slice(0, 500); }
-      console.error('[ADMIN] pdf/chave SIEG retornou erro HTTP', resp.status, ':', typeof errMsg === 'object' ? JSON.stringify(errMsg).slice(0, 300) : errMsg);
-      return res.status(resp.status >= 400 ? resp.status : 502).json({
-        erro: (typeof errMsg === 'object') ? (errMsg.ErrorMessage || errMsg.Message || errMsg.message || JSON.stringify(errMsg)) : errMsg,
-        chave: chave,
-        http_sieg: resp.status,
-        dica: 'O endpoint SIEG /api/v1/GetPdf pode nao estar disponivel para NF-e. Tente baixar o XML.'
+    if (!xmlStr) {
+      return res.status(404).json({
+        erro: 'XML não encontrado no cofre SIEG para esta chave.',
+        dica: 'Verifique o tipo (tipoXml=1 recebidas, tipoXml=2 emitidas cofre) e recarregue a listagem antes de baixar o PDF.',
+        chave,
       });
     }
 
+    // 3. Gerar DANFE localmente (pdfkit + bwip-js) — sem depender da SIEG
+    var { gerarDanfePdf } = require('../services/danfe-pdf');
+    var pdfBuf = await gerarDanfePdf(xmlStr);
+    console.log('[ADMIN] pdf DANFE local OK —', pdfBuf.length, 'bytes, chave:', chave.slice(0,10)+'...');
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.pdf"');
-    res.send(buf);
+    res.send(pdfBuf);
   } catch(e) {
     console.error('[ADMIN] pdf/chave erro:', e.message);
     res.status(500).json({ erro: e.message });
@@ -1072,5 +1112,6 @@ router.get('/api/sieg/diagnostico', auth, async (req, res) => {
 });
 
 module.exports = router;
+
 
 
