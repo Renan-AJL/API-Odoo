@@ -630,9 +630,25 @@ router.post('/send-invoice', async (req, res) => {
     // 6. Le dados da empresa (remetente)
     const company = await odooTe.getCompany();
 
-    // 6b. Motorista: TE atribui automaticamente (DefineDriverAfter=1)
-    let motoristaName = null;
-    let teDriver = null;
+    // 6b. Motorista: le x_studio_motorista da fatura (many2one -> res.partner)
+    let driverPhone = null;
+    try {
+      var invMotorista = await odooTe.executeKw('account.move', 'read', [[invId]], {
+        fields: ['x_studio_motorista'],
+      });
+      if (invMotorista && invMotorista[0] && invMotorista[0].x_studio_motorista) {
+        var motoristaId = invMotorista[0].x_studio_motorista[0];
+        var motoristaPartner = await odooTe.executeKw('res.partner', 'read', [[motoristaId]], {
+          fields: ['name', 'phone', 'mobile'],
+        });
+        if (motoristaPartner && motoristaPartner[0]) {
+          driverPhone = motoristaPartner[0].phone || motoristaPartner[0].mobile || null;
+          console.log('[TE-SEND-INVOICE] Motorista selecionado: ' + motoristaPartner[0].name + ' | Tel: ' + (driverPhone || 'N/A'));
+        }
+      }
+    } catch (err) {
+      console.warn('[TE-SEND-INVOICE] Erro ao ler motorista (usando auto): ' + err.message);
+    }
 
     // 7. Mapeia para TE (picking sera sintetico pelo mapper se null)
     const delivery = Mapper.odooToTeDelivery({
@@ -644,8 +660,7 @@ router.post('/send-invoice', async (req, res) => {
       companyCnpj: config.empresa.cnpj,
       orderLines: orderLines,
       productsMap: productsMap,
-      motoristaName: null,
-      teDriver: null,
+      driverPhone: driverPhone,
     });
     if (!delivery) {
       return res.status(500).json({ success: false, error: 'Falha no mapeamento dos dados' });
@@ -663,6 +678,11 @@ router.post('/send-invoice', async (req, res) => {
     if (delivery.Volume) chatterMsg += ' | Volumes: ' + delivery.Volume;
     if (delivery.Documents && delivery.Documents.length) {
       chatterMsg += '<br/>NF: ' + (delivery.Documents[0].DocumentNumber || '');
+    }
+    if (driverPhone) {
+      chatterMsg += '<br/>Motorista: telefone definido no Odoo';
+    } else {
+      chatterMsg += '<br/>Motorista: auto (TE define)';
     }
     if (!saleOrder) {
       chatterMsg += '<br/><i>Sem sale.order vinculada — fluxo direto fatura</i>';

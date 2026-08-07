@@ -240,7 +240,7 @@ function buildDocuments(invoice, orderLines, productsMap) {
 /**
  * Mapeia picking Odoo + partner + saleOrder + invoice + company para OrderViewModel do TE
  *
- * @param {Object} ctx - { picking, partner, saleOrder, invoice, company, companyCnpj, orderLines, productsMap, motoristaName, teDriver }
+ * @param {Object} ctx - { picking, partner, saleOrder, invoice, company, companyCnpj, orderLines, productsMap, driverPhone }
  */
 function odooToTeDelivery(ctx) {
   var picking = ctx.picking;
@@ -251,8 +251,7 @@ function odooToTeDelivery(ctx) {
   var companyCnpj = ctx.companyCnpj;
   var orderLines = ctx.orderLines || [];
   var productsMap = ctx.productsMap;
-  var motoristaName = ctx.motoristaName || null;  // Nome do motorista do Odoo
-  var teDriver = ctx.teDriver || null;              // { PhoneCountry, PhoneNumber } do TE
+  var driverPhone = ctx.driverPhone || null;  // Telefone do motorista selecionado no Odoo (res.partner)
 
   if (!partner) return null;
 
@@ -336,13 +335,25 @@ function odooToTeDelivery(ctx) {
     observation += (observation ? ' | ' : '') + 'Valor: R$ ' + Number(amountTotal).toFixed(2).replace('.', ',');
   }
 
-  // Driver: TE atribui automaticamente (DefineDriverAfter=1)
-  var driver = {
-    PhoneCountry: '55',
-    PhoneNumber: '99999999999',
-    DefineDriverAfter: 1,
-  };
-  logger.info('[MAPPER] Driver -> AUTO (TE atribui): DefineDriverAfter=1');
+  // Driver: se motorista selecionado no Odoo, envia telefone para TE encontrar
+  // O TE API de criacao so aceita PhoneCountry, PhoneNumber e DefineDriverAfter (nao aceita Name)
+  var driver;
+  if (driverPhone) {
+    var ph = formatPhone(driverPhone);
+    driver = {
+      PhoneCountry: ph.phoneCountry,
+      PhoneNumber: ph.phoneNumber,
+      DefineDriverAfter: 0,
+    };
+    logger.info('[MAPPER] Driver -> DEFINIDO pelo telefone do Odoo: ' + ph.phoneCountry + ' ' + ph.phoneNumber + ' (DefineDriverAfter=0)');
+  } else {
+    driver = {
+      PhoneCountry: '55',
+      PhoneNumber: '99999999999',
+      DefineDriverAfter: 1,
+    };
+    logger.info('[MAPPER] Driver -> AUTO (TE atribui): DefineDriverAfter=1');
+  }
 
   var delivery = {
     Customer: {
