@@ -137,6 +137,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     'name', 'partner_id', 'company_id', 'invoice_date', 'date',
     'amount_total', 'narration',
     'x_studio_nfe_status', 'x_studio_nfse_status', 'payment_state',
+    'x_studio_motorista',
   ]]);
   if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
   var move = moves[0];
@@ -152,6 +153,30 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   if (!partnerId) throw new Error('Fatura sem parceiro');
   var partner = await readPartner(client, db, uid, pwd, partnerId);
   console.log('[SIEG-EMIT] [DESTINATARIO] CNPJ=' + partner.cnpj_cpf + ' xNome=' + partner.xNome + ' cMun=' + partner.city_ibge_code + ' xMun=' + partner.city + ' UF=' + partner.state + ' xLgr=' + partner.street + ' nro=' + partner.number);
+
+  // 3b. Read motorista (x_studio_motorista) para <transporta> no XML
+  var transporta = null;
+  var motoristaRef = move.x_studio_motorista;
+  if (motoristaRef) {
+    var motoristaId = tupId(motoristaRef);
+    if (motoristaId) {
+      try {
+        var motoristaPartner = await readPartnerSafe(client, db, uid, pwd, motoristaId);
+        var motoristaDoc = motoristaPartner.cnpj_cpf || motoristaPartner.vat || '';
+        transporta = {
+          xNome: motoristaPartner.name || '',
+          CNPJ: motoristaDoc.replace(/\D/g, '').length === 14 ? motoristaDoc : '',
+          CPF: motoristaDoc.replace(/\D/g, '').length === 11 ? motoristaDoc : '',
+          cnpj_cpf: motoristaDoc,
+        };
+        console.log('[SIEG-EMIT] [MOTORISTA] xNome=' + transporta.xNome + ' doc=' + motoristaDoc);
+      } catch (errMotorista) {
+        console.warn('[SIEG-EMIT] Erro ao ler motorista ' + motoristaId + ': ' + errMotorista.message);
+      }
+    }
+  } else {
+    console.log('[SIEG-EMIT] [MOTORISTA] Nenhum motorista selecionado na fatura');
+  }
 
   // 4. Read invoice lines diretamente de account.move.line (evita computed field)
   var allLineIds = await executeKw(client, db, uid, pwd, 'account.move.line', 'search', [[
@@ -234,6 +259,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       tpAmb: process.env.SIEG_TP_AMB || config.sieg.tpAmb || '2',
       natOp: 'Venda de Mercadoria',
       mod: tipo === 'nfe' ? '55' : '01',
+      transporta: transporta,
     },
     tipo: tipo,
   };

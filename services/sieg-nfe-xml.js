@@ -541,12 +541,25 @@ ${xmlEndereco(partner, 'enderDest')}
   // === transp ===
   const modFrete = String(cfg.modFrete || '9');
   const hasVolume = cfg.qVol != null && Number(cfg.qVol) > 0;
+  const transporta = cfg.transporta || null;
+
+  let transportaBlock = '';
+  if (transporta && (transporta.xNome || transporta.CNPJ || transporta.CPF)) {
+    const docTransp = onlyNum(transporta.CNPJ || transporta.CPF || transporta.cnpj_cpf || '');
+    const docTag = docTransp.length === 14 ? 'CNPJ' : (docTransp.length === 11 ? 'CPF' : '');
+    transportaBlock = `
+      <transporta>${docTag ? `
+        <${docTag}>${docTransp}</${docTag}>` : ''}
+        <xNome>${esc(transporta.xNome || '')}</xNome>
+      </transporta>`;
+  }
+
   xml += `
     <transp>
       <modFrete>${modFrete}</modFrete>${hasVolume ? `
       <vol>
         <qVol>${Math.trunc(Number(cfg.qVol))}</qVol>
-      </vol>` : ''}
+      </vol>` : ''}${transportaBlock}
     </transp>`;
 
   // === cobr (duplicatas) ===
