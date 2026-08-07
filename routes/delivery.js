@@ -611,7 +611,7 @@ router.post('/send-invoice', async (req, res) => {
     }
 
     if (!saleOrder) {
-      console.log('[TE-SEND-INVOICE] Fluxo direto fatura->TE (sem motorista, sem picking)');
+      console.log('[TE-SEND-INVOICE] Fluxo direto fatura->TE (sem picking)');
       try {
         orderLines = await odooTe.getInvoiceLines(invId);
         console.log('[TE-SEND-INVOICE] ' + orderLines.length + ' linhas da fatura com produto');
@@ -630,14 +630,14 @@ router.post('/send-invoice', async (req, res) => {
     // 6. Le dados da empresa (remetente)
     const company = await odooTe.getCompany();
 
-    // 6b. Motorista: le x_studio_motorista da fatura (many2one -> res.partner)
+    // 6b. Motorista: le x_studio_motorista (many2one -> res.partner)
+    // Tenta da fatura primeiro, depois da venda vinculada
     let driverPhone = null;
     try {
-      var invMotorista = await odooTe.executeKw('account.move', 'read', [[invId]], {
-        fields: ['x_studio_motorista'],
-      });
-      if (invMotorista && invMotorista[0] && invMotorista[0].x_studio_motorista) {
-        var motoristaId = invMotorista[0].x_studio_motorista[0];
+      var motoristaRef = invoice.x_studio_motorista || (saleFull && saleFull.x_studio_motorista) || null;
+      if (motoristaRef) {
+        var motoristaId = Array.isArray(motoristaRef) ? motoristaRef[0] : motoristaRef;
+        console.log('[TE-SEND-INVOICE] Motorista ref: ' + JSON.stringify(motoristaRef) + ' -> ID=' + motoristaId + (invoice.x_studio_motorista ? ' (da fatura)' : ' (da venda)'));
         var motoristaPartner = await odooTe.executeKw('res.partner', 'read', [[motoristaId]], {
           fields: ['name', 'phone', 'mobile'],
         });
@@ -645,6 +645,8 @@ router.post('/send-invoice', async (req, res) => {
           driverPhone = motoristaPartner[0].phone || motoristaPartner[0].mobile || null;
           console.log('[TE-SEND-INVOICE] Motorista selecionado: ' + motoristaPartner[0].name + ' | Tel: ' + (driverPhone || 'N/A'));
         }
+      } else {
+        console.log('[TE-SEND-INVOICE] Nenhum motorista selecionado (fatura e venda sem x_studio_motorista)');
       }
     } catch (err) {
       console.warn('[TE-SEND-INVOICE] Erro ao ler motorista (usando auto): ' + err.message);
