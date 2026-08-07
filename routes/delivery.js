@@ -630,20 +630,54 @@ router.post('/send-invoice', async (req, res) => {
     // 6. Le dados da empresa (remetente)
     const company = await odooTe.getCompany();
 
-    // 6b. Motorista: le x_studio_motorista (many2one -> res.partner)
+    // 6b. Motorista: le x_studio_motorista
+    // O campo pode ser many2one (res.partner) ou selection (string key)
     // Tenta da fatura primeiro, depois da venda vinculada
+    // Fallback: busca pelo nome no cache de motoristas do TE
     let driverPhone = null;
+    let motoristaNome = null;
     try {
       var motoristaRef = invoice.x_studio_motorista || (saleFull && saleFull.x_studio_motorista) || null;
+      console.log('[TE-SEND-INVOICE] Motorista raw: ' + JSON.stringify(motoristaRef) + ' (tipo: ' + typeof motoristaRef + ')' + (invoice.x_studio_motorista ? ' [da fatura]' : (saleFull && saleFull.x_studio_motorista ? ' [da venda]' : '')));
+
       if (motoristaRef) {
-        var motoristaId = Array.isArray(motoristaRef) ? motoristaRef[0] : motoristaRef;
-        console.log('[TE-SEND-INVOICE] Motorista ref: ' + JSON.stringify(motoristaRef) + ' -> ID=' + motoristaId + (invoice.x_studio_motorista ? ' (da fatura)' : ' (da venda)'));
-        var motoristaPartner = await odooTe.executeKw('res.partner', 'read', [[motoristaId]], {
-          fields: ['name', 'phone', 'mobile'],
-        });
-        if (motoristaPartner && motoristaPartner[0]) {
-          driverPhone = motoristaPartner[0].phone || motoristaPartner[0].mobile || null;
-          console.log('[TE-SEND-INVOICE] Motorista selecionado: ' + motoristaPartner[0].name + ' | Tel: ' + (driverPhone || 'N/A'));
+        if (Array.isArray(motoristaRef)) {
+          // many2one: [id, "Nome do Motorista"]
+          var motoristaId = motoristaRef[0];
+          motoristaNome = motoristaRef[1] || '';
+          console.log('[TE-SEND-INVOICE] Motorista many2one: ID=' + motoristaId + ' Nome=' + motoristaNome);
+          // Tenta ler telefone do partner
+          try {
+            var motoristaPartner = await odooTe.executeKw('res.partner', 'read', [[motoristaId]], {
+              fields: ['name', 'phone', 'mobile'],
+            });
+            if (motoristaPartner && motoristaPartner[0]) {
+              driverPhone = motoristaPartner[0].phone || motoristaPartner[0].mobile || null;
+              console.log('[TE-SEND-INVOICE] Phone do partner: ' + (driverPhone || 'N/A'));
+            }
+          } catch (errPartner) {
+            console.warn('[TE-SEND-INVOICE] Erro ao ler partner do motorista: ' + errPartner.message);
+          }
+        } else {
+          // selection: string key (ex: "haime") ou texto livre
+          motoristaNome = String(motoristaRef);
+          console.log('[TE-SEND-INVOICE] Motorista selection/texto: "' + motoristaNome + '"');
+        }
+
+        // Se nao conseguiu telefone do partner, busca pelo nome no cadastro do TE
+        if (!driverPhone && motoristaNome) {
+          console.log('[TE-SEND-INVOICE] Sem telefone no partner, buscando motorista "' + motoristaNome + '" no TE...');
+          try {
+            var teDriver = await teClient.findDriverByName(motoristaNome);
+            if (teDriver) {
+              driverPhone = teDriver.PhoneNumber;
+              console.log('[TE-SEND-INVOICE] Motorista encontrado no TE: ' + teDriver.Name + ' | Tel: ' + (teDriver.PhoneCountry || '') + ' ' + driverPhone);
+            } else {
+              console.warn('[TE-SEND-INVOICE] Motorista "' + motoristaNome + '" NAO encontrado no TE');
+            }
+          } catch (errTeDriver) {
+            console.warn('[TE-SEND-INVOICE] Erro ao buscar motorista no TE: ' + errTeDriver.message);
+          }
         }
       } else {
         console.log('[TE-SEND-INVOICE] Nenhum motorista selecionado (fatura e venda sem x_studio_motorista)');
