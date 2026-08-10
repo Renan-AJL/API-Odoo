@@ -112,6 +112,7 @@ function odooKw(c, db, uid, pass, model, method, args, kwargs) {
 // ── Login ─────────────────────────────────────────────────────────
 router.get('/login', (req, res) => res.send(loginHtml(req.query.erro ? 'Usuário ou senha inválidos.' : '')));
 
+router.use(express.json());
 router.post('/login', express.urlencoded({ extended: false }), (req, res) => {
   if (req.body.usuario === ADMIN_USER && req.body.senha === ADMIN_PASS) {
     var token = makeToken(req.body.usuario);
@@ -389,6 +390,71 @@ router.get('/api/sieg/pdf/:chave', auth, async (req, res) => {
 });
 
 // Download ZIP direto da SIEG
+
+// POST /api/sieg/pdf-zip — gera ZIP com PDFs DANFE das chaves enviadas
+router.post('/api/sieg/pdf-zip', auth, async (req, res) => {
+  try {
+    var chaves = (req.body && req.body.chaves) || [];
+    var tipoXml = parseInt((req.body && req.body.tipoXml) || 1) || 1;
+    if (!chaves.length) return res.status(400).json({ erro: 'Nenhuma chave informada' });
+    if (chaves.length > 100) return res.status(400).json({ erro: 'Máximo 100 NF-e por vez' });
+
+    var { gerarDanfePdf } = require('../services/danfe-pdf');
+    var AdmZip = require('adm-zip');
+    var zip = new AdmZip();
+    var erros = [];
+
+    for (var chave of chaves) {
+      try {
+        // 1. tenta cache
+        var xmlStr = cacheGet(chave);
+        // 2. sem cache → busca SIEG
+        if (!xmlStr) {
+          var axios  = require('axios');
+          var { getAuthHeaders } = require('../services/sieg-auth');
+          var headers = await withTimeout(getAuthHeaders(), 15000);
+          var aamm = chave.slice(2, 6);
+          var ano  = '20' + aamm.slice(0, 2);
+          var mes  = aamm.slice(2, 4);
+          var di   = ano + '-' + mes + '-01';
+          var dfD  = new Date(parseInt(ano), parseInt(mes), 0);
+          var df   = ano + '-' + mes + '-' + String(dfD.getDate()).padStart(2,'0');
+          var zResp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', {
+            TipoXml: tipoXml, Take: 500, Skip: 0,
+            DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
+          }, { headers, timeout: 30000, responseType: 'arraybuffer' }), 35000);
+          var tmpZip = new AdmZip(zResp.data);
+          for (var entry of tmpZip.getEntries()) {
+            if (entry.isDirectory) continue;
+            var xs = tmpZip.readAsText(entry);
+            var km = xs.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
+            if (km) cacheSet(km[1], xs);
+            if (xs.indexOf(chave) !== -1) xmlStr = xs;
+          }
+        }
+        if (!xmlStr) { erros.push(chave.slice(0,10)+'... (XML não encontrado)'); continue; }
+        var pdfBuf = await gerarDanfePdf(xmlStr);
+        zip.addFile('NFe_' + chave + '.pdf', pdfBuf);
+      } catch(eChave) {
+        erros.push(chave.slice(0,10)+'... (' + eChave.message + ')');
+      }
+    }
+
+    if (zip.getEntries().length === 0) {
+      return res.status(404).json({ erro: 'Nenhum PDF gerado. ' + erros.join('; ') });
+    }
+
+    var zipBuf = zip.toBuffer();
+    var nome = 'danfe-' + new Date().toISOString().slice(0,10) + '.zip';
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + nome + '"');
+    res.send(zipBuf);
+  } catch(e) {
+    console.error('[ADMIN] pdf-zip erro:', e.message);
+    res.status(500).json({ erro: e.message });
+  }
+});
+
 router.get('/api/sieg/download-zip', auth, async (req, res) => {
   try {
     var axios = require('axios');
@@ -909,12 +975,28 @@ async function dlSelecionadosPdf(){
   if(!chks.length){alert('Nenhuma nota selecionada.');return;}
   var cnt=document.getElementById('sel-count');
   var orig=cnt?cnt.textContent:'';
-  for(var i=0;i<chks.length;i++){
-    if(cnt) cnt.textContent='Gerando PDF '+(i+1)+'/'+chks.length+'...';
-    var chave=chks[i].dataset.chave, tipo=chks[i].dataset.tipo||'1';
-    await downloadFile('/admin/api/sieg/pdf/'+chave+'?tipoXml='+tipo,'NFe_'+chave+'.pdf');
-    await new Promise(function(r){setTimeout(r,600);});
-  }
+  if(cnt) cnt.textContent='Gerando ZIP com '+chks.length+' PDF(s)...';
+  var chaves=chks.map(function(c){return c.dataset.chave;}).filter(Boolean);
+  var tipo=(chks[0]&&chks[0].dataset.tipo)||'1';
+  try{
+    var resp=await fetch('/admin/api/sieg/pdf-zip',{
+      method:'POST',
+      credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({chaves:chaves,tipoXml:parseInt(tipo)})
+    });
+    if(!resp.ok){
+      var err=await resp.json().catch(function(){return {erro:'Erro '+resp.status};});
+      alert('Erro ao gerar ZIP: '+(err.erro||resp.status));
+    } else {
+      var blob=await resp.blob();
+      var a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download='danfe-'+new Date().toISOString().slice(0,10)+'.zip';
+      document.body.appendChild(a);a.click();
+      setTimeout(function(){URL.revokeObjectURL(a.href);document.body.removeChild(a);},1000);
+    }
+  }catch(e){alert('Erro: '+e.message);}
   if(cnt) cnt.textContent=orig;
   updateSelBar();
 }
