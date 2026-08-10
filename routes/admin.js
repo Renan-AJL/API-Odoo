@@ -587,7 +587,7 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
           </div>
         </div>
         <div id="e-sum"></div>
-        <div id="e-tbl"><div class="loading"><span class="spin"></span>Aguardando...</div></div>
+        <div id="e-tbl"><div class="empty">Selecione o período e clique em <b>Filtrar</b>.</div></div>
       </div>
     </div>
   </div>
@@ -637,7 +637,7 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
           Padrão: últimos 3 dias. Use os filtros ou botões para ampliar o período.
         </div>
         <div id="r-sum"></div>
-        <div id="r-tbl"><div class="loading"><span class="spin"></span>Aguardando...</div></div>
+        <div id="r-tbl"><div class="empty">Selecione o período e clique em <b>Pesquisar</b>.</div></div>
       </div>
     </div>
   </div>
@@ -707,7 +707,6 @@ function tab(name, el){
   el.classList.add('on');
   if(!loaded[name]){
     loaded[name]=true;
-    if(name==='sieg') loadEmit();
     if(name==='status') loadStatus();
   }
 }
@@ -717,7 +716,7 @@ function stab(name, el){
   el.classList.add('on');
   document.getElementById('sp-emit').style.display = name==='emit'?'':'none';
   document.getElementById('sp-rec').style.display  = name==='rec' ?'':'none';
-  if(name==='rec' && !loaded['rec']){ loaded['rec']=true; loadRec(); }
+  // loadRec() só sob demanda (botão Pesquisar)
 }
 
 async function loadStatus(){
@@ -812,6 +811,7 @@ async function loadRec(){
   var html='<div class="sel-bar" id="sel-bar">'
     +'<span id="sel-count">0 selecionado(s)</span>'
     +'<button class="btn btn-o" style="font-size:12px" onclick="dlSelecionados()">⬇ XML Selecionados</button>'
+    +'<button class="btn btn-o" style="font-size:12px" onclick="dlSelecionadosPdf()">⬇ PDF Selecionados</button>'
     +'<button class="btn btn-o" style="font-size:12px" onclick="deselectAll()">✕ Limpar</button>'
     +'</div>';
 
@@ -904,6 +904,21 @@ async function dlSelecionados(){
   }
 }
 
+async function dlSelecionadosPdf(){
+  var chks=Array.from(document.querySelectorAll('.row-chk:checked'));
+  if(!chks.length){alert('Nenhuma nota selecionada.');return;}
+  var cnt=document.getElementById('sel-count');
+  var orig=cnt?cnt.textContent:'';
+  for(var i=0;i<chks.length;i++){
+    if(cnt) cnt.textContent='Gerando PDF '+(i+1)+'/'+chks.length+'...';
+    var chave=chks[i].dataset.chave, tipo=chks[i].dataset.tipo||'1';
+    await downloadFile('/admin/api/sieg/pdf/'+chave+'?tipoXml='+tipo,'NFe_'+chave+'.pdf');
+    await new Promise(function(r){setTimeout(r,600);});
+  }
+  if(cnt) cnt.textContent=orig;
+  updateSelBar();
+}
+
 // ── Exportar Excel (CSV UTF-8) ────────────────────────────────────
 function exportarExcel(){
   var tbl=document.getElementById('r-table');
@@ -944,7 +959,7 @@ document.addEventListener('click',function(e){
 });
 
 // ── Init ──────────────────────────────────────────────────────────
-preset('e',3);
+preset('e',30);
 preset('r',3);
 loadStatus();
 </script>
