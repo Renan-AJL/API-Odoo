@@ -542,7 +542,10 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
 </div>
 
 <div class="tabs">
-  <div class="tab on" onclick="tab('sieg',this)">📄 Consulta SIEG</div>
+  <div class="tab on" onclick="tab('sieg',this)">📄 SIEG</div>
+  <div class="tab" onclick="tab('odoo',this)">📊 Odoo</div>
+  <div class="tab" onclick="tab('itau',this)">🏦 Itaú</div>
+  <div class="tab" onclick="tab('te',this)">🚚 TudoEntregue</div>
   <div class="tab" onclick="tab('status',this)">⚙️ Status</div>
 </div>
 
@@ -584,7 +587,7 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
           </div>
         </div>
         <div id="e-sum"></div>
-        <div id="e-tbl"><div class="empty">Selecione o período e clique em <b>Filtrar</b>.</div></div>
+        <div id="e-tbl"><div class="loading"><span class="spin"></span>Aguardando...</div></div>
       </div>
     </div>
   </div>
@@ -634,10 +637,25 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
           Padrão: últimos 3 dias. Use os filtros ou botões para ampliar o período.
         </div>
         <div id="r-sum"></div>
-        <div id="r-tbl"><div class="empty">Selecione o período e clique em <b>Pesquisar</b>.</div></div>
+        <div id="r-tbl"><div class="loading"><span class="spin"></span>Aguardando...</div></div>
       </div>
     </div>
   </div>
+</div>
+
+<!-- ══ ODOO ══════════════════════════════════════════════════════ -->
+<div id="p-odoo" class="pane">
+  <div class="panel"><div class="pb"><div class="empty">Em breve — Odoo</div></div></div>
+</div>
+
+<!-- ══ ITAÚ ══════════════════════════════════════════════════════ -->
+<div id="p-itau" class="pane">
+  <div class="panel"><div class="pb"><div class="empty">Em breve — Itaú</div></div></div>
+</div>
+
+<!-- ══ TE ════════════════════════════════════════════════════════ -->
+<div id="p-te" class="pane">
+  <div class="panel"><div class="pb"><div class="empty">Em breve — TudoEntregue</div></div></div>
 </div>
 
 <!-- ══ STATUS ════════════════════════════════════════════════════ -->
@@ -689,6 +707,7 @@ function tab(name, el){
   el.classList.add('on');
   if(!loaded[name]){
     loaded[name]=true;
+    if(name==='sieg') loadEmit();
     if(name==='status') loadStatus();
   }
 }
@@ -793,7 +812,6 @@ async function loadRec(){
   var html='<div class="sel-bar" id="sel-bar">'
     +'<span id="sel-count">0 selecionado(s)</span>'
     +'<button class="btn btn-o" style="font-size:12px" onclick="dlSelecionados()">⬇ XML Selecionados</button>'
-    +'<button class="btn btn-o" style="font-size:12px" onclick="dlSelecionadosPdf()">⬇ PDF Selecionados</button>'
     +'<button class="btn btn-o" style="font-size:12px" onclick="deselectAll()">✕ Limpar</button>'
     +'</div>';
 
@@ -884,30 +902,6 @@ async function dlSelecionados(){
     await downloadFile('/admin/api/sieg/xml/'+chave+'?tipoXml='+tipo,'NFe_'+chave+'.xml');
     await new Promise(function(r){setTimeout(r,400);});
   }
-}
-
-async function dlSelecionadosPdf(){
-  var chks=Array.from(document.querySelectorAll('.row-chk:checked'));
-  if(!chks.length){alert('Nenhuma nota selecionada.');return;}
-  var bar=document.getElementById('sel-bar');
-  var origHtml=bar ? bar.innerHTML : '';
-  if(bar) bar.innerHTML='<span class="spin"></span><span style="font-size:12px">Gerando PDFs... (0/'+chks.length+')</span>';
-  var ok=0, erros=0;
-  for(var i=0;i<chks.length;i++){
-    var c=chks[i];
-    var chave=c.dataset.chave, tipo=c.dataset.tipo||'1';
-    if(bar) bar.innerHTML='<span class="spin"></span><span style="font-size:12px">Gerando PDFs... ('+(i+1)+'/'+chks.length+')</span>';
-    try{
-      await downloadFile('/admin/api/sieg/pdf/'+chave+'?tipoXml='+tipo,'NFe_'+chave+'.pdf');
-      ok++;
-    }catch(e){ erros++; }
-    await new Promise(function(r){setTimeout(r,600);});
-  }
-  if(bar) bar.innerHTML=origHtml;
-  updateSelBar();
-  if(erros>0) alert('PDFs gerados: '+ok+' ✓  Erros: '+erros+'
-
-Dica: certifique-se de ter pesquisado antes de baixar em lote (popula o cache XML).');
 }
 
 // ── Exportar Excel (CSV UTF-8) ────────────────────────────────────
