@@ -793,6 +793,7 @@ async function loadRec(){
   var html='<div class="sel-bar" id="sel-bar">'
     +'<span id="sel-count">0 selecionado(s)</span>'
     +'<button class="btn btn-o" style="font-size:12px" onclick="dlSelecionados()">⬇ XML Selecionados</button>'
+    +'<button class="btn btn-o" style="font-size:12px" onclick="dlSelecionadosPdf()">⬇ PDF Selecionados</button>'
     +'<button class="btn btn-o" style="font-size:12px" onclick="deselectAll()">✕ Limpar</button>'
     +'</div>';
 
@@ -883,6 +884,30 @@ async function dlSelecionados(){
     await downloadFile('/admin/api/sieg/xml/'+chave+'?tipoXml='+tipo,'NFe_'+chave+'.xml');
     await new Promise(function(r){setTimeout(r,400);});
   }
+}
+
+async function dlSelecionadosPdf(){
+  var chks=Array.from(document.querySelectorAll('.row-chk:checked'));
+  if(!chks.length){alert('Nenhuma nota selecionada.');return;}
+  var bar=document.getElementById('sel-bar');
+  var origHtml=bar ? bar.innerHTML : '';
+  if(bar) bar.innerHTML='<span class="spin"></span><span style="font-size:12px">Gerando PDFs... (0/'+chks.length+')</span>';
+  var ok=0, erros=0;
+  for(var i=0;i<chks.length;i++){
+    var c=chks[i];
+    var chave=c.dataset.chave, tipo=c.dataset.tipo||'1';
+    if(bar) bar.innerHTML='<span class="spin"></span><span style="font-size:12px">Gerando PDFs... ('+(i+1)+'/'+chks.length+')</span>';
+    try{
+      await downloadFile('/admin/api/sieg/pdf/'+chave+'?tipoXml='+tipo,'NFe_'+chave+'.pdf');
+      ok++;
+    }catch(e){ erros++; }
+    await new Promise(function(r){setTimeout(r,600);});
+  }
+  if(bar) bar.innerHTML=origHtml;
+  updateSelBar();
+  if(erros>0) alert('PDFs gerados: '+ok+' ✓  Erros: '+erros+'
+
+Dica: certifique-se de ter pesquisado antes de baixar em lote (popula o cache XML).');
 }
 
 // ── Exportar Excel (CSV UTF-8) ────────────────────────────────────
