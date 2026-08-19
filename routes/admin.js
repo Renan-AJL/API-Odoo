@@ -711,7 +711,20 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
 
 <!-- ══ ODOO ══════════════════════════════════════════════════════ -->
 <div id="p-odoo" class="pane">
-  <div class="panel"><div class="pb"><div class="empty">Em breve — Odoo</div></div></div>
+  <div class="panel">
+    <div class="ph"><h3>⚙️ Ações Odoo</h3></div>
+    <div class="pb">
+      <div style="max-width:500px;margin:0 auto;padding:20px 0">
+        <p style="margin-bottom:16px;color:var(--tx2);font-size:13px">
+          Cria/atualiza o botão <b>Cancelar Boleto</b> na fatura e a ação programada <b>Importar Extrato Itau</b> (diário 06:00) no Odoo via XML-RPC.
+        </p>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600">Senha do Odoo (admin)</label>
+        <input type="password" id="odoo-pass" placeholder="Senha do usuário admin do Odoo" style="width:100%;padding:8px 12px;border:1px solid var(--bd);border-radius:6px;margin-bottom:12px;box-sizing:border-box;font-size:14px">
+        <button class="btn" id="btn-setup-odoo" onclick="setupOdooActions()" style="width:100%;padding:10px;font-size:14px">Criar Ações no Odoo</button>
+        <div id="setup-result" style="margin-top:12px;font-size:13px"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ══ ITAÚ ══════════════════════════════════════════════════════ -->
@@ -1040,6 +1053,35 @@ document.addEventListener('click',function(e){
   if(!e.target.closest('.row-menu')) document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
 });
 
+async function setupOdooActions(){
+  var pass=document.getElementById('odoo-pass').value.trim();
+  if(!pass){alert('Informe a senha do Odoo.');return;}
+  var btn=document.getElementById('btn-setup-odoo');
+  var res=document.getElementById('setup-result');
+  btn.disabled=true; btn.textContent='Criando...'; res.innerHTML='';
+  try{
+    var r=await fetch('/admin/api/setup-odoo-actions',{
+      method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({odoo_password:pass})
+    });
+    var d=await r.json();
+    if(d.sucesso){
+      res.innerHTML='<div style="background:#0a3d1f;color:#4ade80;padding:12px;border-radius:6px">'
+        +'<b>OK!</b> '+d.msg+'<br><br>'
+        +(d.acoes.cancelar_boleto?'Cancelar Boleto: '+d.acoes.cancelar_boleto+'<br>':'')
+        +(d.acoes.cron_extrato?'Cron Extrato: '+d.acoes.cron_extrato+'<br>':'')
+        +'<br><span style="color:#fbbf24;font-size:11px">Render: '+d.lembrete_render+'</span>'
+        +'</div>';
+    }else{
+      res.innerHTML='<div style="background:#3d0a0a;color:#f87171;padding:12px;border-radius:6px"><b>Erro:</b> '+d.erro+'</div>';
+    }
+  }catch(e){
+    res.innerHTML='<div style="background:#3d0a0a;color:#f87171;padding:12px;border-radius:6px"><b>Erro:</b> '+e.message+'</div>';
+  }
+  btn.disabled=false; btn.textContent='Criar Ações no Odoo';
+}
+
 // ── Init ──────────────────────────────────────────────────────────
 preset('e',30);
 preset('r',3);
@@ -1047,5 +1089,146 @@ loadStatus();
 </script>
 </body></html>`;
 }
+
+// ════════════════════════════════════════════════════
+// API — Setup Odoo Actions (Cancelar Boleto + Cron Extrato)
+// ════════════════════════════════════════════════════
+
+router.post('/api/setup-odoo-actions', auth, async (req, res) => {
+  try {
+    var odooPass = (req.body.odoo_password || '').trim();
+    if (!odooPass) return res.json({ sucesso: false, erro: 'Informe a senha do Odoo.' });
+
+    var cfg = config.odoo;
+    if (!cfg.url) return res.json({ sucesso: false, erro: 'ODOO_URL nao configurada na middleware.' });
+
+    var c   = odooClient(cfg.url);
+    var uid = await odooAuth(c, cfg.db, cfg.user, odooPass);
+    var ekw = (m, mt, a, k) => odooKw(c, cfg.db, uid, cfg.password, m, mt, a, k);
+
+    var modelIds = await ekw('ir.model', 'search', [[['model', '=', 'account.move']]]);
+    if (!modelIds.length) return res.json({ sucesso: false, erro: 'Modelo account.move nao encontrado.' });
+    var modelId = modelIds[0];
+
+    // ── Codigo do Cancelar Boleto ──
+    var codigoCancelarBoleto = [
+      "import urllib.request, json",
+      "from odoo.exceptions import UserError",
+      "",
+      "nosso_numero = record.x_studio_nosso_numero or ''",
+      "",
+      "if not nosso_numero:",
+      "    raise UserError('Fatura nao possui Nosso Numero. Nao ha boleto para cancelar.')",
+      "",
+      "url     = 'https://odoo-middleware-unified.onrender.com/api/v1/itau/cancelar'",
+      "payload = json.dumps({'nosso_numero': nosso_numero}).encode('utf-8')",
+      "req     = urllib.request.Request(url, data=payload, headers={",
+      "    'Content-Type': 'application/json',",
+      "    'X-Api-Key': 'cnpja-odoo-secret-2024',",
+      "}, method='POST')",
+      "",
+      "try:",
+      "    with urllib.request.urlopen(req, timeout=30) as resp:",
+      "        resultado = json.loads(resp.read().decode('utf-8'))",
+      "    if resultado.get('success'):",
+      "        record.x_studio_boleto_cancelado = True",
+      "        raise UserError('Boleto %s cancelado com sucesso no Itau!' % nosso_numero)",
+      "    else:",
+      "        raise UserError('Erro ao cancelar: ' + str(resultado.get('message', 'Erro desconhecido')))",
+      "except urllib.error.HTTPError as e:",
+      "    body = e.read().decode('utf-8') if e.fp else ''",
+      "    raise UserError('Erro HTTP %d ao cancelar boleto: %s' % (e.code, body[:200]))",
+      "except UserError:",
+      "    raise",
+      "except Exception as e:",
+      "    raise UserError('Erro ao cancelar boleto: %s' % str(e))",
+    ].join('\n');
+
+    // Criar/atualizar Cancelar Boleto
+    var existingCancelar = await ekw('ir.actions.server', 'search', [[['name', '=', 'Cancelar Boleto']]]);
+    var valsCancelar = {
+      name: 'Cancelar Boleto',
+      model_id: modelId,
+      binding_model_id: modelId,
+      binding_view_types: 'form',
+      state: 'code',
+      code: codigoCancelarBoleto,
+    };
+    if (existingCancelar.length) {
+      await ekw('ir.actions.server', 'write', [existingCancelar, valsCancelar]);
+      console.log('[SETUP] Cancelar Boleto atualizada ID=' + existingCancelar[0]);
+    } else {
+      var idCancelar = await ekw('ir.actions.server', 'create', [valsCancelar]);
+      console.log('[SETUP] Cancelar Boleto criada ID=' + idCancelar);
+    }
+
+    // ── Codigo do Cron Extrato ──
+    var CRON_SECRET = 'extrato-itau-cron-ajl-2024';
+    var codigoCronExtrato = [
+      "import urllib.request, json",
+      "from odoo.exceptions import UserError",
+      "",
+      "url = 'https://odoo-middleware-unified.onrender.com/api/v1/itau/extrato/cron?secret=" + CRON_SECRET + "'",
+      "req = urllib.request.Request(url, method='GET')",
+      "req.add_header('Content-Type', 'application/json')",
+      "",
+      "try:",
+      "    with urllib.request.urlopen(req, timeout=120) as resp:",
+      "        resultado = json.loads(resp.read().decode('utf-8'))",
+      "    if resultado.get('success'):",
+      "        n = resultado.get('transacoes', 0)",
+      "        sid = resultado.get('statement_id', '')",
+      "        if n > 0:",
+      "            _logger.info('Extrato Itau: %d transacoes (Statement %s)', n, sid)",
+      "        else:",
+      "            _logger.info('Extrato Itau: sem transacoes para ontem')",
+      "    else:",
+      "        _logger.warning('Extrato Itau falhou: %s', resultado.get('message', ''))",
+      "except urllib.error.HTTPError as e:",
+      "    _logger.error('Extrato Itau HTTP %d', e.code)",
+      "except Exception as e:",
+      "    _logger.error('Extrato Itau: %s', str(e))",
+    ].join('\n');
+
+    // Criar/atualizar Cron
+    var cronName = 'Importar Extrato Itau (Diario)';
+    var existingCron = await ekw('ir.cron', 'search', [[['name', '=', cronName]]]);
+    var modelCronIds = await ekw('ir.model', 'search', [[['model', '=', 'ir.cron']]]);
+
+    var valsCron = {
+      name: cronName,
+      active: true,
+      model_id: modelCronIds[0] || 1,
+      state: 'code',
+      code: codigoCronExtrato,
+      interval_number: 1,
+      interval_type: 'days',
+      numbercall: -1,
+      nextcall: new Date(Date.now() + 24*3600000).toISOString().replace('T',' ').substring(0,19),
+      priority: 10,
+    };
+    if (existingCron.length) {
+      await ekw('ir.cron', 'write', [existingCron, valsCron]);
+      console.log('[SETUP] Cron Extrato atualizada ID=' + existingCron[0]);
+    } else {
+      var idCron = await ekw('ir.cron', 'create', [valsCron]);
+      console.log('[SETUP] Cron Extrato criada ID=' + idCron);
+    }
+
+    res.json({
+      sucesso: true,
+      msg: 'Acoes criadas com sucesso!',
+      acoes: {
+        cancelar_boleto: 'OK - ' + (existingCancelar.length ? 'atualizada' : 'criada'),
+        cron_extrato: 'OK - ' + (existingCron.length ? 'atualizada' : 'criada') + ' (as 06:00 diario)',
+      },
+      lembrete_render: 'Adicione ODOO_BANK_STATEMENT_IMPORT_CRON_SECRET=' + CRON_SECRET + ' no Render',
+    });
+
+  } catch(e) {
+    console.error('[SETUP] Erro:', e.message);
+    res.json({ sucesso: false, erro: e.message });
+  }
+});
 
 module.exports = router;
