@@ -1,54 +1,49 @@
 #!/usr/bin/env python3
 """
-odoo-scripts/criar-botao-cancelar-boleto.py
-============================================
-Cria (ou atualiza) via XML-RPC o Server Action "Cancelar Boleto".
-Bypassa a validacao do editor web do Odoo.
+Criar botao "Cancelar Boleto" no Odoo via XML-RPC.
+Bypassa a validacao do editor web (safe_eval bloqueia import/with/dunder).
 
-Execute:
-  ODOO_URL=https://nytro.odoo.com ODOO_DB=nytro \\
-  ODOO_LOGIN=admin ODOO_PASSWORD=xxx \\
-  python3 odoo-scripts/criar-botao-cancelar-boleto.py
+Preencha APENAS a variavel ODOO_PASSWORD abaixo e execute:
+  python3 criar-botao-cancelar-boleto.py
 """
-import os, xmlrpc.client
+import xmlrpc.client
 
-ODOO_URL      = os.environ['ODOO_URL'].rstrip('/')
-ODOO_DB       = os.environ['ODOO_DB']
-ODOO_LOGIN    = os.environ['ODOO_LOGIN']
-ODOO_PASSWORD = os.environ['ODOO_PASSWORD']
+ODOO_URL      = 'https://ajlferroeaco.odoo.com'
+ODOO_DB       = 'ajlferroeaco'
+ODOO_LOGIN    = 'admin'
+ODOO_PASSWORD = 'COLE_A_SENHA_AQUI'
 
 MIDDLEWARE_URL = 'https://odoo-middleware-unified.onrender.com'
 MIDDLEWARE_KEY = 'cnpja-odoo-secret-2024'
 
+print('Conectando...')
 common = xmlrpc.client.ServerProxy(f'{ODOO_URL}/xmlrpc/2/common')
 uid    = common.authenticate(ODOO_DB, ODOO_LOGIN, ODOO_PASSWORD, {})
 if not uid:
-    raise SystemExit('Autenticacao falhou')
-print(f'Autenticado como uid={uid}')
+    raise SystemExit('Falha na autenticacao. Verifique ODOO_PASSWORD.')
+print(f'OK - autenticado como uid={uid}')
 
 models = xmlrpc.client.ServerProxy(f'{ODOO_URL}/xmlrpc/2/object')
 def kw(model, method, args=None, kwargs=None):
     return models.execute_kw(ODOO_DB, uid, ODOO_PASSWORD, model, method, args or [], kwargs or {})
 
 model_ids = kw('ir.model', 'search', [[['model', '=', 'account.move']]])
-if not model_ids:
-    raise SystemExit('Modelo account.move nao encontrado')
 model_id = model_ids[0]
 
-codigo = f"""import urllib.request, json
+codigo = """import urllib.request, json
 from odoo.exceptions import UserError
 
 nosso_numero = record.x_studio_nosso_numero or ''
 
 if not nosso_numero:
-    raise UserError('Fatura nao possui Nosso Numero (boleto). Nao ha o que cancelar.')
+    raise UserError('Fatura nao possui Nosso Numero. Nao ha boleto para cancelar.')
 
-url     = '{MIDDLEWARE_URL}/api/v1/itau/cancelar'
-payload = json.dumps({{'nosso_numero': nosso_numero}}).encode('utf-8')
-req     = urllib.request.Request(url, data=payload, headers={{
+url     = 'https://odoo-middleware-unified.onrender.com/api/v1/itau/cancelar'
+payload = json.dumps({"nosso_numero": nosso_numero}).encode('utf-8')
+req     = urllib.request.Request(url, data=payload, headers={
     'Content-Type': 'application/json',
-    'X-Api-Key': '{MIDDLEWARE_KEY}',
-}}, method='POST')
+    'X-Api-Key': 'cnpja-odoo-secret-2024',
+}, method='POST')
 
 try:
     with urllib.request.urlopen(req, timeout=30) as resp:
@@ -76,7 +71,6 @@ vals = {
     'code': codigo,
 }
 
-# Se ja existe, atualiza; senao cria
 existing = kw('ir.actions.server', 'search', [[['name', '=', 'Cancelar Boleto']]])
 if existing:
     kw('ir.actions.server', 'write', [existing, vals])
@@ -84,5 +78,4 @@ if existing:
 else:
     action_id = kw('ir.actions.server', 'create', [vals])
     print(f'Acao "Cancelar Boleto" criada (ID={action_id})')
-
-print('Acesse qualquer fatura > menu Acao (engrenagem) > "Cancelar Boleto"')
+print('Pronto. Abra uma fatura > menu Acao (engrenagem) > Cancelar Boleto')
