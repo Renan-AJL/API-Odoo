@@ -2,8 +2,8 @@
 """
 odoo-scripts/criar-botao-cancelar-boleto.py
 ============================================
-Cria via XML-RPC um Server Action "Cancelar Boleto" visivel como botao
-no menu Acao (engrenagem) do formulario de faturas (account.move).
+Cria (ou atualiza) via XML-RPC o Server Action "Cancelar Boleto".
+Bypassa a validacao do editor web do Odoo.
 
 Execute:
   ODOO_URL=https://nytro.odoo.com ODOO_DB=nytro \\
@@ -30,7 +30,6 @@ models = xmlrpc.client.ServerProxy(f'{ODOO_URL}/xmlrpc/2/object')
 def kw(model, method, args=None, kwargs=None):
     return models.execute_kw(ODOO_DB, uid, ODOO_PASSWORD, model, method, args or [], kwargs or {})
 
-# ID do modelo account.move
 model_ids = kw('ir.model', 'search', [[['model', '=', 'account.move']]])
 if not model_ids:
     raise SystemExit('Modelo account.move nao encontrado')
@@ -68,14 +67,22 @@ except Exception as e:
     raise UserError('Erro ao cancelar boleto: %s' % str(e))
 """
 
-action_id = kw('ir.actions.server', 'create', [{
+vals = {
     'name': 'Cancelar Boleto',
     'model_id': model_id,
     'binding_model_id': model_id,
     'binding_view_types': 'form',
     'state': 'code',
     'code': codigo,
-}])
+}
 
-print(f'Botao "Cancelar Boleto" criado com sucesso! (ir.actions.server ID={action_id})')
-print('Acesse qualquer fatura no Odoo -> menu Acao (engrenagem) -> "Cancelar Boleto"')
+# Se ja existe, atualiza; senao cria
+existing = kw('ir.actions.server', 'search', [[['name', '=', 'Cancelar Boleto']]])
+if existing:
+    kw('ir.actions.server', 'write', [existing, vals])
+    print(f'Acao "Cancelar Boleto" atualizada (ID={existing[0]})')
+else:
+    action_id = kw('ir.actions.server', 'create', [vals])
+    print(f'Acao "Cancelar Boleto" criada (ID={action_id})')
+
+print('Acesse qualquer fatura > menu Acao (engrenagem) > "Cancelar Boleto"')
