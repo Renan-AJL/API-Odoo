@@ -640,6 +640,73 @@ router.post('/cancelar', apiKeyAuth, async function(req, res) {
   }
 });
 
+// GET /api/v1/itau/cancelar/web?nosso_numero=XXX&odoo_id=YYY
+// Versao web para chamar do Odoo Server Action (abre no navegador)
+// Cancela o boleto e atualiza o campo x_studio_boleto_cancelado no Odoo via XML-RPC
+router.get('/cancelar/web', async function(req, res) {
+  var nn = req.query.nosso_numero || '';
+  var odooId = req.query.odoo_id || '';
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+
+  function htmlPage(title, color, msg) {
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + title + '</title></head>' +
+      '<body style="font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#f5f5f5">' +
+      '<div style="background:#fff;padding:40px 50px;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,0.1);text-align:center;max-width:500px">' +
+      '<div style="font-size:48px;margin-bottom:16px">' + (color === 'green' ? '\u2705' : '\u274c') + '</div>' +
+      '<h2 style="color:' + color + ';margin:0 0 12px">' + title + '</h2>' +
+      '<p style="color:#555;line-height:1.6">' + msg + '</p>' +
+      '<button onclick="window.close()" style="margin-top:20px;padding:10px 30px;border:none;border-radius:6px;background:#4466aa;color:#fff;cursor:pointer;font-size:14px">Fechar</button>' +
+      '</div></body></html>';
+  }
+
+  if (!nn) {
+    return res.send(htmlPage('Nosso Numero Ausente', 'red', 'A fatura nao possui Nosso Numero. Nao ha boleto para cancelar.'));
+  }
+
+  try {
+    console.log('[CANCELAR-WEB] Cancelando boleto NN:', nn, '| Odoo ID:', odooId);
+    var resultado = await cancelarBoleto(nn);
+
+    // Atualiza o campo x_studio_boleto_cancelado no Odoo via XML-RPC
+    if (odooId) {
+      try {
+        var oc = config.odoo;
+        if (oc && oc.enabled && oc.url && oc.db && oc.user && oc.password) {
+          var xmlrpc = require('xmlrpc');
+          var base = oc.url.replace(/\/+$/, '');
+          var host = base.replace('https://', '');
+          var commonCli = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/common', port: 443 });
+          var modelsCli = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/object', port: 443 });
+
+          var uid = await new Promise(function(ok, fail) {
+            commonCli.methodCall('authenticate', [oc.db, oc.user, oc.password, {}], function(e, u) {
+              if (e || !u) fail(e || new Error('auth failed'));
+              else ok(u);
+            });
+          });
+
+          await new Promise(function(ok, fail) {
+            modelsCli.methodCall('execute_kw', [oc.db, uid, oc.password, 'account.move', 'write', [[parseInt(odooId)], { 'x_studio_boleto_cancelado': true }]], function(e, r) {
+              if (e) fail(e);
+              else ok(r);
+            });
+          });
+          console.log('[CANCELAR-WEB] Campo x_studio_boleto_cancelado atualizado no Odoo, ID:', odooId);
+        }
+      } catch (odooErr) {
+        console.warn('[CANCELAR-WEB] Aviso: nao atualizou Odoo:', odooErr.message);
+      }
+    }
+
+    res.send(htmlPage('Boleto Cancelado', 'green',
+      'Nosso Numero: <b>' + nn + '</b><br>O boleto foi cancelado com sucesso no Itau. Voce pode fechar esta janela.'));
+  } catch (err) {
+    console.error('[CANCELAR-WEB] ERRO:', err.message);
+    res.status(500).send(htmlPage('Erro ao Cancelar', 'red',
+      'Nosso Numero: <b>' + nn + '</b><br>' + err.message));
+  }
+});
+
 // === CHECKOUT DE CARTAO ===
 var checkoutPage = require('../views/checkout-page');
 var linkPagService = require('../services/itau-link-pagamento');
