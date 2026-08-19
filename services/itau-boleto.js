@@ -8,7 +8,7 @@
  * =============================================
  */
 const { getAccessToken, invalidateToken } = require('./itau-auth');
-const { callBolecode, callBolecodeGet } = require('./itau-api');
+const { callBolecode, callBolecodeGet, callBolecodePut } = require('./itau-api');
 const config = require('../config');
 
 /**
@@ -286,6 +286,55 @@ function parseFormaPagamento(forma) {
 }
 
 /**
+ * Cancela um boleto no BoleCode Itau
+ * Endpoint: PUT /boletos_pix/cancelamento
+ * @param {string} nossoNumero - Nosso numero do boleto a cancelar
+ * @param {string} [beneficiaryId] - ID do beneficiario (usa config como default)
+ */
+async function cancelarBoleto(nossoNumero, beneficiaryId) {
+  console.log('[BOLETO] Cancelando boleto nosso_numero:', nossoNumero);
+  let accessToken;
+  try {
+    accessToken = await getAccessToken();
+  } catch (err) {
+    console.error('[BOLETO] Falha ao obter token para cancelamento:', err.message);
+    throw new Error('Falha na autenticacao Itau: ' + err.message);
+  }
+
+  var payload = {
+    beneficiario: {
+      id_beneficiario: beneficiaryId || config.banco.idBeneficiario || '776400223389',
+    },
+    codigo_carteira: config.banco.codigoCarteira || '109',
+    nosso_numero: String(nossoNumero),
+  };
+
+  console.log('[BOLETO] Payload cancelamento:', JSON.stringify(payload));
+
+  try {
+    var response = await callBolecodePut(accessToken, '/boletos_pix/cancelamento', payload);
+    console.log('[BOLETO] Cancelamento solicitado com sucesso:', JSON.stringify(response));
+    return { sucesso: true, dados: response };
+  } catch (error) {
+    if (error.message && (error.message.includes('401') || error.message.includes('403'))) {
+      console.log('[BOLETO] Token pode ter expirado, invalidando cache...');
+      invalidateToken();
+      try {
+        accessToken = await getAccessToken();
+        var response = await callBolecodePut(accessToken, '/boletos_pix/cancelamento', payload);
+        console.log('[BOLETO] Cancelamento na 2a tentativa:', JSON.stringify(response));
+        return { sucesso: true, dados: response };
+      } catch (retryError) {
+        console.error('[BOLETO] Falha na 2a tentativa de cancelamento:', retryError.message);
+        throw retryError;
+      }
+    }
+    console.error('[BOLETO] Erro ao cancelar boleto:', error.message);
+    throw error;
+  }
+}
+
+/**
  * Consulta boleto por nosso_numero no BoleCode Itau
  * Quando o middleware reinicia (Render sleep), a memoria e zerada.
  * Esta funcao consulta o Itaú diretamente para recuperar os dados do boleto.
@@ -309,4 +358,4 @@ async function consultarBoletoPorNossoNumero(nossoNumero, beneficiaryId) {
   }
 }
 
-module.exports = { emitirBoleto, consultarBoleto, consultarBoletoPorNossoNumero, montaPayloadBolecode, parseFormaPagamento };
+module.exports = { emitirBoleto, cancelarBoleto, consultarBoleto, consultarBoletoPorNossoNumero, montaPayloadBolecode, parseFormaPagamento };

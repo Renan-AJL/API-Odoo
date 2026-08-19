@@ -8,11 +8,13 @@
 const express = require('express');
 const router = express.Router();
 const { apiKeyAuth } = require('../middleware/auth');
-const { emitirBoleto, parseFormaPagamento } = require('../services/itau-boleto');
+const { emitirBoleto, parseFormaPagamento, cancelarBoleto } = require('../services/itau-boleto');
 const { storeBoleto, generatePdf, generatePdfFromFields } = require('../services/pdf-boleto');
 const { pushBoletosToOdoo, pushPixToOdoo } = require('../services/odoo-push');
 const { criarLinkPagamento } = require('../services/itau-link-pagamento');
 const { criarCobrancaPix, consultarCobrancaPix } = require('../services/itau-pix');
+const { buscarExtratoNormalizado } = require('../services/itau-extrato');
+const { criarExtrato } = require('../services/odoo-bank-statement');
 const config = require('../config');
 const bwipjs = require('bwip-js');
 
@@ -619,6 +621,25 @@ router.get('/pix/status/:txid', async function(req, res) {
   }
 });
 
+// === CANCELAR BOLETO ===
+// POST /api/v1/itau/cancelar
+// Body: { nosso_numero: string }
+// Cancela um boleto no Itau (baixa por cancelamento)
+router.post('/cancelar', apiKeyAuth, async function(req, res) {
+  try {
+    var nn = req.body.nosso_numero || '';
+    if (!nn) {
+      return res.status(400).json({ success: false, message: 'nosso_numero obrigatorio' });
+    }
+    console.log('[API/CANCELAR] Cancelando boleto NN:', nn);
+    var resultado = await cancelarBoleto(nn);
+    res.json({ success: true, message: 'Boleto cancelado com sucesso', dados: resultado.dados });
+  } catch (err) {
+    console.error('[API/CANCELAR] ERRO:', err.message);
+    res.status(500).json({ success: false, message: 'Erro ao cancelar boleto: ' + err.message });
+  }
+});
+
 // === CHECKOUT DE CARTAO ===
 var checkoutPage = require('../views/checkout-page');
 var linkPagService = require('../services/itau-link-pagamento');
@@ -646,6 +667,88 @@ router.post('/checkout/:orderId/pay', async function(req, res) {
       returnMessage: err.message,
       detail: err.detail,
     });
+  }
+});
+
+// ============================================================
+// EXTRATO BANCARIO — Importacao para Odoo
+// ============================================================
+
+// POST /api/v1/itau/extrato/importar
+// Body: { data_inicial?: "YYYY-MM-DD", data_final?: "YYYY-MM-DD" }
+// Se nao informar, busca ontem (D-1)
+router.post('/extrato/importar', async function(req, res) {
+  try {
+    var ontem = new Date(Date.now() - 24 * 3600000);
+    var di = req.body.data_inicial || ontem.toISOString().substring(0, 10);
+    var df = req.body.data_final || di;
+
+    console.log('[EXTRATO-IMPORT] Buscando extrato: ' + di + ' ate ' + df);
+    var transacoes = await buscarExtratoNormalizado(di, df);
+
+    if (!transacoes.length) {
+      return res.json({ success: true, message: 'Extrato vazio (' + di + ' a ' + df + ')', transacoes: 0 });
+    }
+
+    // Cria o extrato no Odoo
+    var resultado = await criarExtrato(df, transacoes);
+
+    res.json({
+      success: true,
+      message: transacoes.length + ' transacoes importadas para o diario ' + resultado.journalName,
+      transacoes: transacoes.length,
+      saldo: resultado.balance,
+      statement_id: resultado.statementId,
+    });
+  } catch (err) {
+    console.error('[EXTRATO-IMPORT] ERRO:', err.message);
+    res.status(500).json({ success: false, message: 'Erro ao importar extrato: ' + err.message });
+  }
+});
+
+// GET /api/v1/itau/extrato/preview
+// Preview do extrato (nao cria no Odoo)
+router.get('/extrato/preview', async function(req, res) {
+  try {
+    var di = req.query.data_inicial || new Date(Date.now() - 24 * 3600000).toISOString().substring(0, 10);
+    var df = req.query.data_final || di;
+
+    var transacoes = await buscarExtratoNormalizado(di, df);
+    res.json({ success: true, data_inicial: di, data_final: df, transacoes: transacoes });
+  } catch (err) {
+    console.error('[EXTRATO-PREVIEW] ERRO:', err.message);
+    res.status(500).json({ success: false, message: 'Erro ao buscar extrato: ' + err.message });
+  }
+});
+
+// GET /api/v1/itau/extrato/cron — Chamada diaria automatica
+// Protegido por secret separado (CRON_SECRET)
+router.get('/extrato/cron', async function(req, res) {
+  var cronSecret = process.env.ODOO_BANK_STATEMENT_IMPORT_CRON_SECRET || '';
+  if (!cronSecret || req.query.secret !== cronSecret) {
+    return res.status(403).json({ success: false, message: 'Secret invalido' });
+  }
+
+  try {
+    var ontem = new Date(Date.now() - 24 * 3600000);
+    var di = ontem.toISOString().substring(0, 10);
+    var df = di;
+
+    console.log('[EXTRATO-CRON] Execucao automatica diaria: ' + di);
+    var transacoes = await buscarExtratoNormalizado(di, df);
+
+    if (!transacoes.length) {
+      console.log('[EXTRATO-CRON] Nenhuma transacao em ' + di);
+      return res.json({ success: true, message: 'Extrato vazio', transacoes: 0 });
+    }
+
+    var resultado = await criarExtrato(df, transacoes);
+    console.log('[EXTRATO-CRON] Extrato criado: ' + resultado.statementId + ' (' + transacoes.length + ' linhas)');
+
+    res.json({ success: true, transacoes: transacoes.length, statement_id: resultado.statementId, saldo: resultado.balance });
+  } catch (err) {
+    console.error('[EXTRATO-CRON] ERRO:', err.message);
+    res.status(500).json({ success: false, message: 'Erro cron extrato: ' + err.message });
   }
 });
 

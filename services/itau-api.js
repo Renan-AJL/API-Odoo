@@ -32,6 +32,36 @@ async function callBolecode(accessToken, endpoint, payload) {
 }
 
 /**
+ * PUT request ao BoleCode (para cancelamentos, etc.)
+ */
+async function callBolecodePut(accessToken, endpoint, payload) {
+  const mtls = config.createMtlsConfig();
+  const baseUrl = config.itau.bolecodeBaseUrl;
+  const url = baseUrl + endpoint;
+  const httpsAgent = mtls.hasMtls ? new https.Agent({ cert: mtls.cert, key: mtls.key }) : undefined;
+
+  console.log('[ITAU-API] BoleCode PUT', url);
+  const headers = {
+    'Authorization': 'Bearer ' + accessToken,
+    'Content-Type': 'application/json; charset=utf-8',
+    'Accept': 'application/json',
+    'x-itau-apikey': config.itau.clientId,
+    'x-itau-correlationID': String(Date.now()),
+  };
+  try {
+    const response = await axios.put(url, payload, { headers, httpsAgent, timeout: 30000 });
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      const msg = JSON.stringify(error.response.data);
+      console.error('[ITAU-API] ERRO PUT ' + error.response.status + ':', msg);
+      throw new Error('BoleCode PUT ' + error.response.status + ': ' + msg);
+    }
+    throw new Error('BoleCode conexao: ' + error.message);
+  }
+}
+
+/**
  * GET request ao BoleCode (para consultas)
  */
 async function callBolecodeGet(accessToken, endpoint) {
@@ -97,4 +127,4 @@ async function callPix(method, endpoint, payload) {
   }
 }
 
-module.exports = { callBolecode, callBolecodeGet, callPix };
+module.exports = { callBolecode, callBolecodeGet, callBolecodePut, callPix };
