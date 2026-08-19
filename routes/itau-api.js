@@ -641,27 +641,20 @@ router.post('/cancelar', apiKeyAuth, async function(req, res) {
 });
 
 // GET /api/v1/itau/cancelar/web?odoo_id=XXX
-// Versao web para chamar do Odoo Server Action (abre no navegador)
-// Se receber apenas odoo_id, le x_studio_itau_resposta_json do Odoo,
-// extrai os nossos numeros e cancela TODOS os boletos da fatura
+// Versao web para chamar do Odoo Server Action
+// Le x_studio_itau_resposta_json do Odoo, extrai os nossos numeros,
+// cancela TODOS os boletos, posta resultado no chatter e redireciona de volta
 router.get('/cancelar/web', async function(req, res) {
-  var nnParam = req.query.nosso_numero || '';
   var odooId = req.query.odoo_id || '';
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  var oc = config.odoo;
+  var returnUrl = (oc && oc.url ? oc.url.replace(/\/+$/, '') : '') + '/web#id=' + odooId + '&model=account.move&view_type=form';
 
-  function htmlPage(title, color, msg) {
-    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + title + '</title></head>' +
-      '<body style="font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#f5f5f5">' +
-      '<div style="background:#fff;padding:40px 50px;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,0.1);text-align:center;max-width:550px">' +
-      '<div style="font-size:48px;margin-bottom:16px">' + (color === 'green' ? '\u2705' : (color === 'orange' ? '\u26a0\ufe0f' : '\u274c')) + '</div>' +
-      '<h2 style="color:' + color + ';margin:0 0 12px">' + title + '</h2>' +
-      '<p style="color:#555;line-height:1.6">' + msg + '</p>' +
-      '<button onclick="window.close()" style="margin-top:20px;padding:10px 30px;border:none;border-radius:6px;background:#4466aa;color:#fff;cursor:pointer;font-size:14px">Fechar</button>' +
-      '</div></body></html>';
-  }
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cancelando...</title></head>' +
+    '<body style="font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#f5f5f5">' +
+    '<div style="text-align:center"><p style="font-size:18px;color:#555">Cancelando boleto(s)... aguarde.</p></div></body></html>');
 
   function odooRpc(model, method, args, kwargs) {
-    var oc = config.odoo;
     var xmlrpc = require('xmlrpc');
     var base = oc.url.replace(/\/+$/, '');
     var host = base.replace('https://', '');
@@ -679,51 +672,54 @@ router.get('/cancelar/web', async function(req, res) {
     });
   }
 
-  if (!odooId) {
-    return res.send(htmlPage('ID Ausente', 'red', 'ID da fatura nao informado.'));
+  function postChatter(recordId, bodyHtml) {
+    return odooRpc('mail.message', 'create', [{
+      model: 'account.move',
+      res_id: parseInt(recordId),
+      body: bodyHtml,
+      message_type: 'comment',
+      subtype_xmlid: 'mail.mt_note',
+    }]);
   }
 
-  var oc = config.odoo;
-  if (!oc || !oc.enabled || !oc.url || !oc.db || !oc.user || !oc.password) {
-    return res.send(htmlPage('Erro de Config', 'red', 'Configuracao do Odoo ausente no middleware.'));
+  if (!odooId || !oc || !oc.enabled || !oc.url || !oc.db || !oc.user || !oc.password) {
+    await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Erro: configuracao Odoo ausente no middleware.</span>');
+    return res.redirect(returnUrl);
   }
 
   try {
     var nossoNumeros = [];
 
-    // Se passou nosso_numero direto, usa ele
-    if (nnParam) {
-      nossoNumeros.push(nnParam);
-    } else {
-      // Le o campo x_studio_itau_resposta_json do Odoo
-      console.log('[CANCELAR-WEB] Lendo resposta_json da fatura ID:', odooId);
-      var fields = await odooRpc('account.move', 'read', [[parseInt(odooId)], ['x_studio_itau_resposta_json']]);
-      var rawJson = '';
-      if (fields && fields[0] && fields[0].x_studio_itau_resposta_json) {
-        rawJson = fields[0].x_studio_itau_resposta_json;
-      }
-      if (!rawJson) {
-        return res.send(htmlPage('Sem Boleto', 'red', 'Fatura ID ' + odooId + ' nao possui dados de boleto (campo vazio).'));
-      }
-
-      // O campo contem um dict Python (single quotes). Converte para JSON valido
-      var jsonStr = rawJson.replace(/'/g, '"').replace(/True/g, 'true').replace(/False/g, 'false').replace(/None/g, 'null');
-      var data = JSON.parse(jsonStr);
-      var pagamentos = data.pagamentos || [];
-
-      if (pagamentos.length === 0) {
-        return res.send(htmlPage('Sem Boleto', 'red', 'Nenhum pagamento encontrado na fatura.'));
-      }
-
-      for (var i = 0; i < pagamentos.length; i++) {
-        if (pagamentos[i].nosso_numero) {
-          nossoNumeros.push(pagamentos[i].nosso_numero);
-        }
-      }
+    // Le o campo x_studio_itau_resposta_json do Odoo
+    console.log('[CANCELAR-WEB] Lendo resposta_json da fatura ID:', odooId);
+    var fields = await odooRpc('account.move', 'read', [[parseInt(odooId)], ['x_studio_itau_resposta_json']]);
+    var rawJson = '';
+    if (fields && fields[0] && fields[0].x_studio_itau_resposta_json) {
+      rawJson = fields[0].x_studio_itau_resposta_json;
+    }
+    if (!rawJson) {
+      await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Fatura nao possui dados de boleto.</span>');
+      return res.redirect(returnUrl);
     }
 
+    // O campo contem um dict Python (single quotes). Converte para JSON valido
+    var jsonStr = rawJson.replace(/'/g, '"').replace(/True/g, 'true').replace(/False/g, 'false').replace(/None/g, 'null');
+    var data = JSON.parse(jsonStr);
+    var pagamentos = data.pagamentos || [];
+
+    if (pagamentos.length === 0) {
+      await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Nenhum pagamento encontrado na fatura.</span>');
+      return res.redirect(returnUrl);
+    }
+
+    for (var i = 0; i < pagamentos.length; i++) {
+      if (pagamentos[i].nosso_numero) {
+        nossoNumeros.push(pagamentos[i].nosso_numero);
+      }
+    }
     if (nossoNumeros.length === 0) {
-      return res.send(htmlPage('Sem Nosso Numero', 'red', 'Nenhum nosso numero encontrado.'));
+      await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Nenhum nosso numero encontrado.</span>');
+      return res.redirect(returnUrl);
     }
 
     console.log('[CANCELAR-WEB] Cancelando', nossoNumeros.length, 'boleto(s):', nossoNumeros.join(', '));
@@ -739,40 +735,52 @@ router.get('/cancelar/web', async function(req, res) {
       }
     }
 
-    // Monta resultado
+    // Monta mensagem do chatter
     var sucesso = resultados.filter(function(r) { return r.ok; }).length;
     var falha = resultados.filter(function(r) { return !r.ok; }).length;
 
-    var msgHtml = '<b>' + sucesso + ' boleto(s) cancelado(s)</b>';
-    if (falha > 0) {
-      msgHtml += '<br><span style="color:red">' + falha + ' falha(s):</span>';
+    var chatBody = '<b>Cancelar Boleto</b><br/>';
+    if (falha === 0) {
+      chatBody += '<span style="color:green">✅ ' + sucesso + ' boleto(s) cancelado(s) com sucesso no Itau.</span>';
+    } else if (sucesso === 0) {
+      chatBody += '<span style="color:red">❌ Falha ao cancelar todos os boletos:</span><br/>';
+      for (var i = 0; i < resultados.length; i++) {
+        chatBody += 'NN ' + resultados[i].nn + ': ' + resultados[i].erro + '<br/>';
+      }
+    } else {
+      chatBody += '<span style="color:orange">⚠️ ' + sucesso + ' cancelado(s), ' + falha + ' falha(s):</span><br/>';
       for (var i = 0; i < resultados.length; i++) {
         if (!resultados[i].ok) {
-          msgHtml += '<br>NN ' + resultados[i].nn + ': ' + resultados[i].erro;
+          chatBody += 'NN ' + resultados[i].nn + ': ' + resultados[i].erro + '<br/>';
         }
       }
     }
-    msgHtml += '<br><br><small>Nos(s) Numero(s): ' + nossoNumeros.join(', ') + '</small>';
+    chatBody += '<br/><small>NN: ' + nossoNumeros.join(', ') + '</small>';
 
-    // Atualiza campo no Odoo
+    // Posta no chatter
+    await postChatter(odooId, chatBody);
+
+    // Atualiza campo boleto cancelado
     try {
       await odooRpc('account.move', 'write', [[parseInt(odooId)], { 'x_studio_boleto_cancelado': true }]);
-      console.log('[CANCELAR-WEB] Campo x_studio_boleto_cancelado atualizado');
-    } catch (odooErr) {
-      console.warn('[CANCELAR-WEB] Aviso: nao atualizou Odoo:', odooErr.message);
+    } catch (wErr) {
+      console.warn('[CANCELAR-WEB] Aviso:', wErr.message);
     }
 
-    res.send(htmlPage(
-      falha === 0 ? 'Boleto(s) Cancelado(s)' : 'Cancelamento Parcial',
-      falha === 0 ? 'green' : 'orange',
-      msgHtml
-    ));
+    // Redireciona de volta para a fatura
+    res.redirect(returnUrl);
 
   } catch (err) {
     console.error('[CANCELAR-WEB] ERRO:', err.message);
-    res.status(500).send(htmlPage('Erro ao Cancelar', 'red', err.message));
+    try {
+      await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Erro: ' + err.message + '</span>');
+    } catch (chatErr) {
+      console.warn('[CANCELAR-WEB] Falha ao postar no chatter:', chatErr.message);
+    }
+    res.redirect(returnUrl);
   }
 });
+
 
 // === CHECKOUT DE CARTAO ===
 var checkoutPage = require('../views/checkout-page');
