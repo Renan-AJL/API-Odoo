@@ -1,0 +1,18 @@
+{
+  "code": 200,
+  "data": {
+    "description": "",
+    "html": "<html><head><meta name=\"color-scheme\" content=\"light dark\"></head><body><pre style=\"word-wrap: break-word; white-space: pre-wrap;\"># ============================================\n# CONFIGURACAO DO MIDDLEWARE ITAU-ODOO\n# ============================================\n\n# Ambiente: sandbox ou producao\nAMBIENTE=sandbox\n\n# --- ITAU BOLETOS ---\nITAU_CLIENT_ID=8a4d4b08-736b-3ca3-9d24-cb2049e42198\nITAU_CLIENT_SECRET=815a925d-389c-404b-a31a-b7fc89869568\nITAU_SANDBOX_URL=https://sandbox.devportal.itau.com.br/itau-ep9-gtw-cash-management-ext-v2/v2\nITAU_PRODUCAO_URL=https://api.itau.com.br/cash_management/v2\n\n# --- ITAU PIX ---\nITAU_PIX_SANDBOX_URL=https://sandbox.devportal.itau.com.br/itau-ep9-gtw-pix-ext-v2\nITAU_PIX_PRODUCAO_URL=https://api.itau.com.br/pix/v2\nITAU_PIX_CHAVE=email@suaempresa.com.br\n\n# --- ITAU TOKEN ---\nITAU_TOKEN_SANDBOX_URL=https://sandbox.devportal.itau.com.br/itau-ep9-gtw-autenticacao-ext/oauth/v2/token\nITAU_TOKEN_PRODUCAO_URL=https://sts.itau.com.br/api/oauth/token\n\n# --- REDE ITAU (CARTAO) ---\nREDE_CLIENT_ID=seu_client_id_rede\nREDE_CLIENT_SECRET=seu_client_secret_rede\nREDE_SANDBOX_URL=https://sandbox-ecommerce.userede.com.br/sandbox/v1\nREDE_PRODUCAO_URL=https://ecommerce.userede.com.br/decrypt/v1\nREDE_MERCHANT_ID=seu_merchant_id\nREDE_SOFT_DESCRIPTOR=LOJA\n\n# --- LINK DE PAGAMENTO ITAU (CARTOES) ---\nLINK_PAG_CLIENT_ID=e3713650-f520-48cd-ab1d-27a903cafe19\nLINK_PAG_CLIENT_SECRET=7W51I2Wzrj\n# Se a API de Link de Pagamento tiver URLs proprias, descomente:\n# LINK_PAG_SANDBOX_URL=https://sandbox.devportal.itau.com.br/...\n# LINK_PAG_PRODUCAO_URL=https://api.itau.com.br/...\n# LINK_PAG_TOKEN_SANDBOX_URL=https://sandbox.devportal.itau.com.br/...\n# LINK_PAG_TOKEN_PRODUCAO_URL=https://sts.itau.com.br/...\n\n# --- CERTIFICADOS mTLS (apenas producao) ---\n# Caminho dos certificados para producao\nITAU_CERT_PATH=/etc/ssl/certs/itau-cert.pem\nITAU_KEY_PATH=/etc/ssl/private/itau-key.pem\nITAU_CA_PATH=/etc/ssl/certs/itau-ca.pem\n\n# --- ODOO ---\nODOO_URL=https://seu-empresa.odoo.com\nODOO_DB=seu-empresa\nODOO_USERNAME=seu-email@empresa.com\nODOO_API_KEY=sua-api-key-do-odoo\n\n# --- MODO MOCK (true para testar sem o Itau) ---\nMOCK_MODE=true\n\n# --- MIDDLEWARE ---\nPORT=3000\nAPI_SECRET_KEY=gerar-uma-chave-secreta-super-forte-aqui\n\n# --- WEBHOOK ---\nWEBHOOK_SECRET=gerar-outra-chave-para-validar-webhooks\n</pre></body></html>",
+    "title": "",
+    "url": "https://raw.githubusercontent.com/marcusvds83/itau-odoo/main/.env.example",
+    "usage": {
+      "tokens": 769
+    }
+  },
+  "meta": {
+    "usage": {
+      "tokens": 769
+    }
+  },
+  "status": 20000
+}

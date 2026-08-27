@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://developer.userede.com.br/e-rede",
+    "name": "Rede Itaú | Portal do Desenvolvedor",
+    "snippet": "O e.Rede é uma solução de pagamentos on-line prática e segura para realizar vendas pela internet com toda tranquilidade. Com diferentes tipos de integração, ...",
+    "host_name": "developer.userede.com.br",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.userede.com.br/e-rede?referrer=wordpress.com",
+    "name": "Introdução - Rede Itaú | Portal do Desenvolvedor",
+    "snippet": "Transação - POST Realizar transação - Request Body - Data Only: MPI Rede ... Esta etapa deve preceder o envio dos dados para a API de Pagamentos. 3 ...",
+    "host_name": "developer.userede.com.br",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.userede.com.br/gestao-vendas",
+    "name": "Gestão de Vendas - Rede Itaú | Portal do Desenvolvedor",
+    "snippet": "A API de gestão de vendas permite consultar todas as transações de débito e crédito, lançamentos, pagamentos, débitos em geral, ajustes, cancelamentos de vendas ...",
+    "host_name": "developer.userede.com.br",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.userede.com.br/qr-code",
+    "name": "QR Code - Rede Itaú | Portal do Desenvolvedor",
+    "snippet": "O conjunto de API de pagamento digital permite a venda via QR Code, independente da carteira digital utilizada pelo seu cliente, já que a forma de pagamento ...",
+    "host_name": "developer.userede.com.br",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.userede.com.br/chargeback",
+    "name": "Chargeback - Rede Itaú | Portal do Desenvolvedor",
+    "snippet": "O conjunto de APIs de Chargeback permite que o estabelecimento comercial gerencie seus chargebacks da Rede. Nas APIs disponibilizadas, o estabelecimento poderá ...",
+    "host_name": "developer.userede.com.br",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.userede.com.br/files/erede/tutorial-oauth2.0.pdf",
+    "name": "[PDF] Tutorial deautenticação e transação via OAuth2.0",
+    "snippet": "Receba o <access_token>. O chamado irá retornar um <access_token> que terá a duração de 24 minutos. Após esse período, um novo chamado deve ser efetuado.",
+    "host_name": "developer.userede.com.br",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.userede.com.br/credenciamento",
+    "name": "Credenciamento - Rede Itaú | Portal do Desenvolvedor",
+    "snippet": "1. Nome da Empresa/Organização parceira que usará as APIs da Rede 2. CNPJ da Empresa/Organização 3. E-mail da Empresa/Organização 4. · Cadastro de Novos Usuários.",
+    "host_name": "developer.userede.com.br",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developers.google.com/assistant/transactions/physical/dev-guide-physical-custom?hl=pt-br",
+    "name": "Crie transações físicas com pagamentos gerenciados pelo",
+    "snippet": "Em Informações adicionais > Transações > marque a caixa que diz \"Faça suas ações usar a API Transactions para realizar transações de produtos físicos?",
+    "host_name": "developers.google.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer-portal-dev.useredecloud.com.br/chargeback",
+    "name": "Chargeback - Rede Itaú | Portal do Desenvolvedor",
+    "snippet": "O conjunto de APIs de Chargeback permite que o estabelecimento comercial gerencie seus chargebacks da Rede. Nas APIs disponibilizadas, o estabelecimento poderá ...",
+    "host_name": "developer-portal-dev.useredecloud.com.br",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://velana.readme.io/reference/criar-transacao",
+    "name": "Criar transação - Introdução",
+    "snippet": "Para criar uma transação, use a rota /transactions, tanto para cartão de crédito, boleto ou PIX.",
+    "host_name": "velana.readme.io",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

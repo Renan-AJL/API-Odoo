@@ -1,0 +1,591 @@
+     1→     1→/**
+     2→     2→ * services/odoo-te.js - Odoo XML-RPC client para TudoEntregue
+     3→     3→ * Usa XML-RPC (igual odoo-push.js) pois JSON-RPC nao funciona no Odoo SaaS
+     4→     4→ */
+     5→     5→var xmlrpc = require('xmlrpc');
+     6→     6→var config = require('../config');
+     7→     7→var logger = require('../utils/logger');
+     8→     8→
+     9→     9→// ============================================================
+    10→    10→// FIELDS mapping — usado por delivery.js (delivery-status, send-invoice)
+    11→    11→// ============================================================
+    12→    12→var FIELDS = {
+    13→    13→  'res.partner': {
+    14→    14→    teCustomerId:   'x_studio_id_cliente_te',
+    15→    15→    teSendSms:      'x_studio_enviar_sms',
+    16→    16→    teSendEmail:    'x_studio_enviar_email',
+    17→    17→  },
+    18→    18→  'sale.order': {
+    19→    19→    teSync:         'x_studio_te_sync',
+    20→    20→    teOrderId:      'x_studio_te_order_id',
+    21→    21→    teTrackingCode: 'x_studio_te_tracking_code',
+    22→    22→    teTrackingUrl:  'x_studio_te_tracking_url',
+    23→    23→    teSituation:    'x_studio_te_situacao',
+    24→    24→    teLastSync:     'x_studio_te_last_sync',
+    25→    25→    teError:        'x_studio_te_error',
+    26→    26→    teWebhook:      'x_studio_te_webhook_received',
+    27→    27→    teDeliveryType: 'x_studio_te_tipo_pedido',
+    28→    28→    teStatusHtml:   'x_studio_status_de_entrega_te',
+    29→    29→    teMotorista:    'x_studio_motorista',
+    30→    30→  },
+    31→    31→  'stock.picking': {
+    32→    32→    teSync:            'x_studio_te_sync',
+    33→    33→    teOrderId:         'x_studio_te_order_id',
+    34→    34→    teTrackingCode:    'x_studio_te_rastreio',
+    35→    35→    teSituation:       'x_studio_te_situacao',
+    36→    36→    teDriverName:      'x_studio_te_nome_motorista',
+    37→    37→    teDriverPhone:     'x_studio_te_fone_motorista',
+    38→    38→    teOccurrences:     'x_studio_te_ocorrencias',
+    39→    39→    teProofUrl:        'x_studio_te_url_comprovante',
+    40→    40→    teLastWebhook:     'x_studio_te_ultimo_webhook',
+    41→    41→    teSituationTarget: 'x_studio_te_estado_destino',
+    42→    42→  },
+    43→    43→  'account.move': {
+    44→    44→    teOrderId:      'x_studio_te_order_id',
+    45→    45→    teTrackingCode: 'x_studio_te_tracking_code',
+    46→    46→    teSituation:    'x_studio_te_situacao',
+    47→    47→  },
+    48→    48→};
+    49→    49→
+    50→    50→// ============================================================
+    51→    51→// Campos nativos por modelo (100% seguros no Odoo SaaS)
+    52→    52→// ============================================================
+    53→    53→var PARTNER_FIELDS = [
+    54→    54→  'id', 'name', 'city', 'state_id', 'zip', 'phone', 'email',
+    55→    55→  'street', 'street2', 'country_id',
+    56→    56→];
+    57→    57→var PARTNER_OPTIONAL_FIELDS = [
+    58→    58→  'vat', 'cnpj_cpf', 'number', 'district', 'l10n_br_district',
+    59→    59→  'l10n_br_city_id', 'mobile', 'partner_latitude', 'partner_longitude',
+    60→    60→  'street_number',
+    61→    61→  'x_studio_te_codigo', 'x_studio_te_razao_social',
+    62→    62→  'x_studio_te_cnpj_cpf', 'x_studio_te_inscricao_estadual',
+    63→    63→  'x_studio_te_telefone', 'x_studio_te_email', 'x_studio_te_logradouro',
+    64→    64→  'x_studio_te_numero', 'x_studio_te_complemento', 'x_studio_te_bairro',
+    65→    65→  'x_studio_te_municipio', 'x_studio_te_uf', 'x_studio_te_cep',
+    66→    66→  'x_studio_te_latitude', 'x_studio_te_longitude',
+    67→    67→];
+    68→    68→var PRODUCT_FIELDS = ['id', 'name', 'weight', 'volume', 'default_code', 'qty_available'];
+    69→    69→var ORDER_LINE_FIELDS = ['id', 'name', 'product_id', 'product_uom_qty', 'price_unit', 'price_subtotal', 'price_total'];
+    70→    70→var SALE_ORDER_FIELDS = ['id', 'name', 'partner_id', 'state', 'amount_total', 'note'];
+    71→    71→var SALE_ORDER_CUSTOM_FIELDS = [
+    72→    72→  'x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_te_situacao',
+    73→    73→  'x_studio_te_situacao_desc', 'x_studio_te_tipo_pedido', 'x_studio_te_data_entrega',
+    74→    74→  'x_studio_te_valor_frete', 'x_studio_te_peso_total', 'x_studio_te_qtd_volumes',
+    75→    75→  'x_studio_te_observacao', 'x_studio_te_protocolo_coleta', 'x_studio_te_data_coleta',
+    76→    76→  'x_studio_te_nome_motorista', 'x_studio_te_placa_veiculo', 'x_studio_te_rastreio',
+    77→    77→  'x_studio_status_de_entrega_te', 'x_studio_motorista',
+    78→    78→];
+    79→    79→var PICKING_FIELDS = [
+    80→    80→  'id', 'name', 'partner_id', 'sale_id', 'state', 'picking_type_code',
+    81→    81→  'scheduled_date', 'origin', 'note', 'move_ids',
+    82→    82→];
+    83→    83→var PICKING_CUSTOM_FIELDS = [
+    84→    84→  'x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_te_situacao',
+    85→    85→  'x_studio_te_situacao_desc', 'x_studio_te_tipo_pedido', 'x_studio_te_data_entrega',
+    86→    86→  'x_studio_te_valor_frete', 'x_studio_te_peso_total', 'x_studio_te_qtd_volumes',
+    87→    87→  'x_studio_te_observacao', 'x_studio_te_protocolo_coleta', 'x_studio_te_data_coleta',
+    88→    88→  'x_studio_te_nome_motorista', 'x_studio_te_placa_veiculo', 'x_studio_te_rastreio',
+    89→    89→  'x_studio_te_ocorrencias', 'x_studio_te_url_comprovante', 'x_studio_te_fone_motorista',
+    90→    90→  'x_studio_te_estado_destino', 'x_studio_te_ultimo_webhook',
+    91→    91→];
+    92→    92→var INVOICE_FIELDS = ['id', 'name', 'state', 'move_type', 'partner_id', 'invoice_date', 'amount_total', 'payment_state'];
+    93→    93→var INVOICE_CUSTOM_FIELDS = ['x_studio_te_sync', 'x_studio_te_order_id'];
+    94→    94→var INVOICE_LINE_FIELDS = ['id', 'name', 'product_id', 'quantity', 'price_unit', 'price_subtotal'];
+    95→    95→
+    96→    96→var OPTIONAL_FIELDS = {
+    97→    97→  'res.partner': PARTNER_OPTIONAL_FIELDS,
+    98→    98→  'sale.order': SALE_ORDER_CUSTOM_FIELDS,
+    99→    99→  'stock.picking': PICKING_CUSTOM_FIELDS,
+   100→   100→  'account.move': INVOICE_CUSTOM_FIELDS,
+   101→   101→};
+   102→   102→
+   103→   103→// ============================================================
+   104→   104→// XML-RPC connection (singleton)
+   105→   105→// ============================================================
+   106→   106→var _cached = null;
+   107→   107→
+   108→   108→function getConn() {
+   109→   109→  if (_cached && _cached.uid) return _cached;
+   110→   110→  var odooConfig = config.odoo;
+   111→   111→  var base = odooConfig.url.replace(/\/+$/, '');
+   112→   112→  var host = base.replace('https://', '').replace('http://', '');
+   113→   113→  var common = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/common', port: 443 });
+   114→   114→  var models = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/object', port: 443 });
+   115→   115→  _cached = { uid: null, common: common, models: models, db: odooConfig.db, password: odooConfig.password };
+   116→   116→  return _cached;
+   117→   117→}
+   118→   118→
+   119→   119→function authenticate() {
+   120→   120→  return new Promise(function(resolve, reject) {
+   121→   121→    var conn = getConn();
+   122→   122→    conn.common.methodCall('authenticate', [conn.db, config.odoo.user, conn.password, {}], function(err, uid) {
+   123→   123→      if (err) { reject(new Error('Auth Odoo falhou: ' + (err.message || JSON.stringify(err)))); }
+   124→   124→      else if (uid === false || uid === null) { reject(new Error('Auth Odoo: credenciais invalidas (UID=false)')); }
+   125→   125→      else { conn.uid = uid; logger.info('[ODOO-TE] Autenticado. UID: ' + uid); resolve(uid); }
+   126→   126→    });
+   127→   127→  });
+   128→   128→}
+   129→   129→
+   130→   130→function ensureAuth() {
+   131→   131→  var conn = getConn();
+   132→   132→  if (conn.uid) return Promise.resolve(conn.uid);
+   133→   133→  return authenticate();
+   134→   134→}
+   135→   135→
+   136→   136→function executeKw(model, method, args, kwargs) {
+   137→   137→  return new Promise(function(resolve, reject) {
+   138→   138→    ensureAuth().then(function(uid) {
+   139→   139→      var conn = getConn();
+   140→   140→      var params = [conn.db, uid, conn.password, model, method, args || []];
+   141→   141→      if (kwargs) params.push(kwargs);
+   142→   142→      conn.models.methodCall('execute_kw', params, function(err, result) {
+   143→   143→        if (err) { reject(new Error(model + '.' + method + ': ' + (err.message || JSON.stringify(err)))); }
+   144→   144→        else { resolve(result); }
+   145→   145→      });
+   146→   146→    }).catch(reject);
+   147→   147→  });
+   148→   148→}
+   149→   149→
+   150→   150→// ============================================================
+   151→   151→// Safe read/write — tenta com x_studio, fallback sem
+   152→   152→// ============================================================
+   153→   153→var _customFieldsCache = {};
+   154→   154→
+   155→   155→async function safeReadCustom(model, ids, nativeFields, customFields) {
+   156→   156→  try {
+   157→   157→    return await executeKw(model, 'read', [ids], { fields: nativeFields.concat(customFields) });
+   158→   158→  } catch (err) {
+   159→   159→    if (err.message && (err.message.indexOf('Invalid field') !== -1 || err.message.indexOf('KeyError') !== -1)) {
+   160→   160→      if (!_customFieldsCache[model]) {
+   161→   161→        _customFieldsCache[model] = { available: false, checked: true };
+   162→   162→        logger.warn('[ODOO-TE] Campos x_studio_* nao encontrados em ' + model + '. Usando campos nativos.');
+   163→   163→      }
+   164→   164→      return await executeKw(model, 'read', [ids], { fields: nativeFields });
+   165→   165→    }
+   166→   166→    throw err;
+   167→   167→  }
+   168→   168→}
+   169→   169→
+   170→   170→async function safeWriteCustom(model, ids, vals) {
+   171→   171→  var customVals = {};
+   172→   172→  var nativeVals = {};
+   173→   173→  Object.keys(vals).forEach(function(k) {
+   174→   174→    if (k.indexOf('x_studio_') === 0) customVals[k] = vals[k];
+   175→   175→    else nativeVals[k] = vals[k];
+   176→   176→  });
+   177→   177→  if (Object.keys(nativeVals).length > 0) await executeKw(model, 'write', [ids, nativeVals]);
+   178→   178→  if (Object.keys(customVals).length > 0) {
+   179→   179→    try { await executeKw(model, 'write', [ids, customVals]); }
+   180→   180→    catch (err) {
+   181→   181→      if (err.message && (err.message.indexOf('Invalid field') !== -1 || err.message.indexOf('KeyError') !== -1)) {
+   182→   182→        if (!_customFieldsCache[model] || !_customFieldsCache[model].warned) {
+   183→   183→          logger.warn('[ODOO-TE] Campo x_studio_* nao existe em ' + model + '. Gravacao ignorada.');
+   184→   184→          if (!_customFieldsCache[model]) _customFieldsCache[model] = {};
+   185→   185→          _customFieldsCache[model].warned = true;
+   186→   186→        }
+   187→   187→      } else throw err;
+   188→   188→    }
+   189→   189→  }
+   190→   190→}
+   191→   191→
+   192→   192→// ============================================================
+   193→   193→// Compatibilidade com delivery.js — wrappers read/searchRead/write/getStudioFields
+   194→   194→// ============================================================
+   195→   195→async function read(model, ids, fields) {
+   196→   196→  return await executeKw(model, 'read', [ids], { fields: fields });
+   197→   197→}
+   198→   198→
+   199→   199→async function searchRead(model, domain, fields, limit, offset, order) {
+   200→   200→  var kwargs = { fields: fields, limit: limit || 0, offset: offset || 0 };
+   201→   201→  if (order) kwargs.order = order;
+   202→   202→  var ids = await executeKw(model, 'search', [domain], kwargs);
+   203→   203→  if (!ids || !ids.length) return [];
+   204→   204→  return await executeKw(model, 'read', [ids], { fields: fields });
+   205→   205→}
+   206→   206→
+   207→   207→async function write(model, ids, values) {
+   208→   208→  await safeWriteCustom(model, ids, values);
+   209→   209→}
+   210→   210→
+   211→   211→function getStudioFields(model) {
+   212→   212→  return Object.values(FIELDS[model] || {});
+   213→   213→}
+   214→   214→
+   215→   215→// ============================================================
+   216→   216→// SALE.ORDER — busca por ID, status HTML, motorista
+   217→   217→// ============================================================
+   218→   218→async function findSaleOrderById(orderId) {
+   219→   219→  var orders = await safeReadCustom('sale.order', [orderId], SALE_ORDER_FIELDS, SALE_ORDER_CUSTOM_FIELDS);
+   220→   220→  return orders ? orders[0] : null;
+   221→   221→}
+   222→   222→
+   223→   223→async function readSaleOrder(orderId) {
+   224→   224→  return findSaleOrderById(orderId);
+   225→   225→}
+   226→   226→
+   227→   227→async function readSaleOrderFull(orderId) {
+   228→   228→  return findSaleOrderById(orderId);
+   229→   229→}
+   230→   230→
+   231→   231→async function updateSaleOrderStatusHtml(orderId, html) {
+   232→   232→  await safeWriteCustom('sale.order', [orderId], { x_studio_status_de_entrega_te: html });
+   233→   233→}
+   234→   234→
+   235→   235→async function updateSaleOrderMotorista(orderId, motoristaKey) {
+   236→   236→  await safeWriteCustom('sale.order', [orderId], { x_studio_motorista: motoristaKey });
+   237→   237→}
+   238→   238→
+   239→   239→async function updateSaleOrderTeData(orderId, data) {
+   240→   240→  await safeWriteCustom('sale.order', [orderId], data);
+   241→   241→  logger.info('[ODOO-TE] Sale Order ' + orderId + ' atualizado: ' + JSON.stringify(Object.keys(data)));
+   242→   242→}
+   243→   243→
+   244→   244→async function markSaleOrdersSynced(orderIds, teOrderId, orderType) {
+   245→   245→  var vals = { x_studio_te_sync: true };
+   246→   246→  if (teOrderId) vals.x_studio_te_order_id = String(teOrderId);
+   247→   247→  if (orderType) vals.x_studio_te_tipo_pedido = orderType;
+   248→   248→  await safeWriteCustom('sale.order', orderIds, vals);
+   249→   249→  logger.info('[ODOO-TE] ' + orderIds.length + ' sale.order(s) sync | te_order_id=' + teOrderId);
+   250→   250→}
+   251→   251→
+   252→   252→async function markSaleOrderError(orderId, errorMessage) {
+   253→   253→  await safeWriteCustom('sale.order', [orderId], {
+   254→   254→    x_studio_te_sync: false,
+   255→   255→    x_studio_te_situacao_desc: errorMessage,
+   256→   256→  });
+   257→   257→}
+   258→   258→
+   259→   259→// ============================================================
+   260→   260→// STOCK.PICKING
+   261→   261→// ============================================================
+   262→   262→async function readPicking(pickingId) {
+   263→   263→  var pickings = await safeReadCustom('stock.picking', [pickingId], PICKING_FIELDS, PICKING_CUSTOM_FIELDS);
+   264→   264→  return pickings ? pickings[0] : null;
+   265→   265→}
+   266→   266→
+   267→   267→async function findDeliveryPicking(saleOrderId) {
+   268→   268→  var ids = await executeKw('stock.picking', 'search', [
+   269→   269→    ['sale_id', '=', saleOrderId], ['picking_type_code', '=', 'outgoing'],
+   270→   270→  ], { limit: 1 });
+   271→   271→  if (!ids || !ids.length) return null;
+   272→   272→  var pickings = await safeReadCustom('stock.picking', ids, PICKING_FIELDS, PICKING_CUSTOM_FIELDS);
+   273→   273→  return pickings ? pickings[0] : null;
+   274→   274→}
+   275→   275→
+   276→   276→async function updatePickingTeData(pickingId, data) {
+   277→   277→  await safeWriteCustom('stock.picking', [pickingId], data);
+   278→   278→  logger.info('[ODOO-TE] Picking ' + pickingId + ' atualizado: ' + JSON.stringify(Object.keys(data)));
+   279→   279→}
+   280→   280→
+   281→   281→async function markPickingsSynced(pickingIds, teOrderId) {
+   282→   282→  var vals = { x_studio_te_sync: true };
+   283→   283→  if (teOrderId) vals.x_studio_te_order_id = String(teOrderId);
+   284→   284→  await safeWriteCustom('stock.picking', pickingIds, vals);
+   285→   285→  logger.info('[ODOO-TE] ' + pickingIds.length + ' picking(s) sync | te_order_id=' + teOrderId);
+   286→   286→}
+   287→   287→
+   288→   288→// ============================================================
+   289→   289→// ACCOUNT.MOVE (faturas)
+   290→   290→// ============================================================
+   291→   291→async function findSaleOrderByInvoice(invoiceId) {
+   292→   292→  console.log('[ODOO-TE] findSaleOrderByInvoice: invoiceId=' + invoiceId);
+   293→   293→
+   294→   294→  // Estrategia 1: sale.order.invoice_ids
+   295→   295→  try {
+   296→   296→    var saleIds = await executeKw('sale.order', 'search', [['invoice_ids', 'in', [invoiceId]]]);
+   297→   297→    if (saleIds && saleIds.length) {
+   298→   298→      var orders = await executeKw('sale.order', 'read', [saleIds], { fields: ['id', 'name'] });
+   299→   299→      if (orders && orders[0]) { console.log('[ODOO-TE] Estrategia 1 (invoice_ids) encontrou: ' + orders[0].name); return orders[0]; }
+   300→   300→    }
+   301→   301→    console.log('[ODOO-TE] Estrategia 1 (invoice_ids): sem resultados');
+   302→   302→  } catch (err) { console.warn('[ODOO-TE] Estrategia 1 falhou: ' + err.message); }
+   303→   303→
+   304→   304→  // Estrategia 2: sale_order_ids da fatura (campo computado)
+   305→   305→  try {
+   306→   306→    var invData = await executeKw('account.move', 'read', [[invoiceId]], { fields: ['id', 'partner_id', 'sale_order_ids'] });
+   307→   307→    var inv = invData && invData[0];
+   308→   308→    console.log('[ODOO-TE] Fatura lida: id=' + (inv ? inv.id : 'null') + ', partner=' + JSON.stringify(inv ? inv.partner_id : null) + ', sale_order_ids=' + JSON.stringify(inv ? inv.sale_order_ids : null));
+   309→   309→    if (inv && inv.sale_order_ids && inv.sale_order_ids.length) {
+   310→   310→      var soId = Array.isArray(inv.sale_order_ids[0]) ? inv.sale_order_ids[0][0] : inv.sale_order_ids[0];
+   311→   311→      var orders = await executeKw('sale.order', 'read', [[soId]], { fields: ['id', 'name'] });
+   312→   312→      if (orders && orders[0]) { console.log('[ODOO-TE] Estrategia 2 (sale_order_ids) encontrou: ' + orders[0].name); return orders[0]; }
+   313→   313→    }
+   314→   314→    console.log('[ODOO-TE] Estrategia 2 (sale_order_ids): sem resultados');
+   315→   315→  } catch (err) { console.warn('[ODOO-TE] Estrategia 2 falhou: ' + err.message); }
+   316→   316→
+   317→   317→  // Estrategia 3: account.move.line -> sale_line_ids -> order_id
+   318→   318→  try {
+   319→   319→    var invData = await executeKw('account.move', 'read', [[invoiceId]], { fields: ['line_ids'] });
+   320→   320→    var inv = invData && invData[0];
+   321→   321→    var lineIds = (inv && inv.line_ids) || [];
+   322→   322→    console.log('[ODOO-TE] Estrategia 3: ' + lineIds.length + ' linhas da fatura');
+   323→   323→    if (lineIds.length) {
+   324→   324→      var lines = await executeKw('account.move.line', 'read', [lineIds], { fields: ['sale_line_ids'] });
+   325→   325→      if (lines) {
+   326→   326→        for (var i = 0; i < lines.length; i++) {
+   327→   327→          var sli = lines[i].sale_line_ids;
+   328→   328→          if (sli && sli.length) {
+   329→   329→            var saleLineId = Array.isArray(sli[0]) ? sli[0][0] : sli[0];
+   330→   330→            var saleLines = await executeKw('sale.order.line', 'read', [[saleLineId]], { fields: ['order_id'] });
+   331→   331→            if (saleLines && saleLines[0] && saleLines[0].order_id) {
+   332→   332→              var orderId = Array.isArray(saleLines[0].order_id) ? saleLines[0].order_id[0] : saleLines[0].order_id;
+   333→   333→              var orders = await executeKw('sale.order', 'read', [[orderId]], { fields: ['id', 'name'] });
+   334→   334→              if (orders && orders[0]) { console.log('[ODOO-TE] Estrategia 3 (lines) encontrou: ' + orders[0].name); return orders[0]; }
+   335→   335→            }
+   336→   336→          }
+   337→   337→        }
+   338→   338→      }
+   339→   339→    }
+   340→   340→    console.log('[ODOO-TE] Estrategia 3 (lines): sem resultados');
+   341→   341→  } catch (err) { console.warn('[ODOO-TE] Estrategia 3 falhou: ' + err.message); }
+   342→   342→
+   343→   343→  // Estrategia 4: partner_id fallback
+   344→   344→  try {
+   345→   345→    var invData = await executeKw('account.move', 'read', [[invoiceId]], { fields: ['partner_id'] });
+   346→   346→    var inv = invData && invData[0];
+   347→   347→    var partnerId = inv && inv.partner_id ? (Array.isArray(inv.partner_id) ? inv.partner_id[0] : inv.partner_id) : null;
+   348→   348→    if (partnerId) {
+   349→   349→      console.log('[ODOO-TE] Estrategia 4: buscando sale.order por partner_id=' + partnerId);
+   350→   350→      var orders = await safeReadCustom('sale.order', null, ['id', 'name', 'state'], []);
+   351→   351→      // search + read
+   352→   352→      var ids = await executeKw('sale.order', 'search', [
+   353→   353→        ['partner_id', '=', partnerId], ['state', 'in', ['sale', 'done']],
+   354→   354→      ], { limit: 5, order: 'id desc' });
+   355→   355→      if (ids && ids.length) {
+   356→   356→        var orders = await executeKw('sale.order', 'read', [ids], { fields: ['id', 'name'] });
+   357→   357→        if (orders && orders[0]) { console.log('[ODOO-TE] Estrategia 4 (partner) encontrou: ' + orders[0].name); return orders[0]; }
+   358→   358→      }
+   359→   359→    }
+   360→   360→  } catch (err) { console.warn('[ODOO-TE] Estrategia 4 falhou: ' + err.message); }
+   361→   361→
+   362→   362→  console.error('[ODOO-TE] Nenhuma estrategia encontrou sale.order para invoice ' + invoiceId);
+   363→   363→  return null;
+   364→   364→}
+   365→   365→
+   366→   366→async function markInvoiceSynced(invoiceIds, teOrderId) {
+   367→   367→  var vals = { x_studio_te_sync: true };
+   368→   368→  if (teOrderId) vals.x_studio_te_order_id = String(teOrderId);
+   369→   369→  await safeWriteCustom('account.move', invoiceIds, vals);
+   370→   370→  logger.info('[ODOO-TE] ' + invoiceIds.length + ' fatura(s) sync | te_order_id=' + teOrderId);
+   371→   371→}
+   372→   372→
+   373→   373→// ============================================================
+   374→   374→// INVOICE HELPERS (send-invoice sem sale.order)
+   375→   375→// ============================================================
+   376→   376→async function readInvoiceFull(invoiceId) {
+   377→   377→  try {
+   378→   378→    var results = await safeReadCustom('account.move', [invoiceId], INVOICE_FIELDS, INVOICE_CUSTOM_FIELDS);
+   379→   379→    return results ? results[0] : null;
+   380→   380→  } catch (err) {
+   381→   381→    logger.warn('[ODOO-TE] readInvoiceFull falhou: ' + err.message);
+   382→   382→    return null;
+   383→   383→  }
+   384→   384→}
+   385→   385→
+   386→   386→async function getInvoiceLines(invoiceId) {
+   387→   387→  try {
+   388→   388→    var ids = await executeKw('account.move.line', 'search', [
+   389→   389→      ['move_id', '=', invoiceId], ['product_id', '!=', false],
+   390→   390→    ]);
+   391→   391→    if (!ids || !ids.length) return [];
+   392→   392→    return await executeKw('account.move.line', 'read', [ids], { fields: INVOICE_LINE_FIELDS });
+   393→   393→  } catch (err) {
+   394→   394→    logger.warn('[ODOO-TE] getInvoiceLines falhou: ' + err.message);
+   395→   395→    return [];
+   396→   396→  }
+   397→   397→}
+   398→   398→
+   399→   399→// ============================================================
+   400→   400→// RES.PARTNER
+   401→   401→// ============================================================
+   402→   402→async function getPartner(partnerId) {
+   403→   403→  var partners = await safeReadCustom('res.partner', [partnerId], PARTNER_FIELDS, PARTNER_OPTIONAL_FIELDS);
+   404→   404→  return partners ? partners[0] : null;
+   405→   405→}
+   406→   406→
+   407→   407→// ============================================================
+   408→   408→// SALE.ORDER.LINE + PRODUCT
+   409→   409→// ============================================================
+   410→   410→async function getSaleOrderLines(saleOrderId) {
+   411→   411→  try {
+   412→   412→    var ids = await executeKw('sale.order.line', 'search', [['order_id', '=', saleOrderId]]);
+   413→   413→    if (!ids || !ids.length) return [];
+   414→   414→    return await executeKw('sale.order.line', 'read', [ids], { fields: ORDER_LINE_FIELDS });
+   415→   415→  } catch (err) {
+   416→   416→    logger.warn('[ODOO-TE] Erro lendo sale.order.line: ' + err.message);
+   417→   417→    return [];
+   418→   418→  }
+   419→   419→}
+   420→   420→
+   421→   421→async function getProducts(productIds) {
+   422→   422→  if (!productIds || !productIds.length) return {};
+   423→   423→  try {
+   424→   424→    var products = await executeKw('product.product', 'read', [productIds], { fields: PRODUCT_FIELDS });
+   425→   425→    var map = {};
+   426→   426→    if (products) products.forEach(function(p) { map[p.id] = p; });
+   427→   427→    return map;
+   428→   428→  } catch (err) {
+   429→   429→    logger.warn('[ODOO-TE] Erro lendo produtos: ' + err.message);
+   430→   430→    return {};
+   431→   431→  }
+   432→   432→}
+   433→   433→
+   434→   434→// ============================================================
+   435→   435→// RES.COMPANY
+   436→   436→// ============================================================
+   437→   437→async function getCompany() {
+   438→   438→  try {
+   439→   439→    var ids = await executeKw('res.company', 'search', [[]], { limit: 1 });
+   440→   440→    if (!ids || !ids.length) return null;
+   441→   441→    var companies = await executeKw('res.company', 'read', [ids], {
+   442→   442→      fields: ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id',
+   443→   443→               'phone', 'email', 'partner_id', 'vat', 'l10n_br_cnpj_cpf', 'district', 'number'],
+   444→   444→    });
+   445→   445→    return companies ? companies[0] : null;
+   446→   446→  } catch (err) {
+   447→   447→    logger.warn('[ODOO-TE] Erro lendo res.company: ' + err.message);
+   448→   448→    return null;
+   449→   449→  }
+   450→   450→}
+   451→   451→
+   452→   452→// ============================================================
+   453→   453→// CHATTER
+   454→   454→// ============================================================
+   455→   455→async function postChatter(model, recordId, body) {
+   456→   456→  try {
+   457→   457→    await executeKw('mail.message', 'create', [{ model: model, res_id: recordId, body: body }]);
+   458→   458→    logger.info('[ODOO-TE] Chatter postado em ' + model + ' ' + recordId);
+   459→   459→  } catch (err) {
+   460→   460→    logger.error('[ODOO-TE] Falha chatter ' + model + ' ' + recordId + ': ' + err.message);
+   461→   461→  }
+   462→   462→}
+   463→   463→
+   464→   464→// ============================================================
+   465→   465→// UNSYNCED (auto-sync legacy)
+   466→   466→// ============================================================
+   467→   467→var _syncFieldChecked = { 'stock.picking': false, 'sale.order': false, 'account.move': false };
+   468→   468→async function safeSearchWithSync(model, baseDomain) {
+   469→   469→  var domain = baseDomain.concat([['x_studio_te_sync', '=', false]]);
+   470→   470→  try { return await executeKw(model, 'search', [domain]); }
+   471→   471→  catch (err) {
+   472→   472→    if (err.message && (err.message.indexOf('Invalid field') !== -1 || err.message.indexOf('KeyError') !== -1)) {
+   473→   473→      if (!_syncFieldChecked[model]) { _syncFieldChecked[model] = true; logger.error('[ODOO-TE] Campo x_studio_te_sync NAO EXISTE em ' + model); }
+   474→   474→      return [];
+   475→   475→    }
+   476→   476→    throw err;
+   477→   477→  }
+   478→   478→}
+   479→   479→async function getUnsyncedPickings() {
+   480→   480→  var ids = await safeSearchWithSync('stock.picking', [['picking_type_code', '=', 'outgoing'], ['state', 'in', ['assigned', 'confirmed']]]);
+   481→   481→  if (!ids || !ids.length) return [];
+   482→   482→  return await safeReadCustom('stock.picking', ids, PICKING_FIELDS, PICKING_CUSTOM_FIELDS) || [];
+   483→   483→}
+   484→   484→async function getUnsyncedSaleOrders() {
+   485→   485→  var ids = await safeSearchWithSync('sale.order', [['state', 'in', ['sale', 'done']]]);
+   486→   486→  if (!ids || !ids.length) return [];
+   487→   487→  return await safeReadCustom('sale.order', ids, SALE_ORDER_FIELDS, SALE_ORDER_CUSTOM_FIELDS) || [];
+   488→   488→}
+   489→   489→async function getUnsyncedInvoices() {
+   490→   490→  var ids = await safeSearchWithSync('account.move', [['move_type', '=', 'out_invoice'], ['state', '=', 'posted']]);
+   491→   491→  if (!ids || !ids.length) return [];
+   492→   492→  return await safeReadCustom('account.move', ids, INVOICE_FIELDS, INVOICE_CUSTOM_FIELDS) || [];
+   493→   493→}
+   494→   494→
+   495→   495→// ============================================================
+   496→   496→// FIND BY TE ID (webhook)
+   497→   497→// ============================================================
+   498→   498→async function findPickingByTeId(teOrderId) {
+   499→   499→  try {
+   500→   500→    var ids = await executeKw('stock.picking', 'search', [['x_studio_te_order_id', '=', String(teOrderId)]]);
+   501→   501→    if (!ids || !ids.length) return null;
+   502→   502→    var pickings = await safeReadCustom('stock.picking', ids, PICKING_FIELDS, PICKING_CUSTOM_FIELDS);
+   503→   503→    return pickings ? pickings[0] : null;
+   504→   504→  } catch (err) {
+   505→   505→    if (err.message && err.message.indexOf('Invalid field') !== -1) return null;
+   506→   506→    throw err;
+   507→   507→  }
+   508→   508→}
+   509→   509→async function findSaleOrderByTeId(teOrderId) {
+   510→   510→  try {
+   511→   511→    var ids = await executeKw('sale.order', 'search', [['x_studio_te_order_id', '=', String(teOrderId)]]);
+   512→   512→    if (!ids || !ids.length) return null;
+   513→   513→    var orders = await safeReadCustom('sale.order', ids, SALE_ORDER_FIELDS, SALE_ORDER_CUSTOM_FIELDS);
+   514→   514→    return orders ? orders[0] : null;
+   515→   515→  } catch (err) {
+   516→   516→    if (err.message && err.message.indexOf('Invalid field') !== -1) return null;
+   517→   517→    throw err;
+   518→   518→  }
+   519→   519→}
+   520→   520→async function findPickingByOrderNumber(orderNumber) {
+   521→   521→  if (!orderNumber) return null;
+   522→   522→  try {
+   523→   523→    var ids = await executeKw('stock.picking', 'search', [['origin', '=', String(orderNumber)], ['picking_type_code', '=', 'outgoing']], { limit: 1 });
+   524→   524→    if (ids && ids.length) { var p = await safeReadCustom('stock.picking', ids, PICKING_FIELDS, PICKING_CUSTOM_FIELDS); return p ? p[0] : null; }
+   525→   525→    ids = await executeKw('stock.picking', 'search', [['name', '=', String(orderNumber)]], { limit: 1 });
+   526→   526→    if (ids && ids.length) { var p = await safeReadCustom('stock.picking', ids, PICKING_FIELDS, PICKING_CUSTOM_FIELDS); return p ? p[0] : null; }
+   527→   527→    return null;
+   528→   528→  } catch (err) { logger.warn('[ODOO-TE] findPickingByOrderNumber erro: ' + err.message); return null; }
+   529→   529→}
+   530→   530→async function findSaleOrderByOrderNumber(orderNumber) {
+   531→   531→  if (!orderNumber) return null;
+   532→   532→  try {
+   533→   533→    var ids = await executeKw('sale.order', 'search', [['name', '=', String(orderNumber)]], { limit: 1 });
+   534→   534→    if (!ids || !ids.length) return null;
+   535→   535→    var orders = await safeReadCustom('sale.order', ids, SALE_ORDER_FIELDS, SALE_ORDER_CUSTOM_FIELDS);
+   536→   536→    return orders ? orders[0] : null;
+   537→   537→  } catch (err) { logger.warn('[ODOO-TE] findSaleOrderByOrderNumber erro: ' + err.message); return null; }
+   538→   538→}
+   539→   539→
+   540→   540→// ============================================================
+   541→   541→// EXPORTS
+   542→   542→// ============================================================
+   543→   543→module.exports = {
+   544→   544→  // Compatibilidade com delivery.js atual
+   545→   545→  read: read,
+   546→   546→  searchRead: searchRead,
+   547→   547→  write: write,
+   548→   548→  getStudioFields: getStudioFields,
+   549→   549→  FIELDS: FIELDS,
+   550→   550→  // Sale Order
+   551→   551→  findSaleOrderById: findSaleOrderById,
+   552→   552→  readSaleOrder: readSaleOrder,
+   553→   553→  readSaleOrderFull: readSaleOrderFull,
+   554→   554→  updateSaleOrderStatusHtml: updateSaleOrderStatusHtml,
+   555→   555→  updateSaleOrderMotorista: updateSaleOrderMotorista,
+   556→   556→  updateSaleOrderTeData: updateSaleOrderTeData,
+   557→   557→  markSaleOrdersSynced: markSaleOrdersSynced,
+   558→   558→  markSaleOrderError: markSaleOrderError,
+   559→   559→  // Picking
+   560→   560→  readPicking: readPicking,
+   561→   561→  findDeliveryPicking: findDeliveryPicking,
+   562→   562→  updatePickingTeData: updatePickingTeData,
+   563→   563→  markPickingsSynced: markPickingsSynced,
+   564→   564→  // Invoice
+   565→   565→  findSaleOrderByInvoice: findSaleOrderByInvoice,
+   566→   566→  markInvoiceSynced: markInvoiceSynced,
+   567→   567→  readInvoiceFull: readInvoiceFull,
+   568→   568→  getInvoiceLines: getInvoiceLines,
+   569→   569→  // Partner
+   570→   570→  getPartner: getPartner,
+   571→   571→  // Produtos
+   572→   572→  getSaleOrderLines: getSaleOrderLines,
+   573→   573→  getProducts: getProducts,
+   574→   574→  // Empresa
+   575→   575→  getCompany: getCompany,
+   576→   576→  // Chatter
+   577→   577→  postChatter: postChatter,
+   578→   578→  // Webhook find
+   579→   579→  findPickingByTeId: findPickingByTeId,
+   580→   580→  findSaleOrderByTeId: findSaleOrderByTeId,
+   581→   581→  findPickingByOrderNumber: findPickingByOrderNumber,
+   582→   582→  findSaleOrderByOrderNumber: findSaleOrderByOrderNumber,
+   583→   583→  // Auto-sync
+   584→   584→  getUnsyncedPickings: getUnsyncedPickings,
+   585→   585→  getUnsyncedSaleOrders: getUnsyncedSaleOrders,
+   586→   586→  getUnsyncedInvoices: getUnsyncedInvoices,
+   587→   587→  // Low-level
+   588→   588→  executeKw: executeKw,
+   589→   589→  safeWriteCustom: safeWriteCustom,
+   590→   590→};
+   591→   591→

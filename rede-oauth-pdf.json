@@ -1,0 +1,31 @@
+{
+  "code": 200,
+  "data": {
+    "description": "",
+    "html": "",
+    "httpStatus": 200,
+    "httpStatusText": "OK",
+    "metadata": {
+      "EncryptFilterName": null,
+      "IsAcroFormPresent": false,
+      "IsCollectionPresent": false,
+      "IsLinearized": false,
+      "IsSignaturesPresent": false,
+      "IsXFAPresent": false,
+      "Language": "en",
+      "PDFFormatVersion": "1.7"
+    },
+    "publishedTime": "Thu, 18 Jun 2026 22:01:44 GMT",
+    "title": "tutorial-oauth2.0.pdf",
+    "url": "https://developer.userede.com.br/files/erede/tutorial-oauth2.0.pdf",
+    "usage": {
+      "tokens": 0
+    }
+  },
+  "meta": {
+    "usage": {
+      "tokens": 0
+    }
+  },
+  "status": 20000
+}

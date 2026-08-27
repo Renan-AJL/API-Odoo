@@ -1,0 +1,63 @@
+services:
+  - type: web
+    name: odoo-middleware-unified
+    runtime: docker
+    plan: free
+    region: sa-east-1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: MIDDLEWARE_API_KEY
+        generateValue: true
+        sync: false
+      # --- Itau ---
+      - key: ITAU_CLIENT_ID
+        sync: false
+      - key: ITAU_CLIENT_SECRET
+        sync: false
+      - key: ITAU_PIX_CHAVE
+        sync: false
+      - key: ITAU_CERT_CRT
+        sync: false
+      - key: ITAU_CERT_KEY
+        sync: false
+      - key: ITAU_AGENCIA
+        value: "7764"
+      - key: ITAU_CONTA
+        value: "22338-9"
+      - key: ITAU_ID_BENEFICIARIO
+        value: "776400223389"
+      - key: ITAU_CARTEIRA
+        value: "109"
+      - key: AMBIENTE
+        value: producao
+      - key: MOCK_MODE
+        value: "false"
+      # --- Odoo ---
+      - key: ODOO_PUSH_ENABLED
+        value: "true"
+      - key: ODOO_URL
+        sync: false
+      - key: ODOO_DB
+        sync: false
+      - key: ODOO_USERNAME
+        sync: false
+      - key: ODOO_API_KEY
+        sync: false
+      # --- CNP Ja ---
+      - key: CNPJA_API_TOKEN
+        sync: false
+      - key: CNPJA_API_BASE
+        sync: false
+      - key: CNPJA_TIMEOUT
+        value: "15000"
+      - key: CONSULTAR_IO_TOKEN
+        sync: false
+      # --- Rate Limit ---
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "60"
+      - key: DEBUG
+        value: "false"
+    healthCheckPath: /api/v1/health

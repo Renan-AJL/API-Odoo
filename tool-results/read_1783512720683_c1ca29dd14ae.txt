@@ -1,0 +1,2002 @@
+     1→Logo Rede
+     2→Portal do Desenvolvedor
+     3→Comece aqui
+     4→Soluções
+     5→Login
+     6→Criar Conta
+     7→e.Rede
+     8→Sobre
+     9→Glossário
+    10→Bibliotecas
+    11→Módulos
+    12→Primeiros Passos
+    13→Autenticação e autorização
+    14→Autenticação da Rede via APIs
+    15→Endpoint de Autenticação
+    16→Autorização
+    17→Endpoint de Autorização
+    18→Fluxo de Autorização
+    19→Documentação
+    20→Pré-requisitos técnicos
+    21→Credenciamento
+    22→Certificado Digital Rede
+    23→Homologação e certificado SSL
+    24→Filiação e Chave de Integração
+    25→Métodos HTTP
+    26→Códigos de retorno
+    27→Formatação
+    28→Transações
+    29→Captura
+    30→Delay Capture
+    31→Companhias aéreas
+    32→3D Secure 2.0
+    33→Data Only
+    34→Tabela de ECIs
+    35→Zero Dollar
+    36→Cancelamento
+    37→URL de notificações
+    38→Consulta de transação
+    39→Consulta de cancelamento
+    40→SoftDescriptor
+    41→MCC dinâmico
+    42→Subadquirentes e Marketplaces
+    43→Recorrência e Card-on-File
+    44→Carteiras Digitais
+    45→Pix
+    46→Voucher
+    47→Retornos
+    48→Soluções de Tokenização
+    49→Cofre de Cartões
+    50→Tokenização de Bandeira Rede
+    51→Tokenização de Bandeira externa (captura)
+    52→Tarifas de Bandeiras
+    53→Retentativas
+    54→Não uso de Zero Dollar
+    55→Uso de Zero Dollar
+    56→Pré-autorizações
+    57→Transações autenticadas e não autenticadas
+    58→Transações não tokenizadas
+    59→Carteiras digitais escalonadas
+    60→Lista de APIs
+    61→Transação
+    62→Cancelamento
+    63→Tokenização
+    64→Tutorial Sandbox
+    65→Ponto de Partida
+    66→Cartões
+    67→Simular erros
+    68→Simular transação com data retroativa
+    69→Simular transação Zero Dollar
+    70→Simular transação 3DS 2.0 – MPI Rede
+    71→Simular transações com brandTid
+    72→Simular transações Pix
+    73→Simular transações Voucher
+    74→Tokenização de Bandeira Rede
+    75→Simular Retornos
+    76→Dicas de Segurança
+    77→O que é um ataque de robô?
+    78→Como ele acontece?
+    79→Através da Página de Pagamento:
+    80→Através dos tokens comprometidos:
+    81→e.Rede
+    82→
+    83→O objetivo deste manual é auxiliar o desenvolvedor a integrar sua aplicação com o e.Rede, listando as funcionalidades e métodos, com exemplos de mensagens a serem enviadas e recebidas.
+    84→
+    85→
+    86→Sobre
+    87→Atualizado em: 18/06/2026
+    88→
+    89→O e.Rede é uma solução de pagamentos on-line prática e segura para realizar vendas pela internet com toda tranquilidade.
+    90→
+    91→Com diferentes tipos de integração, a solução realiza a captura e processamento de transações financeiras diretamente pela Rede, ou seja, sem necessidade de um intermediador, oferecendo pagamentos com cartões de crédito e débito das principais bandeiras do mercado. Estão disponíveis no crédito as bandeiras Mastercard, Visa, Hiper, Elo, Diners, Sorocred, American Express, Hipercard, JCB, Banescard, Cabal, Mais, Credz; e no débito Mastercard, Visa e Elo.
+    92→
+    93→Além disso, o e.Rede oferece uma série de funcionalidades para agregar ainda mais valor aos negócios de seus clientes, com maior foco na conversão de vendas e maior controle de gestão.
+    94→
+    95→O objetivo deste manual é auxiliar o desenvolvedor a integrar sua aplicação com o e.Rede, listando as funcionalidades e métodos, com exemplos de mensagens a serem enviadas e recebidas.
+    96→
+    97→A solução e.Rede foi desenvolvida pensando na facilidade para o estabelecimento que deseja utilizar a API sem a necessidade de instalar novos sistemas. As principais vantagens de se utilizar uma API são: interoperabilidade entre aplicações distintas e fisicamente distantes, portabilidade entre diferentes plataformas, facilidade de integração, redução de custos para transporte de dados e formato universal.
+    98→
+    99→Glossário
+   100→Para facilitar o entendimento criamos um glossário com os termos mais utilizados relacionados a e-commerce, adquirência e cartões.
+   101→
+   102→Autorização: processo que sensibiliza o limite de crédito do portador do cartão junto ao banco emissor, geralmente utilizado para análise de prevenção, análise de limite de crédito e da validação dos dados de cartão utilizado. A autorização não gera cobrança na fatura do comprador.
+   103→Captura: processo que confirma uma transação autorizada. Após a captura o valor é debitado dos créditos do portador do cartão gerando a cobrança na fatura do mesmo.
+   104→Cancelamento: processo que devolve ao comprador o valor autorizado ou capturado no cartão.
+   105→PV (número de filiação): código identificador gerado pela Rede para os estabelecimentos filiados. O PV (ponto de venda) é único para cada estabelecimento.
+   106→Chave de integração: código de segurança gerado pela Rede utilizado para garantir a integridade da transação. Faz parte, junto com o PV, das credenciais de autenticação da API.
+   107→Emissor: é a instituição financeira que emite o cartão de crédito ou débito.
+   108→Portador: é o proprietário do cartão, comprador do produto.
+   109→Estabelecimento: é a entidade responsável pelo e-commerce (loja ou serviço virtual).
+   110→TID: é o identificador único de uma transação composto por 20 caracteres gerados pela Rede. Esse identificador não se repete.
+   111→MPI: sistema responsável em autenticar junto ao emissor as transações de crédito e débito.
+   112→SecureCode: é o sistema de compra protegida da MasterCard que certifica junto ao emissor o portador do cartão, validando dados que apenas ele e o banco possuem. Segue o padrão universal 3D Secure.
+   113→Verified by Visa (VBV): é o sistema de compra protegida da Visa que certifica junto ao emissor o portador do cartão, validando dados que apenas ele e o banco possuem. Segue o padrão universal 3D Secure.
+   114→Tokenização: Um processo pelo qual o número do cartão é substituído por um valor chamado token estático que será usado em todas as transações de pagamento.
+   115→Ciclo de vida: Uma vez que um token do cartão é gerado, ele passará por diferentes estágios ao longo da sua existência. O Emissor também poderá solicitar a substituição dos dados cadastrais do cartão físico atrelado a àquele token, por exemplo, por motivos de vencimento, fraude, danificação do plástico etc.
+   116→Criptograma: é um valor criptografado único que é gerado dinamicamente pela Bandeira a cada transação, juntamente com os dados do token.
+   117→Data de validade do token: é gerado e mantido na Bandeira, é aprovada durante o processamento do token. A data de validade do token geralmente não é a mesma que a data de validade do Cartão e pode ser antes ou depois da data de validade informada.
+   118→TokenizationId: Identificador único da Rede para a solicitação de tokenização do número do cartão realizada pelo portador.
+   119→ProvisionedTokenId: Um ID único associado a um token. O ID é criado após o provisionamento inicial de um token pela Bandeira.
+   120→Postback: Retorno síncrono da API, por exemplo, no fluxo de autenticação 3DS.
+   121→Callback: Retorno assíncrono da API, por exemplo, na API de cancelamento.
+   122→Bibliotecas
+   123→Módulos
+   124→Confira o módulo disponível para integração com e.Rede. Fique atento a data de atualização.
+   125→
+   126→Magento 2
+   127→
+   128→Primeiros Passos
+   129→Autenticação e autorização
+   130→Para gerenciar o acesso aos serviços é utilizado o protocolo de autorização OAuth 2.0. Ele foi projetado para fornecer segurança e controle granular sobre o acesso as aplicações.
+   131→
+   132→Mudança para protocolo OAuth 2.0
+   133→
+   134→Nosso protocolo de autenticação e autorização será alterado para OAuth 2.0 Todos os clientes que usam o e.Rede devem ajustar o padrão de integração com a API até 05/01/2026. A atualização visa trazer mais segurança e evitar ataques direcionados a suas transações. Caso não seja realizada, suas transações podem ser impactadas. Confira o que muda.
+   135→
+   136→Autenticação da Rede via APIs
+   137→As APIs da Rede utilizam o protocolo de autenticação OAuth 2.0, um padrão da indústria para autorização e autenticação de aplicações. Esse protocolo foi projetado para simplificar o desenvolvimento de fluxos de autorização para aplicações web, desktop, smartphones, outros.
+   138→
+   139→Passo a passo para integração OAuth 2.0
+   140→1. Obtenha as credenciais de acesso PV e Chave de Integração no Portal Use Rede.
+   141→
+   142→Com a utilização do protocolo OAuth 2.0, essas credenciais foram renomeadas para o novo padrão, conforme a tabela. Confira todas credenciais usadas em ambiente de desenvolvimento:
+   143→
+   144→Portal Use Rede Credencial para OAuth 2.0
+   145→PV      clientId
+   146→Chave de Integração     clientSecret
+   147→Token de acesso dinâmico        access_token
+   148→2. Com essas credenciais, faça uma chamada ao endpoint de autenticação:https://api.userede.com.br/redelabs/oauth2/token
+   149→
+   150→3. Essa chamada gera uma access_token, que será usado para transacionar com a Rede
+   151→
+   152→4. 0 access_token deve ser armazenado de forma segura, evitando exposição ou uso indevido
+   153→
+   154→5- 0 access_token tem validade de 24 minutos. Após esse período, é necessário fazer uma nova chamada ao endpoint para gerar um novo token
+   155→
+   156→OAuth Authorization
+   157→Fluxo de Autorização
+   158→
+   159→Atenção
+   160→
+   161→Caso você seja um cliente que já transacionava com a Rede e ainda utiliza o protocolo BASIC, entenda as mudanças. Antes, a autenticação era feita seguindo o protocolo BASIC e usando apenas PV e chave de de integração gerada no Portal Use Rede.
+   162→
+   163→Fluxo de Autorização
+   164→
+   165→Agora, adotamos o modelo OAuth 2.0, que proporciona mais segurança para suas transações. Por isso, precisamos adicionar mais uma etapa no processo de autenticação. Assim que as credenciais forem atualizadas, deve ser feito um novo chamado de endpoint para gerar o access_token, necessário para transacionar com o e.Rede.
+   166→
+   167→Informações sobre a Chave de Integração(clientSecret).
+   168→
+   169→Se você já possui uma Chave de integração, pode continuar usando a mesma.
+   170→
+   171→Em caso de perda ou esquecimento da chave de integração, uma nova deverá ser gerada no Portal Use Rede.
+   172→
+   173→Para gerar a Chave, seu usuário precisa ter perfil de administrador. Acesse o menu: e-commerce > chave de integração e clique em “Gerar chave de integração”.
+   174→
+   175→Se uma nova chave de integração for gerada, é necessário atualizar imediatamente no campo clientSecret da API para que o fluxo transacional se mantenha.
+   176→
+   177→Como realizar autenticação no padrão OAuth 2.0
+   178→Endpoint de Autenticação
+   179→Ambiente        URL para gerar Token
+   180→Sandbox https://rl7-sandbox-api.useredecloud.com.br/oauth2/token
+   181→Produção        https://api.userede.com.br/redelabs/oauth2/token
+   182→Autenticação
+   183→Gerar access_token
+   184→Com o clientId e o clientSecret, é possível gerar o token de acesso dinâmico utilizando a chamada:
+   185→
+   186→curl --request POST \
+   187→--url '{base_url}' \
+   188→--header 'Authorization: Basic Base64(clientId:clientSecret)' \
+   189→--header 'Content-Type: application/x-www-form-urlencoded' \
+   190→--data grant_type=client_credentials
+   191→Headers:
+   192→Parâmetro       Obrigatório     Descrição
+   193→Authorization   ✅       Junte o client_id e o client_secret com dois-pontos (:) e converta o resultado para base64
+   194→Content-Type    ✅       application/x-www-form-urlencoded
+   195→Form:
+   196→Parâmetro       Obrigatório     Descrição
+   197→grant_type      ✅       Tipo de geração do token, com o valor fixo “client_credentials”
+   198→Response:
+   199→Parâmetro       Obrigatório     Descrição
+   200→access_token    ✅       Token usado para chamar as APIs da Rede, com duração padrão de 24 minutos
+   201→token_type      ✅       Tipo do token gerado, padrão é "Bearer"
+   202→expires_in      ✅       Tempo de expiração em segundos do access_token
+   203→scope   ✅       Lista de escopos separados por espaço, representando os acessos concedidos à aplicação
+   204→Autorização
+   205→Utilizar o Token de acesso
+   206→Para transacionar utilizando o e.Rede, você deve:
+   207→
+   208→1. Ter uma access_token gerado, para ser usado nas APIs de negócio
+   209→
+   210→2. Atualizar o access_token gerado anteriormente
+   211→
+   212→Qual a diferença entre autenticação e autorização?
+   213→
+   214→A autenticação é feita quando o um token de acesso (access_token) é gerado e a sua identidade confirmada.
+   215→
+   216→A autorização acontece quando o access_token é utilizado em uma requisição e o OAuth permite acesso aos recursos.
+   217→
+   218→Depois de realizar as etapas anteriores, você já pode chamar as APIs da Rede. Para isso, é necessário enviar o access_token gerado do no cabeçalho de todas as requisições.
+   219→
+   220→Header
+   221→
+   222→Authorization: Bearer {access_token}.
+   223→
+   224→Atenção
+   225→
+   226→O access_token deve ser armazenado com segurança
+   227→
+   228→Como sua duração é de 24 minutos, uma nova chamada deverá ser feita antes desse período para atualizar a credencial.
+   229→
+   230→O token de acesso possui validade de 24 minutos e pode ser reutilizado dentro desse intervalo. Para evitar expiração durante o uso, recomenda-se renová-lo entre 15 e 23 minutos após sua emissão.
+   231→
+   232→A escolha de como realizar o chamado e atualizar os access_token gerados ficam sob sua responsabilidade
+   233→
+   234→Codificação OAuth
+   235→UTF8
+   236→Configure sua aplicação para usar codificação UTF-8.
+   237→
+   238→Codificação de URL
+   239→A codificação URL é usada para codificar informações em URIs e usada também para dados do tipo application/x-www-formurlencoded, como em formulários HTML.
+   240→
+   241→JSON
+   242→JSON é o padrão usado para troca de dados entre sistemas. Para chamadas POST e PUT, é necessário especificar o cabeçalho:
+   243→
+   244→Content-Type: application/json
+   245→Boas práticas de segurança
+   246→Armazene o access_token em cache seguro e criptografado.
+   247→Evite expor o token em logs ou interfaces públicas
+   248→Implemente controle de acesso para uso do token
+   249→Utilize HTTPS em todas as chamadas às APIs da Rede
+   250→Glossário
+   251→Termo   Descrição
+   252→PV      Código do estabelecimento utilizado nas transações com a Rede.
+   253→clientId        Identificador do cliente, equivalente ao PV.
+   254→clientSecret    Chave de integração gerada no portal da Rede.
+   255→access_token    Token de acesso gerado OAuth 2.0, utilizado para autenticação nas APIs.
+   256→OAuth 2.0       Protocolo padrão da indústria para autenticação e autorização de aplicações.
+   257→Endpoint de autenticação        URL utilizada para gerar o access_token.
+   258→Scope   Lista de permissões concedidas ao token de acesso.
+   259→Para mais informações de como realizar a migração para o modelo de autenticação OAuth 2.0, consulte nosso tutorial.
+   260→Caso tenha mais dúvidas sobre o processo de migração e possíveis impactos, consulte nossa FAQ.
+   261→Endpoint de Autorização
+   262→Os endpoints são as URLs que serão utilizadas para a chamada de determinado serviço. Elas podem variar dependendo do ambiente e método HTTP.
+   263→
+   264→A composição é realizada da seguinte forma:
+   265→
+   266→URL base
+   267→Versão da API
+   268→Serviço
+   269→Ambiente        URL
+   270→Sandbox https://sandbox-erede.useredecloud.com.br/v2/transactions
+   271→Produção        https://api.userede.com.br/erede/v2/transactions
+   272→A cada tipo de serviço, um complemento será adicionado à URL base para que em seguida a requisição seja realizada. No decorrer desta documentação listaremos todas elas.
+   273→
+   274→Fluxo de Autorização
+   275→A autorização é o primeiro passo para realizar uma transação. O valor da transação sensibiliza o limite do cartão do portador, porém não gera cobrança na fatura enquanto não houver a confirmação (captura).
+   276→
+   277→Caso a autorização não seja capturada no prazo máximo de acordo com o ramo do estabelecimento, ela é automaticamente cancelada.
+   278→
+   279→Para transações parceladas, informar o número mínimo de “2” e máximo de “12” parcelas.
+   280→
+   281→O diagrama abaixo mostra o fluxo da transação de permissão sem a captura automática:
+   282→
+   283→Fluxo de Autorização
+   284→
+   285→Selecione o tipo "Autorização" no combo box "Examples" da requisição.
+   286→
+   287→POST: /v2/transactions
+   288→
+   289→Parâmetros da requisição:
+   290→
+   291→Nome    Tamanho Tipo    Obrigatório     Descrição
+   292→capture         Booleano        Não     Defina se a transação terá captura automática ou posterior. O não envio desse campo será considerado a captura automática (true). Para transações de débito e Zero dollar, em caso de envio, o valor do parâmetro deve ser definido como true, indicando captura automática.
+   293→kind
+   294→
+   295→Alfanumérico
+   296→
+   297→Não
+   298→
+   299→Tipo de transação a ser realizada.
+   300→
+   301→Para transações de crédito, utilizar credit
+   302→Para transações de débito, utilizar debit
+   303→O não envio desse campo será considerado crédito.
+   304→
+   305→reference       Até 50  Alfanumérico    Sim     Código da transação gerado pelo estabelecimento.
+   306→orderId Até 50  Alfanumérico    Não     Código do pedido gerado pelo estabelecimento. (Não aceita caracteres especiais)
+   307→amount
+   308→
+   309→Até 10
+   310→
+   311→Numérico
+   312→
+   313→Sim
+   314→
+   315→Valor total da transação sem separador de milhar e decimal. Exemplos:
+   316→
+   317→R$10,00 = 1000
+   318→R$0,50 = 50
+   319→installments
+   320→
+   321→Até 2
+   322→
+   323→Numérico
+   324→
+   325→Não
+   326→
+   327→Número de parcelas em que uma transação será autorizada. De 2 a 12.
+   328→O não envio desse campo será considerado à vista.
+   329→
+   330→cardholderName
+   331→
+   332→Até 30
+   333→
+   334→Alfanumérico
+   335→
+   336→Não
+   337→
+   338→Nome do portador impresso no cartão.
+   339→Não enviar caracteres especiais.
+   340→
+   341→cardNumber      Até 19  Alfanumérico    Sim     Número do cartão.
+   342→expirationMonth Até 2   Numérico        Sim     Mês de vencimento do cartão. De 1 a 12.
+   343→expirationYear
+   344→
+   345→2 ou 4
+   346→
+   347→Numérico
+   348→
+   349→Sim
+   350→
+   351→Ano de vencimento do cartão.
+   352→Ex .: 2028 ou 28.
+   353→
+   354→securityCode
+   355→
+   356→Até 4
+   357→
+   358→Alfanumérico
+   359→
+   360→Não
+   361→
+   362→Código de segurança do cartão geralmente localizado no verso do cartão.
+   363→O envio desse parâmetro garante maior possibilidade de aprovação da transação.
+   364→
+   365→softDescriptor  Até 18 *        Alfanumérico    Não     Frase personalizada que será impressa na fatura do portador.
+   366→subscription
+   367→
+   368→Booleano
+   369→
+   370→Não
+   371→
+   372→Informa ao emissor se uma transação é proveniente de uma recorrência. Se transação por uma recorrência, enviar true. Caso contrário, envie false.
+   373→O não envio desse campo será considerado o valor false.
+   374→A Rede não gerencia os agendamentos de recorrência, apenas permite aos lojistas indicarem se uma transação originada é de um plano recorrente.
+   375→
+   376→origin
+   377→
+   378→Até 2
+   379→
+   380→Numérico
+   381→
+   382→Não
+   383→
+   384→Identifica uma origem da transação.
+   385→
+   386→e.Rede - 1
+   387→O não envio desse campo será considerado uma transação e.Rede (1).
+   388→
+   389→distributorAffiliation  Até 9   Numérico        Não     Número de filiação do distribuidor (PV).
+   390→brandTid        Até 21  Alfanumérico    Não     Correlaciona a primeira e demais transações através do envio deste campo. Para mais detalhes consulte a seção Recorrência e Card-on-file
+   391→transactionLinkId       Até 22  Alfanumérico    Não     Correlaciona a primeira e demais transações através do envio deste campo. Para mais detalhes consulte a seção Recorrência e Card-on-file
+   392→securtityAuthentication -       -       -       Grupo securityAuthentication
+   393→sai
+   394→
+   395→Até 02
+   396→
+   397→Alfanumérico
+   398→
+   399→Obrigatório para as bandeiras Visa e ELO. Opcional em transações card-on-file
+   400→
+   401→Identificador de transação eletrônica (ECI). Para transações da bandeira Mastercard, esse campo não é enviado. Nas transações que não forem tokenizadas (apenas card-on-file) o envio deste campo não é necessário. Para mais detalhes desse campo verifique o tópico “uso do sai”.
+   402→
+   403→transactionCredentials  -       -       -       Grupo transactionCredentials
+   404→transactionCredentials/ credentialId    Até 02  Alfanumérico    Sim, se storagecard=1 ou =2 e cartão mastercard Indica a categoria da transação com credencial armazenada. Consulte a seção “Categorização de transações card-on-file” para mais detalhes
+   405→gatewayId
+   406→
+   407→Até 11
+   408→
+   409→Alfanumérico
+   410→
+   411→Não*
+   412→
+   413→Id de registro do gateway de pagamento na bandeira do cartão da transação.
+   414→
+   415→*Esse campo é obrigatório para transações que envolvam gateways de pagamento.
+   416→
+   417→Uso do “sai”: O parâmetro deverá ser utilizado sempre que a transação possuir um ECI específico, que não esteja atrelado a autenticação 3DS (ex: Wallets e Cloud Token Visa), quando autenticado como 3DS faz-se necessário que o “eci” seja informado dentro do grupo 3D Secure, não sendo necessária a utilização do “sai” neste caso.
+   418→
+   419→Atenção: Ao fazer o envio do grupo threeDSecure em qualquer requisição, o campo “sai” será ignorado e a prioridade será do fluxo de 3DS.
+   420→
+   421→Parâmetros da resposta:
+   422→
+   423→Nome    Tamanho Tipo    Descrição
+   424→returnCode      Até 4   Alfanumérico    Código de retorno da transação.
+   425→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação.
+   426→reference       Até 50  Alfanumérico    Código da transação gerado pelo estabelecimento.
+   427→orderId Até 50  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+   428→tid     20      Alfanumérico    Número identificador único da transação.
+   429→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede.
+   430→authorizationCode       6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+   431→dateTime                Data e hora     Dados da transação no formato YYYY-MM-DDhh: mm: ss.sTZD .
+   432→amount  Até 10  Numérico        Valor total da transação sem separador de milhar e decimal.
+   433→cardBin 6       Alfanumérico    6 primeiros dígitos do cartão.
+   434→last4   4       Alfanumérico    4 últimos dígitos do cartão.
+   435→brand   -       -       Grupo de informações recebidas da bandeira sobre a transação.
+   436→brand/name      -       Alfanumérico    Nome da bandeira. Ex: Mastercard.
+   437→brand/returnCode        Até 4   Alfanumérico    Código de retorno da transação.
+   438→brand/returnMessage     Até 256 Alfanumérico    Mensagem de retorno da transação.
+   439→brand/authorizationCode 6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+   440→brand/brandTid  Até 21  Alfanumérico    Código identificador da transação na respectiva bandeira. Para mais detalhes consulte a seção Recorrência e Card-on-file
+   441→brand/transactionLinkId Até 22  Alfanumérico    Código identificador da transação na bandeira Mastercard. Para mais detalhes consulte a seção Recorrência e Card-on-file
+   442→Documentação
+   443→Pré-requisitos técnicos
+   444→O mecanismo de integração é simples, de modo que conhecimentos em linguagem de programação para web, requisições HTTPS e manipulação de arquivos JSON sejam necessários para implantar a solução com sucesso.
+   445→
+   446→Credenciamento
+   447→Para solicitar o credenciamento do e.Rede e realizar a integração à sua aplicação, entre em contato com a Central de atendimento da Rede:
+   448→
+   449→4001 4433 (capitais e regiões metropolitanas) 0800 728 4433 (demais localidades)
+   450→
+   451→Quando o credenciamento for realizado, o responsável pelo estabelecimento será notificado via e-mail com o número de filiação (PV), orientações para acessar ao portal da Rede e suas credenciais para integração.
+   452→
+   453→Certificado Digital Rede
+   454→O que é um certificado digital? Certificado digital é um arquivo eletrônico que serve como identidade virtual para uma empresa e por ele pode se fazer transações online com garantia de autenticidade. Como uma prática de mercado para garantir toda a proteção das informações trocadas entre sua empresa e a Rede, é realizada a atualização do Certificado Digital Rede anualmente.
+   455→
+   456→Por que ele deve ser atualizado? Para garantir maior segurança em suas vendas realizadas online.
+   457→
+   458→Como fazer a atualização do Certificado Digital Rede? Para que seja feita a atualização do certificado dentro da sua empresa, pedimos que você direcione esta atividade ao seu time de tecnologia ou a quem tenha acesso ao seu servidor e seja responsável pela sua aplicação e-commerce. Caso o seu contato com a Rede seja feito por meio de sua plataforma, gateway ou módulo pedimos que entre em contato com eles para a atualização.
+   459→
+   460→Ela deve ser realizada a partir do servidor que é responsável pela comunicação entre a sua empresa e a Rede e no qual o certificado já esteja instalado. Baixe o certificado digital de acordo com o seu sistema operacional determinado nas caixas sinalizadas abaixo nesta página.
+   461→
+   462→Para efetuar a instalação ou atualização do Certificado Digital Rede utilize o link abaixo e siga as instruções. https://www.userede.com.br/n/documentos/certificado-digital-rede
+   463→
+   464→Caso seu e-commerce não faça uso de certificado digital, essa etapa não é necessária.
+   465→
+   466→Homologação e certificado SSL
+   467→Para transacionar com a API do e.Rede é necessário que o estabelecimento possua instalado na página de pagamento um certificado de segurança SSL com criptografia 2048 bits ou superior, para garantir o sigilo das informações transferidas e certificar ao portador do cartão que está realmente acessando o site desejado, evitando problemas com fraude.
+   468→
+   469→Para garantir que os estabelecimentos tenham o certificado SSL instalado, a Rede faz o processo de homologação automaticamente da loja ou serviço virtual do estabelecimento após a realização da primeira transação.
+   470→
+   471→IMPORTANTE: Periodicamente, o processo de homologação é realizado e a Rede se reserva o direito de suspender o uso da plataforma até que a loja ou serviço virtual estejam adequados às normas de segurança solicitadas.
+   472→
+   473→Para identificar se a página possui o certificado SSL, ao acessar o site, a URL deve ser exibida com o protocolo “https” possibilitando a visualização do cadeado de segurança nos navegadores.
+   474→
+   475→Exemplos:
+   476→Firefox:
+   477→SSL Firefox
+   478→
+   479→Google Chrome:
+   480→SSL Google Chrome
+   481→
+   482→Internet Explorer:
+   483→SSL Internet Explorer
+   484→
+   485→Caso o estabelecimento tenha sido suspenso por não estar certificado, acesse o portal da Rede no menu para vender > e-commerce > homologação e clique em “Solicitar homologação” após a regularização do certificado SSL.
+   486→
+   487→Filiação e Chave de Integração
+   488→Para que o estabelecimento comece a transacionar com o e.Rede, é necessário configurar a API com suas credenciais: número de filiação (PV) e chave de integração.
+   489→
+   490→A chave de integração é uma chave de uso confidencial, gerada no Portal da Rede{target="blank"}. Para gerá-la, certifique-se que seu usuário possua perfil de administrador (usuário master). Acesse o menu: _e.Rede > para vender > e-commerce > chave de integração e clique em “Gerar chave de integração”.
+   491→
+   492→Em caso de perda ou esquecimento da chave de integração, uma nova deverá ser gerada e a configuração da API deverá ser alterada, para que as transações continuem sendo enviadas à Rede.
+   493→
+   494→Métodos HTTP
+   495→Os métodos HTTP para serviços RESTful serão frequentemente utilizados para requisição das transações.
+   496→
+   497→VERBO HTTP      DESCRIÇÃO
+   498→POST    Utilizado na criação dos recursos ou no envio de informações que serão processadas. Por exemplo, criação de uma transação.
+   499→GET     Utilizado para consultas de recursos já existentes. Por exemplo, consulta de transações.
+   500→PUT     Utilizado para atualização de um recurso já existente. Por exemplo, captura de uma transação previamente autorizada.
+   501→As variações serão utilizadas conforme o serviço requisitado: autorização, captura, autorização com captura automática, consulta, cancelamento e consulta de cancelamento.
+   502→
+   503→Códigos de retorno
+   504→Os códigos de retorno HTTP são utilizados para indicar o sucesso ou fracasso de uma solicitação da API. Os códigos iniciados com 2xx indicam sucesso, os códigos iniciados com 4xx indicam um erro devido a alguma informação incorreta fornecida na requisição e os códigos iniciados com 5xx indicam erro nos servidores.
+   505→
+   506→Códigos de sucesso
+   507→RETORNO DESCRIÇÃO       MÉTODO
+   508→200     Indica que o processamento foi realizado corretamente e o retorno será conforme a expectativa.  GET
+   509→201     Indica que o recurso foi criado com sucesso, deverá existir o header location indicando a url do novo recurso.  POST
+   510→202     Indica que o processamento será assíncrono, portanto, além do header location, deverá retornar o conteúdo com um atributo status.       POST E PUT
+   511→204     Indica que o recurso foi alterado ou excluído com sucesso.      PUT
+   512→Códigos de erro
+   513→RETORNO DESCRIÇÃO
+   514→400     Requisição mal formatada.
+   515→401     Requisição requer autenticação.
+   516→403     Requisição negada.
+   517→404     Recurso não encontrado.
+   518→405     Método não permitido.
+   519→408     Tempo esgotado para requisição.
+   520→413     Requisição excede o tamanho máximo permitido.
+   521→415     Tipo de mídia inválida (verificar o header content-type da requisição)
+   522→422     Exceção de negócio. Verificar return code e return message.
+   523→429     Requisição excede a quantidade máxima de chamadas permitidas à API.
+   524→OBS: Caso você receba o erro "HTTP 401: Requisição requer autenticação" ao realizar uma requisição utilizando o protocolo de autenticação oAuth 2.0, significa que o acess_token utilizado está expirado e um novo deve ser gerado.
+   525→
+   526→Exceção lançada por erro de servidor(es)
+   527→RETORNO DESCRIÇÃO
+   528→500     Erro de servidor.
+   529→Observação
+   530→
+   531→Caso ocorra o erro 500 durante uma transação 3DS ou DATA ONLY, recomenda-se a verificação do status da transação. Essa verificação deve ser realizada na API de Consulta de transação pelo código do pedido campo (Reference):
+   532→
+   533→GET: /v2/transactions?reference={codigo_reference}
+   534→
+   535→Formatação
+   536→Encoding
+   537→Para utilizar as APIs da Rede será necessário configurar em sua aplicação o uso do encoding UTF-8.
+   538→
+   539→JSON
+   540→JSON (JavaScript Object Notation) é um padrão para descrição de dados para intercâmbio entre sistemas. Ele é mais simples e mais leve que o XML. Por padrão, toda API trafega JSON, tanto para receber informações (métodos POST e PUT) quanto no retorno (método GET).
+   541→
+   542→Devido esta padronização, para as chamadas POST e PUT é necessário informar no HTTP Header content-type: application/json. Do contrário, você receberá um erro HTTP 415: Unsupported Media Type.
+   543→
+   544→Campos do tipo Datetime
+   545→Todos os atributos do tipo Datetime, tanto atributos que são retornados em objetos quanto os que são passados como parâmetros nas operações, seguem o padrão ISO-8601, representado abaixo:
+   546→
+   547→Date: YYYY-MM-DDThh:mm:ss.sTZD Exemplo: 2015-11-28T08:54:00.000-03:00
+   548→
+   549→Transações
+   550→As transações são divididas de forma com que o lojista possa optar em realizar a captura de forma posterior ou automática.
+   551→
+   552→Na autorização com captura posterior, o valor da transação sensibiliza o limite do cartão do portador, porém não gera cobrança na fatura enquanto não houver a confirmação (captura).
+   553→
+   554→Já na autorização com captura automática, o valor da transação é confirmado de maneira instantânea, sem a necessidade de realizar a transação de captura.
+   555→
+   556→Captura
+   557→Ao realizar uma autorização, é necessária a confirmação desta transação (captura). Nesse momento é gerada a cobrança na fatura do portador do cartão.
+   558→
+   559→A autorização deverá ser capturada no período máximo de acordo com o ramo do estabelecimento.
+   560→
+   561→IMPORTANTE: Sempre aguardar a resposta da transação antes de realizar nova tentativa de captura da mesma.
+   562→
+   563→O diagrama abaixo mostra o fluxo da transação de captura:
+   564→
+   565→Fluxo de Transação de Captura
+   566→
+   567→PUT: /v2/transactions/{tid}
+   568→
+   569→Parâmetros da requisição:
+   570→
+   571→Nome    Tamanho Tipo    Obrigatório     Descrição
+   572→amount  Até 10  Numérico        Não     Valor da captura sem separador de milhar e decimal.
+   573→Exemplos:
+   574→- R$10,00 = 1000
+   575→- R$0,50 = 50
+   576→Parâmetros da resposta:
+   577→
+   578→Nome    Tamanho Tipo    Descrição
+   579→reference       Até 50  Alfanumérico    Código da transação gerado pelo estabelecimento.
+   580→tid     20      Alfanumérico    Número identificador único da transação.
+   581→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede.
+   582→authorizationCode       6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+   583→dateTime                Datetime        Data da transação no formato YYYY-MM-DDThh:mm:ss.sTZD .
+   584→returnCode      Até 4   Alfanumérico    Código de retorno da transação.
+   585→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação.
+   586→Delay Capture
+   587→1. Como Funciona
+   588→
+   589→A funcionalidade de delay capture permitirá que a confirmação de transações pendentes possa ser feita em até 120 horas após a autorização do pagamento.
+   590→
+   591→1.1 Regras do Delay Capture
+   592→
+   593→O produto delay capture Rede, só poderá ser usado na modalidade Crédito (kind = credit).
+   594→O estabelecimento deverá enviar no request da transação o tempo de expiração da mesma, esse tempo poderá ser de 24, 48, 72, 96 ou 120 horas;
+   595→Em caso de confirmação não realizada pelo estabelecimento até a data de expiração da transação, a Rede irá ESTORNAR o pagamento em sua totalidade;
+   596→O valor confirmado, deverá ser sempre igual ao valor autorizado;
+   597→Bandeiras disponíveis Mastercard e ELO;
+   598→O produto também está disponível para transações autenticadas com 3DS e Data Only, tanto MPI interno (Rede) quanto MPI externo.
+   599→2. Autorização de Transação
+   600→
+   601→O corpo da requisição (body) deve estar em formato JSON contendo os campos descritos na tabela abaixo:
+   602→
+   603→Nome    Tamanho Tipo    Obrigatório     Descrição
+   604→capture         Booleano        Sim     Defina se a transação terá captura automática ou posterior. Para este caso deve ser enviado como “true”
+   605→kind
+   606→
+   607→Alfanumérico
+   608→
+   609→Não
+   610→
+   611→Tipo de transação a ser realizada.
+   612→
+   613→Para transações de crédito, utilizar credit. O não envio desse campo será considerado crédito.
+   614→O produto débito não está disponível nesta modalidade de captura.
+   615→
+   616→reference       Até 12  Alfanumérico    Sim     Código do pedido gerado pelo estabelecimento.
+   617→amount
+   618→
+   619→Até 10
+   620→
+   621→Numérico
+   622→
+   623→Sim
+   624→
+   625→Valor total da transação sem separador de milhar e decimal. Exemplos:
+   626→
+   627→R$10,00 = 1000
+   628→R$0,50 = 50
+   629→cardholderName
+   630→
+   631→Até 30
+   632→
+   633→Alfanumérico
+   634→
+   635→Não
+   636→
+   637→Nome do portador impresso no cartão.
+   638→Não enviar caracteres especiais.
+   639→
+   640→cardNumber      Até 19  Alfanumérico    Sim     Número do cartão.
+   641→expirationMonth Até 2   Numérico        Sim     Mês de vencimento do cartão. De 1 a 12.
+   642→expirationYear
+   643→
+   644→2 ou 4
+   645→
+   646→Numérico
+   647→
+   648→Sim
+   649→
+   650→Ano de vencimento do cartão.
+   651→Ex .: 2028 ou 28.
+   652→
+   653→securityCode
+   654→
+   655→Até 4
+   656→
+   657→Alfanumérico
+   658→
+   659→Não
+   660→
+   661→Código de segurança do cartão geralmente localizado no verso do cartão.
+   662→O envio desse parâmetro garante maior possibilidade de aprovação da transação.
+   663→
+   664→captureExpirationHours  Até 3   Numérico        Sim     Tempo em horas para a expiração da transação. Valores aceitos: 24, 48, 72, 96, 120
+   665→2.1 Resposta da Autorização
+   666→
+   667→Caso a autorização ocorra com sucesso os seguintes campos serão retornados
+   668→
+   669→Nome    Tamanho Tipo    Descrição
+   670→reference       Até 12  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+   671→tid     Até 20  Alfanumérico    Número identificador único da transação
+   672→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede
+   673→authorizationCode       6       Alfanumérico    Número de autorização da transação retornado pelo emissor
+   674→brandTid
+   675→
+   676→Até 16
+   677→
+   678→Alfanumérico
+   679→
+   680→Código identificador da transação na respectiva bandeira. Para mais detalhes consulte a seção Recorrência e Card-on-file
+   681→Campo utilizado somente para as bandeiras Visa e Mastercard
+   682→
+   683→dateTime        29      Alfanumérico    Data da transação de autorização no formato YYYY-MMDDThh:mm:ss.sTZD
+   684→captureExpirationHours  Até 3   Numérico        Tempo em horas para a expiração da transação. Valores aceitos: 24, 48, 72, 96, 120
+   685→captureExpirationDateTime               Date time       Data de expiração da transação no formato YYYYMM-DDThh:mm:ss.sTZD Contém o dateTime da transação acrescido das horas enviadas no campo captureExpirationHours
+   686→amount  Até 10  Numérico        Valor total da transação sem separador de milhar e decimal. Exemplos:R$10,00 = 1000
+   687→cardBin 6       Alfanumérico    6 primeiros dígitos do cartão
+   688→last4   4       Alfanumérico    4 últimos dígitos do cartão
+   689→returnCode      Até 3   Alfanumérico    Código de retorno da transação
+   690→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação
+   691→3. Consulta de Transação
+   692→
+   693→3.1 Consulta com sucesso e transação pendente
+   694→
+   695→Caso a consulta ocorra com sucesso e a transação esteja pendente os seguintes campos serão retornados
+   696→
+   697→Nome    Tamanho Tipo    Descrição
+   698→requestDateTime 29      Alfanumérico    Data de requisição no formato YYYY-MM-DDThh:mm:ss STZD
+   699→authorization           Objeto  Grupo com informações sobre a autorização
+   700→dateTime        29      Alfanumérico    Data da transação de autorização no formato YYYY-MM-DDThh:mm:ss STZD
+   701→returnCode      Até 3   Alfanumérico    Código de retorno da transação
+   702→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação
+   703→status          Alfanumérico    Status da transação Approved / Denied / Canceled / Pending
+   704→reference       Até 12  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+   705→tid     Até 20  Alfanumérico    Número identificador único da transação
+   706→brandTid
+   707→
+   708→Até 16
+   709→
+   710→Alfanumérico
+   711→
+   712→Código identificador da transação na respectiva bandeira. Para mais detalhes consulte a seção Recorrência e Card-on-file
+   713→Campo utilizado somente para as bandeiras Visa e Mastercard
+   714→
+   715→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede
+   716→authorizationCode       6       Alfanumérico    Número de autorização da transação retornado pelo emissor
+   717→kind    Até 10  Alfanumérico    Método de pagamento utilizado na transação original
+   718→amount  Até 10  Numérico        Valor total da transação sem separador de milhar e decimal. Exemplos:R$10,00 = 1000
+   719→cardBin 6       Alfanumérico    6 primeiros dígitos do cartão
+   720→last4   4       Alfanumérico    4 últimos dígitos do cartão
+   721→captureExpirationDateTime               Date Time       Data de expiração da transação
+   722→3.2 Consulta com sucesso e transação aprovada
+   723→
+   724→Caso a consulta ocorra com sucesso e a transação esteja capturada os seguintes campos serão retornados
+   725→
+   726→Nome    Tamanho Tipo    Descrição
+   727→requestDateTime 29      Alfanumérico    Data de requisição no formato YYYY-MM-DDThh:mm:ss STZD
+   728→authorization           Objeto  Grupo com informações sobre a autorização
+   729→dateTime        29      Alfanumérico    Data da transação de autorização no formato YYYY-MM-DDThh:mm:ss STZD
+   730→returnCode      Até 3   Alfanumérico    Código de retorno da transação
+   731→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação
+   732→status          Alfanumérico    Status da transação Approved / Denied / Canceled / Pending
+   733→reference       Até 12  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+   734→tid     Até 20  Alfanumérico    Número identificador único da transação
+   735→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede
+   736→authorizationCode       6       Alfanumérico    Número de autorização da transação retornado pelo emissor
+   737→kind    Até 10  Alfanumérico    Método de pagamento utilizado na transação original
+   738→amount  Até 10  Numérico        Valor total da transação sem separador de milhar e decimal. Exemplos:R$10,00 = 1000
+   739→cardBin 6       Alfanumérico    6 primeiros dígitos do cartão
+   740→last4   4       Alfanumérico    4 últimos dígitos do cartão
+   741→capture         Objeto  Grupo com informações da captura
+   742→brandTid
+   743→
+   744→Até 16
+   745→
+   746→Alfanumérico
+   747→
+   748→Código identificador da transação na respectiva bandeira. Para mais detalhes consulte a seção Recorrência e Card-on-file
+   749→Campo utilizado somente para as bandeiras Visa e Mastercard
+   750→
+   751→captureExpirationDateTime               Date Time       Data de expiração da transação
+   752→4. Confirmação de autorização
+   753→
+   754→Confirma (captura) a transação previamente autorizada. O corpo da requisição (body) deve estar em formato JSON contendo os campos descritos na tabela abaixo:
+   755→
+   756→Nome    Tamanho Tipo    Descrição
+   757→amount
+   758→
+   759→Até 10
+   760→
+   761→Numérico
+   762→
+   763→Valor total da compra sem separador de milhar e casa decimal Ex: R$10,00 = 1000 / R$ 0,50 = 50
+   764→
+   765→Para Delay Capture, o valor capturado deve ser igual ao valor autorizado.
+   766→
+   767→Caso a captura ocorra com sucesso os seguintes campos serão retornados:
+   768→
+   769→Nome    Tamanho Tipo    Descrição
+   770→reference       Até 12  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+   771→tid     Até 20  Alfanumérico    Número identificador único da transação
+   772→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede
+   773→dateTime        29      Alfanumérico    Data da transação de autorização no formato YYYY-MM-DDThh:mm:ss STZD
+   774→returnCode      Até 3   Alfanumérico    Código de retorno da transação
+   775→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação
+   776→5. Caso Especial
+   777→
+   778→Zero Dollar
+   779→
+   780→Se:
+   781→
+   782→amount = 0
+   783→
+   784→Então:
+   785→
+   786→A transação será processada como Zero Dollar
+   787→A captura será automática
+   788→O fluxo de delay capture não se aplica
+   789→OBS: Importante lembrar que não é possível utilizar o 3DS em transações Zero Dollar. Portanto se o parâmetro amount for enviado como 0 no bloco de 3DS a autenticação retornará erro.
+   790→
+   791→6. Códigos de Retorno
+   792→
+   793→Os retornos de integração são exibidos sempre que houver algo de errado na sua requisição, permitindo assim a correção imediata.
+   794→
+   795→Nome    Descrição       Descrição
+   796→173     Authorization expired   A transação a ser capturada já está expirada
+   797→3118    CaptureExpirationHours: Invalid parameter format        Formato do parâmetro inválido
+   798→3119    Capture: Invalid parameter format       Formato do parâmetro inválido
+   799→3120    CaptureExpirationHours: Invalid parameter size  Parâmetro enviado com tamanho inválido
+   800→3121    Invalid amount  O valor enviado é diferente do valor autorizado
+   801→3122    CaptureExpirationHours: Invalid parameter       O valor enviado não é um dos valores permitidos para esse campo
+   802→Companhias aéreas
+   803→Companhias aéreas possuem um tipo de transação diferenciada, que permite o envio do valor da taxa de embarque separado do valor da passagem aérea. A transação pode ser “à vista” ou “parcelada”.
+   804→
+   805→As transações de companhias aéreas devem ser do tipo crédito, com captura automática (capture = true) e devem ser enviadas juntamente com o BODY da transação.
+   806→
+   807→IMPORTANTE: Cancelamentos de transações do tipo IATA só podem ser realizados à partir de D+1.
+   808→
+   809→Selecione o tipo "Companhias aéreas" no combo box "Examples" da requisição.
+   810→
+   811→POST: /v2/transactions
+   812→
+   813→Parâmetros da requisição:
+   814→
+   815→Nome    Tamanho Tipo    Obrigatório     Descrição
+   816→iata            iata            
+   817→iata/code       Até 9   Numérico        Sim     Código iata da companhia aérea.
+   818→iata/departureTax       Até 10  Numérico        Sim     Valor da taxa de embarque sem separador de milhar e decimal.
+   819→Exemplos:
+   820→- R$10,00 = 1000
+   821→- R$0,50 = 50
+   822→Parâmetros da resposta:
+   823→
+   824→Nome    Tamanho Tipo    Descrição
+   825→returnCode      Até 4   Alfanumérico    Código de retorno da transação.
+   826→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação.
+   827→reference       Até 50  Alfanumérico    Código da transação gerado pelo estabelecimento.
+   828→orderId Até 50  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+   829→tid     20      Alfanumérico    Número identificador único da transação.
+   830→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede.
+   831→authorizationCode       6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+   832→dateTime                Datetime        Data da transação no formato YYYY-MM-DDThh:mm:ss.sTZD .
+   833→amount  Até 10  Numérico        Valor total da transação sem separador de milhar e decimal.
+   834→cardBin 6       Alfanumérico    6 primeiros dígitos do cartão.
+   835→last4   4       Alfanumérico    4 últimos dígitos do cartão.
+   836→brand   -       -       Grupo de informações recebidas da bandeira sobre a transação.
+   837→brand/name      -       Alfanumérico    Nome da bandeira. Ex: Mastercard.
+   838→brand/returnCode        Até 4   Alfanumérico    Código de retorno da transação.
+   839→brand/returnMessage     Até 256 Alfanumérico    Mensagem de retorno da transação.
+   840→brand/merchantAdviceCode        Até 2   Alfanumérico    Código de Aviso para Estabelecimento Comercial. É um conjunto de códigos usado para fornecer informações adicionais sobre uma resposta de transação de uso exclusivo da bandeira Mastercard.
+   841→brand/authorizationCode 6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+   842→brand/brandTid  Até 21  Alfanumérico    Código identificador da transação na respectiva bandeira. Para mais detalhes consulte a seção Recorrência e Card-on-file
+   843→3D Secure 2.0
+   844→Transações autenticadas 3D Secure ou 3DS são transações que necessitam de uma autenticação adicional para garantir maior segurança para o portador do cartão nas compras online. A autenticação 3DS é efetuada através da validação de dados que apenas o portador do cartão e o banco possuem, como por exemplo, senha do cartão, data de nascimento, código de segurança, token do banco. Em caso de sucesso da autenticação, o emissor assume o risco da transação.
+   845→
+   846→O 3D Secure 2.0 é um novo padrão de autenticação para fornecer segurança adicional às transações e é a primeira solução capaz de autenticar uma transação sem intervenção do cliente (autenticação sem desafio), pois o emissor terá acesso a mais informações da transação e não apenas os dados de valor e cartão. Nos casos que necessitam de autenticação (com desafio) o processo é intuitivo e pode ocorrer via biometria, reconhecimento de voz/facial ou envio de SMS, ajudando a evitar o abandono do carrinho. Quem decide se a transação deverá ser com desafio ou não, é o emissor.
+   847→
+   848→Em termos de mercado, atualmente a Rede proporciona a utilização da versão 2.2 do protocolo 3DS. Estamos trabalhando para disponibilizar a versão 2.3 em breve. Resumidamente, o protocolo 3D Secure 2.0 acelera a autenticação, aumenta a segurança e aumenta as taxas de conversão proporcionando aos compradores uma rápida finalização da compra extremamente fluída, especialmente no celular, e trazendo proteção extra para o lojista. Veja a tabela de funcionalidades abaixo:
+   849→
+   850→Funcionalidades do 3DS 2.0      Benefícios agregados
+   851→Substitui senhas estáticas por 2 fatores fortes: RBA, OTP, Biometria ou Canal Alternativo (Out of Band).
+   852→
+   853→Maior segurança
+   854→Maior conveniência
+   855→Menor fricção
+   856→Suporte a diferentes canais de pagamento (in-app, IoT, navegador, etc).
+   857→
+   858→Melhor UX
+   859→Maior abrangência
+   860→Controle melhorado para os estabelecimentos
+   861→Suporte a compra e casos de uso adicionais (provisionamento de Card on File, Carteiras Digitais, Pagamentos Recorrentes, Tokenização, etc).
+   862→
+   863→Maior aplicabilidade
+   864→Maior segurança
+   865→A autenticação 3DS é obrigatória para todas as transações efetuadas com cartões de débito. Para os cartões de crédito, sua utilização é opcional.
+   866→
+   867→O MPI (merchant plug-in) é o serviço que provê a integração do estabelecimento com diferentes emissores, alinhado às certificações das bandeiras para processamento da autenticação 3D Secure (3DS).
+   868→
+   869→O e.Rede disponibiliza duas formas de utilização do serviço 3DS, através do MPI Rede ou MPI Cliente. A utilização do MPI estará a critério do estabelecimento.
+   870→
+   871→MPI Rede: serviço já embarcado na plataforma e.Rede, sem necessidade de contratação adicional. Nesse cenário, a Rede realiza o fluxo de autenticação e autorização da transação.
+   872→MPI Cliente: serviço contratado adicionalmente pelo cliente para integração com o e.Rede, sem influência da Rede na autenticação da transação. Portanto, nesse cenário, a Rede realiza apenas o fluxo de autorização.
+   873→Para que as transações 3DS possam ser realizadas, os emissores também precisam estar preparados para receber as informações de autenticação do comprador. Os principais emissores do Brasil já disponibilizam esse serviço a seus clientes.
+   874→
+   875→3DS 2.0 - MPI Rede
+   876→O e.Rede já possui o MPI embarcado em sua plataforma. Portanto, utilize o parâmetro embedded para sinalizar que o MPI contratado é o da Rede, vide tabela de “Parâmetros da requisição”.
+   877→
+   878→As transações que utilizam o serviço 3DS com o MPI Rede podem ser do tipo crédito ou débito e devem ser enviadas juntamente com o BODY da transação de autorização.
+   879→
+   880→O MPI Rede permite a autenticação do 3DS2.0 em transações das bandeiras Visa, Mastercard e Elo.
+   881→
+   882→Para as transações de crédito, caso a transação não tenha sido autenticada com sucesso, existe a possibilidade de prosseguir com a transação sem a devida autenticação 3DS, e o risco da transação passa a ser do lojista, voltando ao ciclo transacional “comum”.
+   883→
+   884→Para transações de débito o valor deste parâmetro é automaticamente definido devido à obrigatoriedade da autenticação.
+   885→
+   886→Para habilitar o serviço, acesse o portal “userede.com.br”, menu vender online > e-commerce > 3DS/Data Only > Contratar.
+   887→
+   888→Em algumas horas, a Rede retornará informando o status da solicitação de habilitação do serviço.
+   889→
+   890→Os diagramas abaixo mostram o fluxo da transação autenticada (1) e autorizada (2) utilizando o MPI Rede, quando há a solicitação do desafio por parte do emissor:
+   891→
+   892→Fluxograma 1 de autenticacao com desafio
+   893→
+   894→Fluxograma 1 de autenticação (com desafio)
+   895→
+   896→Fluxograma 2 de autorizacao com desafio
+   897→
+   898→Fluxograma 2 de autorização (com desafio)
+   899→
+   900→Já o diagrama abaixo, ilustra o fluxo da transação autenticada e autorizada quando o emissor não solicita o desafio ao comprador:
+   901→
+   902→Fluxograma 3 de autenticacao + autorizacao sem desafio
+   903→
+   904→Fluxograma 3 de autenticação + autorização (sem desafio)
+   905→
+   906→IMPORTANTE: Para verificar o status da transação, utilize o endpoint de consulta. Clique aqui para obter mais informações.
+   907→
+   908→Selecione o tipo "3D Secure 2.0: MPI Rede" no combo box "Examples" da requisição.
+   909→
+   910→POST: /v2/transactions
+   911→
+   912→Parâmetros da requisição:
+   913→
+   914→Nome    Tamanho Tipo    Obrigatório     Descrição
+   915→threeDSecure            threeDSecure    Sim     
+   916→threeDSecure /embedded
+   917→
+   918→Booleano
+   919→
+   920→Não
+   921→
+   922→Informa se o serviço MPI utilizado será da Rede ou terceiro.
+   923→
+   924→true: utiliza o serviço MPI da Rede
+   925→false: utiliza serviço MPI terceiro
+   926→O não envio desse campo será considerado o uso do MPI da Rede.
+   927→
+   928→threeDSecure /onFailure
+   929→
+   930→Alfanumérico
+   931→
+   932→Não
+   933→
+   934→Define como prosseguir com a transação caso a autenticação 3DS não obtenha sucesso.
+   935→
+   936→continue: prossegue com a transação financeira mesmo se a autenticação falhar
+   937→decline: não prossegue com a transação financeira caso a autenticação falhar
+   938→Para transações de débito o valor deste parâmetro é automaticamente definido para decline devido à obrigatoriedade da autenticação.
+   939→
+   940→threeDSecure /userAgent Até 255 Alfanumérico    Sim     Identificador do browser utilizado pelo comprador no momento da compra.
+   941→threeDSecure /ipAddress 11      Alfanumérico    Sim     Suporta informações somente em iPv4. Exemplo: 10.0.0.1
+   942→threeDSecure /device                            
+   943→threeDSecure /device/colorDepth 2       Numérico        Sim     Campo que representa a estimativa da paleta de cores usada para a exibição de imagens, em bits por pixel. Obtido no navegador do cliente através da propriedade.
+   944→threeDSecure /device/deviceType3ds      20      Alfanumérico    Sim     Campo que indica tipo de dispositivo no qual a autenticação ocorre.
+   945→threeDSecure /device/javaEnabled                Booleano        Sim     Campo booleano que representa a capacidade do navegador para executar Java. O valor é aquele retornado pela propriedade navigator.javaEnabled, true ou false.
+   946→threeDSecure /device/language   10      Alfanumérico    Sim     Idioma do navegador no formato IETF BCP47, contendo entre 1 e 8 caracteres.
+   947→threeDSecure /device/screenHeight       6       Numérico        Sim- para browser e Mobile      A altura total da tela do cliente em pixels. O valor é aquele retornado pela propriedade screen.height.
+   948→threeDSecure /device/screenWidth        6       Numérico        Sim- para browser e Mobile      A largura total da tela do cliente em pixels. O valor é aquele retornado pela propriedade screen.width.
+   949→threeDSecure /device/timeZoneOffset     10      Alfanumérico    Sim     Diferença de horário, em horas, entre o UTC e a hora local do navegador do titular do cartão.
+   950→cardholderName  Até 30  Alfanumérico    Sim     Nome do portador impresso no cartão. Não enviar caracteres especiais.
+   951→threeDSecure /billing           billing Sim     Dados referentes ao portador do cartão
+   952→threeDSecure /billing /address  Até 128 Alfanumérico    Sim     Endereço
+   953→threeDSecure /billing /city     Até 64  Alfanumérico    Sim     Cidade
+   954→threeDSecure /billing /postalcode       9       Numérico        Sim     CEP
+   955→threeDSecure /billing /state    Até 64  Alfanumérico    Sim     Estado
+   956→threeDSecure /billing /country  Até 64  Alfanumérico    Sim     País
+   957→threeDSecure /billing /emailAddress     Até 128 Alfanumérico    Sim     E-mail
+   958→threeDSecure /billing /phoneNumber      Até 32  Numérico        Sim     Telefone
+   959→urls            urls            
+   960→urls/kind
+   961→
+   962→Alfanumérico
+   963→
+   964→Sim
+   965→
+   966→Campo que identifica qual o tipo da url.
+   967→
+   968→threeDSecureSuccess
+   969→threeDSecureFailure
+   970→threeDSecureCallback
+   971→urls/url
+   972→
+   973→Até 87
+   974→
+   975→Alfanumérico
+   976→
+   977→Sim
+   978→
+   979→Campo para informar a url que o comprador deverá ser redirecionado após a autenticação e ser notificado via postback (application/x-www-form-urlencoded) ou callback com os dados da transação.
+   980→
+   981→Caso o urls/kind seja preenchido com o threeDSecureSuccess ou threeDSecureFailure, será recebido um postback conforme documentação Clique aqui.
+   982→
+   983→Caso seja enviado o threeDSecureCallback, será recebido um callback conforme documentação Clique aqui.
+   984→
+   985→Os processos podem ser usados de maneira conjunta como estratégia de redundância no reebimento das informações.
+   986→
+   987→Ponto de atenção: É possível utilizar o 3DS MPI Interno somente com as seguintes mensagerias:
+   988→
+   989→MCC dinâmico: Mensageria específica para os clientes que atuam com mais de um MCC
+   990→Carteira digital escalonada (SDWO)
+   991→Tokenização de bandeira Rede
+   992→Tokenização de bandeira externa (captura)
+   993→Recorrência e Card-on-File Importante: Ao combinar as duas mensagerias, a autenticação é realizada e válida apenas para a primeira transação da recorrência. As transações subsequentes não terão autenticação 3DS, nem o benefício do liability shift.
+   994→As mensagerias podem ser utilizadas em conjunto ou individualmente.
+   995→
+   996→Observação:
+   997→
+   998→Não é possível utilizar o 3DS em transações Zero Dollar.
+   999→Não é possível fazer simulações de Iframe com 3DS em sandbox.
+  1000→Erro 500 em transações 3DS
+  1001→
+  1002→Caso ocorra o erro 500 durante uma transação 3DS, recomenda-se a verificação do status da transação. Essa verificação deve ser realizada na API de Consulta de transação pelo código do pedido campo (Reference):
+  1003→
+  1004→GET: /v2/transactions?reference={codigo_reference}
+  1005→
+  1006→Para ver um exemplo de todas as mensagerias juntas na requisição:
+  1007→
+  1008→Selecione o tipo "3D Secure 2.0: MPI Rede + Token + MCC Dinâmico + SDWO" no combo box "Examples" da requisição.
+  1009→
+  1010→POST: /v2/transactions
+  1011→
+  1012→Parâmetros da resposta:
+  1013→
+  1014→Nome    Tamanho Tipo    Descrição
+  1015→dateTime                Datetime        Data de transação no formato YYYY-MM-DDThh:mm:ss.sTZD
+  1016→threeDSecure            threeDSecure    
+  1017→threeDSecure /embedded          Booleano        Informa se o serviço MPI utilizado será da Rede ou terceiro.
+  1018→threeDSecure /url       Até 500 Alfanumérico    Url de autenticação retornada pelo sistema MPI.
+  1019→returnCode      3       Alfanumérico    Código de retorno da transação com 3ds (vide tabela retornos 3DS).
+  1020→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação com 3ds (vide tabela retornos 3DS).
+  1021→installments    Até 2   Numérico        Número de parcelas em que uma transação será autorizada. De 2 a 12. (vide tabela de Autorização).
+  1022→Postback
+  1023→Notificação via application/x-www-form-urlencoded com os seguintes dados da transação:
+  1024→
+  1025→Nome    Tamanho Tipo    Descrição
+  1026→reference       Até 50  Alfanumérico    Código da transação gerado pelo estabelecimento.
+  1027→orderId Até 50  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+  1028→tid     20      Alfanumérico    Número identificador único da transação.
+  1029→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede.
+  1030→authorizationCode       6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+  1031→date            Date    Data da transação no formato yyyyMMdd .
+  1032→time            Time    Hora da transação no formato HH:mm:ss .
+  1033→returncode      Até 4   Alfanumérico    Código de retorno da transação.
+  1034→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação.
+  1035→threeDSecure.returnCode Até 4   Alfanumérico    Código de retorno do 3DS (vide tabela retornos 3DS).
+  1036→brand                   Grupo de informações recebidas da bandeira sobre a transação.
+  1037→brand/name              Alfanumérico    Nome da bandeira. Ex: Mastercard.
+  1038→brand/returnCode        Até 4   Alfanumérico    Código de retorno da transação.
+  1039→brand/returnMessage     Até 256 Alfanumérico    Mensagem de retorno da transação.
+  1040→O postback será enviado apenas em cenários de autenticação bem-sucedidas. Em casos de falha na autenticação ou de não interação do cliente em um possível fluxo com desafio, nenhum postback será enviado.
+  1041→
+  1042→IMPORTANTE
+  1043→
+  1044→No caso de um não recebimento de postback, ou de falha nesse fluxo, recomenda-se a verificação do status da transação. Essa verificação deve ser realizada na API de Consulta de transação pelo código do pedido campo (Reference):
+  1045→
+  1046→GET: /v2/transactions?reference={codigo_reference}
+  1047→
+  1048→Lembrando que se a transação financeira (pós autenticação) não for realizada, a consulta apresentará o seguinte retorno: “returnCode”: “78”, “returnMessage”: “Transaction does not exist.”
+  1049→
+  1050→Callback
+  1051→O Callback é um retorno assíncrono da API, que será enviado no endpoint indicado para receber o método post.
+  1052→
+  1053→Essa “indicação” é feita na própria requisição da transação, dentro do bloco “urls”, enviando o item preenchido com o: "kind": "threeDSecureCallback" e a “url” com o valor correspondente ao seu endpoint que irá receber o callback através de uma requisição HTTP com o método POST.
+  1054→
+  1055→No callback será indicado o resultado da autenticação da transação.
+  1056→
+  1057→Nome    Tamanho Tipo    Descrição
+  1058→reference       Até 16  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+  1059→tid     20      Alfanumérico    Número identificador único da transação.
+  1060→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede.
+  1061→authorizationCode       6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+  1062→expiresAt               Data e hora     Dados de expiração da pré-autorização no formato YYYY-MM-DDThh:mm:ssTZD.
+  1063→date            Data    Data da transação no formato YYYY-MM-DD.
+  1064→time            Hora    Hora da transação no formato HH:mm:ss.
+  1065→returncode      Até 4   Alfanumérico    Código de retorno da transação.
+  1066→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação.
+  1067→threeDSecure.returnCode Até 4   Alfanumérico    Código de retorno do 3DS (vide tabela retornos 3DS).
+  1068→threeDSecure.returnMessage      Até 256 Alfanumérico    Mensagem de retorno do 3DS.
+  1069→brand                   Grupo de informações recebidas da bandeira sobre a transação.
+  1070→brand/name              Alfanumérico    Nome da bandeira. Ex: Mastercard.
+  1071→brand/returnCode        Até 4   Alfanumérico    Código de retorno da transação.
+  1072→brand/returnMessage     Até 256 Alfanumérico    Mensagem de retorno da transação.
+  1073→IMPORTANTE: O callback é utilizado para informar os status de autenticação da transação, para consultar e validar os status de autorização, é necessário confirmar o status da transação na API de Autorização.
+  1074→
+  1075→3DS 2.0 - MPI Cliente
+  1076→O MPI Cliente é utilizado quando o estabelecimento já possui um MPI contratado. Portanto, utilize o parâmetro embedded para sinalizar que o MPI já foi contratado de forma externa à Rede, vide tabela de “Parâmetros da requisição”.
+  1077→
+  1078→Para que as transações com 3DS sejam autenticadas pelo emissor e posteriormente autorizadas via e.Rede, através do MPI Cliente, é necessário que o serviço de MPI seja certificado junto às bandeiras e à Rede. Atualmente, os serviços de MPI certificados são: Lyra, Cardinal e Datacash.
+  1079→
+  1080→Nesse cenário de autenticação externa, a Rede pode receber transações de todas as bandeiras, entre as que já estão preparadas para o produto, e assim seguir com o fluxo de autorização.
+  1081→
+  1082→As transações que utilizam o serviço 3DS com o MPI Cliente, podem ser do tipo crédito ou débito e devem ser enviadas juntamente com o BODY da transação de autorização.
+  1083→
+  1084→O diagrama abaixo mostra o fluxo de autorização da transação autenticada utilizando o MPI Cliente:
+  1085→
+  1086→Fluxograma 4 de autorizacao com ou sem desafio Fluxograma 4 de autorização (com ou sem desafio)
+  1087→
+  1088→Selecione o tipo "3D Secure 2.0: MPI Cliente" no combo box "Examples" da requisição.
+  1089→
+  1090→POST: /v2/transactions
+  1091→
+  1092→Parâmetros da requisição:
+  1093→
+  1094→Nome    Tamanho Tipo    Obrigatório     Descrição
+  1095→threeDSecure            threeDSecure    Sim     
+  1096→threeDSecure /embedded
+  1097→
+  1098→Booleano
+  1099→
+  1100→Não
+  1101→
+  1102→Informa se o serviço MPI utilizado será da Rede ou terceiro.
+  1103→
+  1104→true: utiliza o serviço MPI da Rede
+  1105→false: utiliza serviço MPI terceiro
+  1106→O não envio desse campo será considerado o uso do MPI da Rede.
+  1107→
+  1108→threeDSecure /eci       2       Alfanumérico    Sim     Código retornado ao MPI pelas Bandeiras que indica o resultado da autenticação do portador junto ao Emissor. Transações de débito devem ser obrigatoriamente autenticadas.
+  1109→threeDSecure /cavv      Até 32  Alfanumérico    Sim     Código do criptograma utilizado na autenticação da transação e enviado pelo MPI do estabelecimento (pode conter caracteres especiais).
+  1110→threeDSecure /threeDIndicator   1       Alfanumérico    Sim     Versão do 3DS usado no processo de autenticação pelo MPI.
+  1111→threeDSecure /xid       28      Alfanumérico    Não     ID da transação de autenticação enviado pelo MPI ao estabelecimento (pode conter caracteres especiais). Deve ser enviado apenas para a utilização do serviço de autenticação 3DS na versão 1.0. Campo utilizado somente para bandeira Visa.
+  1112→threeDSecure /directoryServerTransactionId      36      Alfanumérico    Sim     ID da transação de autenticação incluída pelo MPI ao estabelecimento (pode conter caracteres especiais). Deve ser enviado apenas para a utilização do serviço de autenticação 3DS 2.0. Esse campo também pode ser chamado como dsTransId na Visa.
+  1113→Parâmetros da resposta:
+  1114→
+  1115→Nome    Tamanho Tipo    Descrição
+  1116→returnCode      Até 4   Alfanumérico    Código de retorno da transação.
+  1117→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação.
+  1118→reference       Até 50  Alfanumérico    Código da transação gerado pelo estabelecimento.
+  1119→orderId Até 50  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+  1120→tid     20      Alfanumérico    Número identificador único da transação.
+  1121→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede.
+  1122→authorizationCode       6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+  1123→dateTime                Datetime        Data da transação no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1124→amount
+  1125→
+  1126→Até 10
+  1127→
+  1128→Numérico
+  1129→
+  1130→Valor total da transação sem separador de milhar e decimal.
+  1131→
+  1132→Exemplos:
+  1133→
+  1134→R$10,00 = 1000
+  1135→R$0,50 = 50
+  1136→cardBin 6       Alfanumérico    6 primeiros dígitos do cartão.
+  1137→last4   4       Alfanumérico    4 últimos dígitos do cartão.
+  1138→brand   -       -       Grupo de informações recebidas da bandeira sobre a transação.
+  1139→brand/name      -       Alfanumérico    Nome da bandeira. Ex: Mastercard.
+  1140→brand/returnCode        Até 4   Alfanumérico    Código de retorno da transação.
+  1141→brand/returnMessage     Até 256 Alfanumérico    Mensagem de retorno da transação.
+  1142→brand/merchantAdviceCode        Até 2   Alfanumérico    Código de Aviso para Estabelecimento Comercial. É um conjunto de códigos usado para fornecer informações adicionais sobre uma resposta de transação de uso exclusivo da bandeira Mastercard.
+  1143→brand/authorizationCode 6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+  1144→brand/brandTid  Até 21  Alfanumérico    Código identificador da transação na respectiva bandeira. Para mais detalhes consulte a seção Recorrência e Card-on-file
+  1145→Ponto de atenção: Utilizando o 3DS2.0 MPI Cliente, sua autenticação será realizada fora do ambiente da Rede. Neste cenário, alguns clientes estão tendo autenticações negadas devido a falta ou invalidez do parâmetro "MCC dinâmico"{target="_blank"}.
+  1146→
+  1147→Portanto, garanta que este campo está sendo enviado ao provider que realizará a autenticação da transação, aumentando assim as taxas de sucesso e evitando erros inesperados neste fluxo.
+  1148→
+  1149→Data Only
+  1150→Dataonly é uma modalidade similar ao 3DS. O objetivo do protocolo é diminuir o índice de fraude e aumentar taxas de aprovação em relação a uma transação comum, pois mais dados serão analisados para embasar a tomada de decisão do emissor.
+  1151→
+  1152→O Dataonly intermediado pela Rede está disponível no momento, para as bandeiras Mastercard e Visa.
+  1153→
+  1154→Todas as transações DataOnly são autenticadas silenciosamente, da mesma forma que um 3DS 2.0 frictionless. Isso garante uma experiência de compra fluída para o usuário, mas em contraponto, não aplica o benefício do liability shift, ou seja, em caso de chargebacks, a responsabilidade de pagamento continua com o comércio, diferentemente da autenticação 3DS, que quando bem-sucedida, transfere essa responsabilidade ao emissor.
+  1155→
+  1156→Para utilização do Produto, é necessário realizar a contratação no portal “userede.com.br”, para que seja realizada a ativação do Comércio no MPI. Portanto, habilite o serviço através do menu vender online > e-commerce > 3DS/Data Only > Contratar.
+  1157→
+  1158→O MPI (merchant plug-in) é o serviço que provê a integração do estabelecimento com diferentes emissores, alinhado às certificações das bandeiras para processamento da autenticação.
+  1159→
+  1160→O e.Rede disponibiliza duas formas de utilização do serviço, através do MPI Rede ou MPI Cliente. A utilização do MPI estará a critério do estabelecimento.
+  1161→
+  1162→MPI Rede: serviço já embarcado na plataforma e.Rede, sem necessidade de contratação adicional. Nesse cenário, a Rede realiza o fluxo de autenticação e autorização da transação.
+  1163→
+  1164→MPI Cliente: serviço contratado adicionalmente pelo cliente para integração com o e.Rede, sem influência da Rede na autenticação da transação. Portanto, nesse cenário, a Rede realiza apenas o fluxo de autorização.
+  1165→
+  1166→Para que as transações 3DS possam ser realizadas, os emissores também precisam estar preparados para receber as informações de autenticação do comprador. Os principais emissores do Brasil já disponibilizam esse serviço a seus clientes.
+  1167→
+  1168→Tabela Comparativa:
+  1169→
+  1170→Experiência sempre sem desafio  Influência na decisão de aprovação do emissor   Sem latência na transação       Liability Shift
+  1171→DataOnly        ✓       ✓       ✓       
+  1172→3DS     Pode ser solicitado ou não      ✓               ✓
+  1173→Para mais informações, consulte o infográfico da MasterCard aqui{target="_blank"}.
+  1174→
+  1175→Data Only - MPI Rede
+  1176→Para utilizar a modalidade Data Only com o MPI embarcado do e.Rede basta adicionar o parâmetro challengePreference na requisição MPI Rede indicando o uso do Data Only, vide tabela de “Parâmetros da requisição”.
+  1177→
+  1178→Selecione o tipo "Data Only - MPI Rede" no combo box "Examples" da requisição.
+  1179→
+  1180→POST: /v2/transactions
+  1181→
+  1182→Parâmetros da requisição:
+  1183→
+  1184→Nome    Tamanho Tipo    Obrigatório     Descrição
+  1185→threeDSecure            threeDSecure    Sim     
+  1186→threeDSecure /embedded
+  1187→
+  1188→Booleano
+  1189→
+  1190→Não
+  1191→
+  1192→Informa se o serviço MPI utilizado será da Rede ou terceiro.
+  1193→
+  1194→true: utiliza o serviço MPI da Rede
+  1195→false: utiliza serviço MPI terceiro
+  1196→O não envio desse campo será considerado o uso do MPI da Rede.
+  1197→
+  1198→threeDSecure /onFailure
+  1199→
+  1200→Alfanumérico
+  1201→
+  1202→Não
+  1203→
+  1204→Define como prosseguir com a transação caso a autenticação 3DS não obtenha sucesso.
+  1205→
+  1206→continue: prossegue com a transação financeira mesmo se a autenticação falhar
+  1207→decline: não prossegue com a transação financeira caso a autenticação falhar
+  1208→Para transações de débito o valor deste parâmetro é automaticamente definido para decline devido à obrigatoriedade da autenticação.
+  1209→
+  1210→threeDSecure /userAgent Até 255 Alfanumérico    Não     Identificador do browser utilizado pelo comprador no momento da compra.
+  1211→threeDSecure /ipAddress 11      Alfanumérico    Sim     Suporta informações somente em iPv4. Exemplo: 10.0.0.1
+  1212→threeDSecure /device                            
+  1213→threeDSecure /device/colorDepth 2       Numérico        Sim     Campo que representa a estimativa da paleta de cores usada para a exibição de imagens, em bits por pixel. Obtido no navegador do cliente através da propriedade.
+  1214→threeDSecure /device/deviceType3ds      20      Alfanumérico    Sim     Campo que indica tipo de dispositivo no qual a autenticação ocorre.
+  1215→threeDSecure /device/javaEnabled                Booleano        Sim     Campo booleano que representa a capacidade do navegador para executar Java. O valor é aquele retornado pela propriedade navigator.javaEnabled, true ou false.
+  1216→threeDSecure /device/language   10      Alfanumérico    Sim     Idioma do navegador no formato IETF BCP47, contendo entre 1 e 8 caracteres.
+  1217→threeDSecure /device/screenHeight       6       Numérico        Sim- para Browser e Mobile      A altura total da tela do cliente em pixels. O valor é aquele retornado pela propriedade screen.height.
+  1218→threeDSecure /device/screenWidth        6       Numérico        Sim- para Browser e Mobile      A largura total da tela do cliente em pixels. O valor é aquele retornado pela propriedade screen.width.
+  1219→threeDSecure /device/timeZoneOffset     10      Alfanumérico    Sim     Diferença de horário, em horas, entre o UTC e a hora local do navegador do titular do cartão.
+  1220→threeDSecure /billing           billing Sim     Dados referentes ao portador do cartão
+  1221→threeDSecure /billing /address  Até 128 Alfanumérico    Sim     Endereço
+  1222→threeDSecure /billing /city     Até 64  Alfanumérico    Sim     Cidade
+  1223→threeDSecure /billing /postalcode       9       Numérico        Sim     CEP
+  1224→threeDSecure /billing /state    Até 64  Alfanumérico    Sim     Estado
+  1225→threeDSecure /billing /country  Até 64  Alfanumérico    Sim     País
+  1226→threeDSecure /billing /emailAddress     Até 128 Alfanumérico    Sim     E-mail
+  1227→threeDSecure /billing /phoneNumber      Até 32  Numérico        Sim     Telefone
+  1228→urls            urls            
+  1229→urls/kind
+  1230→
+  1231→Alfanumérico
+  1232→
+  1233→Sim
+  1234→
+  1235→Campo que identifica qual o tipo da url.
+  1236→
+  1237→threeDSecureSuccess
+  1238→threeDSecureFailure
+  1239→urls/url        Até 87  Alfanumérico    Sim     Campo para informar a url que o comprador deverá ser redirecionado após a autenticação e ser notificado via postback (application/x-www-form-urlencoded) com os dados da transação. Clique aqui para mais informações.
+  1240→threeDSecure /challengePreference
+  1241→
+  1242→Alfanumérico
+  1243→
+  1244→Não
+  1245→
+  1246→Campo que indica a preferência de uso do Data Only.
+  1247→
+  1248→DATA_ONLY
+  1249→Ponto de atenção: É possível utilizar o Data Only - MPI Rede somente com as seguintes mensagerias:
+  1250→
+  1251→MCC dinâmico: Mensageria específica para os clientes que atuam com mais de um MCC
+  1252→Carteira digital escalonada (SDWO)
+  1253→Tokenização de bandeira Rede
+  1254→Tokenização de bandeira externa (captura)
+  1255→Recorrência e Card-on-File Importante: Ao combinar as duas mensagerias, a autenticação é realizada e válida apenas para a primeira transação da recorrência. As transações subsequentes não terão autenticação Data Only.
+  1256→As mensagerias podem ser utilizadas em conjunto ou individualmente.
+  1257→
+  1258→Observação: Não é possível utilizar o Data Only em transações Zero Dollar.
+  1259→
+  1260→Para ver um exemplo de todas as mensagerias juntas na requisição:
+  1261→
+  1262→Selecione o tipo "Data Only: MPI Rede + Token + MCC Dinâmico + SDWO" no combo box "Examples" da requisição.
+  1263→
+  1264→POST: /v2/transactions
+  1265→
+  1266→Erro 500 em transações Data_ONLY
+  1267→
+  1268→Caso ocorra o erro 500 durante uma transação DATA ONLY, recomenda-se a verificação do status da transação. Essa verificação deve ser realizada na API de Consulta de transação pelo código do pedido campo (Reference):
+  1269→
+  1270→> GET: /v2/transactions?reference={codigo_reference}
+  1271→
+  1272→Parâmetros da resposta:
+  1273→
+  1274→Nome    Tamanho Tipo    Descrição
+  1275→returnCode      Até 4   Alfanumérico    Código de retorno da transação.
+  1276→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação.
+  1277→reference       Até 50  Alfanumérico    Código da transação gerado pelo estabelecimento.
+  1278→orderId Até 50  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+  1279→tid     20      Alfanumérico    Número identificador único da transação.
+  1280→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede.
+  1281→authorizationCode       6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+  1282→dateTime                Datetime        Data da transação no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1283→amount
+  1284→
+  1285→Até 10
+  1286→
+  1287→Numérico
+  1288→
+  1289→Valor total da transação sem separador de milhar e decimal.
+  1290→
+  1291→Exemplos:
+  1292→
+  1293→R$10,00 = 1000
+  1294→R$0,50 = 50
+  1295→installments    Até 2   Numérico        Número de parcelas em que uma transação será autorizada. De 2 a 12. (vide tabela de Autorização).
+  1296→cardBin 6       Alfanumérico    6 primeiros dígitos do cartão.
+  1297→last4   4       Alfanumérico    4 últimos dígitos do cartão.
+  1298→Data Only - MPI Cliente
+  1299→Para utilizar a modalidade Data Only com um MPI externo, a requisição será a mesma do 3DS 2.0, com alterações de valores em alguns campos. Vide tabela de “Parâmetros da requisição”.
+  1300→
+  1301→Selecione o tipo "Data Only – MPI Cliente" no combo box "Examples" da requisição.
+  1302→
+  1303→POST: /v2/transactions
+  1304→
+  1305→Parâmetros da requisição:
+  1306→
+  1307→Nome    Tamanho Tipo    Obrigatório     Descrição
+  1308→threeDSecure            threeDSecure    Sim     
+  1309→threeDSecure /embedded
+  1310→
+  1311→Booleano
+  1312→
+  1313→Não
+  1314→
+  1315→Informa se o serviço MPI utilizado será da Rede ou terceiro.
+  1316→
+  1317→true: utiliza o serviço MPI da Rede
+  1318→false: utiliza serviço MPI terceiro
+  1319→O não envio desse campo será considerado o uso do MPI da Rede.
+  1320→
+  1321→threeDSecure /eci       2       Alfanumérico    Sim     Código retornado ao MPI pelas Bandeiras que indica o resultado da autenticação do portador junto ao Emissor. Transações de débito devem ser obrigatoriamente autenticadas.
+  1322→threeDSecure /cavv      Até 32  Alfanumérico    Sim     Código do criptograma utilizado na autenticação da transação e enviado pelo MPI do estabelecimento (pode conter caracteres especiais).
+  1323→threeDSecure /threeDIndicator   1       Alfanumérico    Sim     Versão do 3DS usado no processo de autenticação pelo MPI.
+  1324→threeDSecure /xid       28      Alfanumérico    Não     ID da transação de autenticação enviado pelo MPI ao estabelecimento (pode conter caracteres especiais). Deve ser enviado apenas para a utilização do serviço de autenticação 3DS na versão 1.0. Campo utilizado somente para bandeira Visa.
+  1325→threeDSecure /directoryServerTransactionId      36      Alfanumérico    Sim     ID da transação de autenticação incluída pelo MPI ao estabelecimento (pode conter caracteres especiais). Deve ser enviado apenas para a utilização do serviço de autenticação 3DS 2.0. Esse campo também pode ser chamado como dsTransId na Visa.
+  1326→Parâmetros da resposta:
+  1327→
+  1328→Nome    Tamanho Tipo    Descrição
+  1329→returnCode      Até 4   Alfanumérico    Código de retorno da transação.
+  1330→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação.
+  1331→reference       Até 50  Alfanumérico    Código da transação gerado pelo estabelecimento.
+  1332→orderId Até 50  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+  1333→tid     20      Alfanumérico    Número identificador único da transação.
+  1334→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede.
+  1335→authorizationCode       6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+  1336→dateTime                Datetime        Data da transação no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1337→amount
+  1338→
+  1339→Até 10
+  1340→
+  1341→Numérico
+  1342→
+  1343→Valor total da transação sem separador de milhar e decimal.
+  1344→
+  1345→Exemplos:
+  1346→
+  1347→R$10,00 = 1000
+  1348→R$0,50 = 50
+  1349→cardBin 6       Alfanumérico    6 primeiros dígitos do cartão.
+  1350→last4   4       Alfanumérico    4 últimos dígitos do cartão.
+  1351→Tabela de ECIs
+  1352→O parâmetro ECI (Eletronic Commerce Indicator) se baseia no valor retornado ao MPI pelas Bandeiras que indica o resultado da autenticação do portador junto ao Emissor.
+  1353→
+  1354→Este, portanto, indica a situação do fluxo de autenticação em uma transação, e se o Risco de chargeback é transferido para o emissor ou permanece com o lojista. Confira abaixo os valores utilizados pelas bandeiras:
+  1355→
+  1356→Bandeira        ECI     Significado da Transação        Risco Chargeback
+  1357→ELO     0       Desconhecido/ Não Especificado/ Loja não participa do programa  Risco de chargeback permanece com o estabelecimento
+  1358→ELO     4       Transação com autenticação In App       Usada em transações Wallets. Risco de chargeback passa a ser do emissor
+  1359→ELO     5       Portador Autenticado pelo Emissor       Risco de chargeback passa a ser do emissor
+  1360→ELO     6       Tentativa de Autenticação do Portador pelo Domínio do Credenciador (autenticada pela bandeira)  Risco de chargeback passa a ser do emissor
+  1361→ELO     7       Transação de eCommerce Não Autenticada  Risco de chargeback permanece com o estabelecimento
+  1362→MASTERCARD      0       Tentativa de autenticação incompleta ou falhou  Risco de chargeback permanece com o estabelecimento
+  1363→MASTERCARD      1       Autenticação pelo Stand-In da Mastercard        Risco de chargeback passa a ser do emissor
+  1364→MASTERCARD      2       Autenticação bem-sucedida       Risco de chargeback passa a ser do emissor
+  1365→MASTERCARD      4       Autenticação Data Only bem-sucedida     Risco de chargeback permanece com o estabelecimento
+  1366→MASTERCARD      7       Recorrência     Risco de chargeback permanece com o estabelecimento
+  1367→VISA    5       Autenticação do Cartão bem-sucedida     Risco de chargeback passa a ser do emissor
+  1368→VISA    6       A autenticação foi tentada, mas não foi ou não pôde ser concluída; possíveis razões, sendo que o cartão ou seu Banco Emissor ainda não participa. (autenticada pela bandeira)   Risco de chargeback passa a ser do emissor
+  1369→VISA    7       A autenticação não foi bem-sucedida ou não foi tentada. Risco de chargeback permanece com o estabelecimento
+  1370→VISA    7       Autenticação Data Only bem-sucedida     Risco de chargeback permanece com o estabelecimento
+  1371→*Para consultar o ECI final da transação, utilize o campo authorizationEci (ECI de autorização), disponível na API de consulta: GET /v2/transactions/{tid} ou {reference}
+  1372→
+  1373→O campo threeDSecure/eci refere-se exclusivamente ao ECI gerado na etapa de autenticação. Esse campo não deve ser utilizado para análise de liability shift, pois não representa o ECI efetivamente considerado na autorização da transação.
+  1374→
+  1375→Além disso, a API de Consulta expõe o campo authorization/downgradeEci, que indica se houve downgrade entre as etapas de autenticação e autorização. O downgrade ocorre quando, no momento da autorização, o ECI retornado é inferior ao obtido na autenticação.
+  1376→
+  1377→Zero Dollar
+  1378→A transação Zero Dollar, permite uma validação prévia para saber se o cartão do portador e dados enviados antes do processamento da transação são válidos. Esse tipo de transação não gera nenhum tipo de cobrança para o comprador, evitando débitos indevidos em seu saldo.
+  1379→
+  1380→O serviço está disponível para as bandeiras Visa, MasterCard, Elo e AMEX no crédito. No débito está disponível para as bandeiras Visa, Mastercard e Elo. O Zero Dollar é obrigatório quando pretende-se armazenar o cartão, já para outras operações é altamente recomendado a fim de validar o cartão antes de iniciar o fluxo transacional padrão.
+  1381→
+  1382→Importante:
+  1383→
+  1384→O parâmetro securityCode será obrigatório para validações Zero Dollar em todas as bandeiras.
+  1385→As transações Zero Dollar deverão ser enviadas como autorização com captura automática (capture = true), informando o valor 0 no parâmetro amount.
+  1386→Em caso de transações Zero Dollar com token de bandeira Visa, o envio do parâmetro tokenCryptogram é obrigatório.
+  1387→Esse tipo de transação não pode ser cancelada.
+  1388→Esse tipo de transação não deve ser enviada como recorrente (subscription = true). Realize primeiro a validação Zero Dollar seguindo os parâmetros especificados a seguir e depois será possível utilizar o cartão para transações recorrentes ou não.
+  1389→Contratação do Produto Zero Dollar.
+  1390→
+  1391→A contratação do produto Zero Dollar deve ser realizada através da Central E-commerce. Para isso, entre em contato com a nossa Central de Atendimento, peça para falar com a central E-commerce e informe que deseja habilitar o "Zero Dollar" em seu ponto de venda e-commerce.
+  1392→
+  1393→Central de Atendimento:
+  1394→
+  1395→4001-4433 (capitais e regiões metropolitanas)
+  1396→0800-728-4433 (demais localidades)
+  1397→Horário de Atendimento: Segunda à sexta, das 08h às 20h.
+  1398→
+  1399→Custo Zero Dollar
+  1400→
+  1401→A habilitação do serviço Zero Dollar não possui nenhum custo adicional na Rede. Mas, a utilização das verificações Zero Dollar tem um custo para validação de cartões Mastercard e Visa. Para mais detalhes sobre a precificação, acesse Tarifas de Bandeiras: Não uso de Zero Dollar e Uso de Zero Dollar.
+  1402→
+  1403→Selecione o tipo "Zero Dollar" no combo box "Examples" da requisição.
+  1404→
+  1405→POST: /v2/transactions
+  1406→
+  1407→Parâmetros da requisição:
+  1408→
+  1409→Nome    Tamanho Tipo    Obrigatório     Descrição
+  1410→capture
+  1411→
+  1412→Booleano
+  1413→
+  1414→Não
+  1415→
+  1416→Define se a transação terá captura automática ou posterior. O não envio desse campo será considerado a captura automática (true).
+  1417→
+  1418→Para transações de débito e Zero Dollar, em caso de envio, o valor do parâmetro deve ser definido como true, indicando captura automática.
+  1419→
+  1420→kind
+  1421→
+  1422→credit / debit
+  1423→
+  1424→Não
+  1425→
+  1426→Tipo de transação a ser realizada.
+  1427→
+  1428→Para transações de crédito, utilizar credit
+  1429→Para transações de débito, utilizar debit
+  1430→O não envio desse campo será considerado crédito.
+  1431→
+  1432→reference       Até 50  Alfanumérico    Sim     Código da transação gerado pelo estabelecimento.
+  1433→orderId Até 50  Alfanumérico    Não     Código do pedido gerado pelo estabelecimento. (Não aceita caracteres especiais)
+  1434→amount  Até 10  Numérico        Sim     Para transação Zero Dollar enviar o valor 0.
+  1435→cardHolderName
+  1436→
+  1437→Até 30
+  1438→
+  1439→Alfanumérico
+  1440→
+  1441→Não
+  1442→
+  1443→Nome do portador do cartão.
+  1444→
+  1445→Não enviar caracteres especiais.
+  1446→
+  1447→cardNumber      Até 19  Alfanumérico    Sim     Número do cartão.
+  1448→expirationMonth Até 2   Numérico        Sim     Mês de vencimento do cartão. De 1 a 12.
+  1449→expirationYear
+  1450→
+  1451→2 ou 4
+  1452→
+  1453→Numérico
+  1454→
+  1455→Sim
+  1456→
+  1457→Ano de vencimento do cartão.
+  1458→
+  1459→Exemplo: 2028 ou 28.
+  1460→
+  1461→securityCode*   Até 4   Alfanumérico    Sim     Código de segurança do cartão geralmente localizado no verso do cartão. O envio desse parâmetro garante maior possibilidade de aprovação da transação.
+  1462→Parâmetros da resposta:
+  1463→
+  1464→Nome    Tamanho Tipo    Descrição
+  1465→reference       Até 50  Alfanumérico    Código da transação gerado pelo estabelecimento.
+  1466→orderId Até 50  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+  1467→tid     20      Alfanumérico    Número identificador único da transação.
+  1468→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede.
+  1469→authorizationCode       6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+  1470→dateTime                Datetime        Data da transação no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1471→amount  Até 10  Numérico        Para transação Zero Dollar o retorno será 0
+  1472→cardBin 6       Alfanumérico    6 primeiros dígitos do cartão.
+  1473→last4   4       Alfanumérico    4 últimos dígitos do cartão.
+  1474→returnCode      Até 4   Alfanumérico    Código de retorno da transação.
+  1475→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação.
+  1476→brand   -       -       Grupo de informações recebidas da bandeira sobre a transação.
+  1477→brand/name      -       Alfanumérico    Nome da bandeira. Ex: Mastercard.
+  1478→brand/returnCode        Até 4   Alfanumérico    Código de retorno da transação.
+  1479→brand/returnMessage     Até 256 Alfanumérico    Mensagem de retorno da transação.
+  1480→brand/merchantAdviceCode        Até 2   Alfanumérico    Código de Aviso para Estabelecimento Comercial. É um conjunto de códigos usado para fornecer informações adicionais sobre uma resposta de transação de uso exclusivo da bandeira Mastercard.
+  1481→brand/authorizationCode 6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+  1482→brand/brandTid  Até 21  Alfanumérico    Código identificador da transação na respectiva bandeira. Para mais detalhes consulte a seção Recorrência e Card-on-file
+  1483→Cancelamento
+  1484→O cancelamento pode ser solicitado para todas as transações, conforme instruções abaixo:
+  1485→
+  1486→Autorização
+  1487→A operação de cancelamento da autorização (sem captura automática) é permitida apenas para o cancelamento total da transação e deverá ser solicitada dentro do período estipulado para cada ramo após esse prazo, a autorização é cancelada automaticamente.
+  1488→
+  1489→Captura e autorização com captura automática
+  1490→A operação de cancelamento da captura e da autorização com captura automática pode ser efetuada de forma parcial ou total, através dos canais disponíveis.
+  1491→
+  1492→No cancelamento total, a transação terá o status “Canceled”, enquanto no cancelamento parcial, o status será mantido como “Approved”, até que a transação seja cancelada integralmente.
+  1493→
+  1494→As solicitações de cancelamento podem ser realizadas em até 7 dias para transações de débito e para transações de crédito o padrão é de até 90 dias, mas pode variar conforme o ramo de atuação de cada estabelecimento.
+  1495→
+  1496→Para cancelamentos solicitados no mesmo dia da transação de autorização ou autorização com captura automática, o processamento será realizado imediatamente, caso contrário, o processamento será realizado em D+1.
+  1497→
+  1498→Cancelamento parcial disponível somente em D+1 e para transações com captura.
+  1499→
+  1500→Uma requisição de solicitação de cancelamento D+1 que retornou o código 360, não indica que o cancelamento será efetivado com sucesso. O estabelecimento precisa consultar posteriormente para verificar se o cancelamento foi efetivado ou negado.
+  1501→
+  1502→Caso um cancelamento parcial D+1 esteja no status "Processando", não deve ser enviado um outro pedido de cancelamento parcial, pois isso pode gerar dois cancelamentos distintos.
+  1503→
+  1504→Observação: Todas as solicitações de cancelamento feitas após as 21h30 serão processadas no próximo dia.
+  1505→
+  1506→Lembramos que para as transações Maestro (débito), é possível realizar apenas um cancelamento parcial. Trata-se de uma regra da bandeira Mastercard, que pode enviar a confirmação/ processamento deste cancelamento em até 5 dias úteis.
+  1507→
+  1508→Para apoiar nossos clientes na melhor identificação de retornos de cancelamento negados por regras de bandeira, desde 29 de janeiro de 2023 é possível receber dois novos cenários de cancelamento através da API e.Rede. Inicialmente, eles serão englobados em retornos já existentes (351 e 354) e você deverá se preparar para receber os retornos definitivos a partir de 01/05/2023.
+  1509→
+  1510→Para a bandeira Mastercard, em que não é permitido realizar mais de um cancelamento parcial no débito, até o dia 01/05/2023 você receberá esse retorno através do código 355, já existente.
+  1511→
+  1512→Para transações Mastercard débito em disputa de chargeback, você receberá o código 351 até 01/05, também já existente.
+  1513→
+  1514→Após esse período, os novos retornos ficam conforme a tabela abaixo:
+  1515→
+  1516→Até 01/05/23 Retornos que englobarão os novos cenários provisoriamente  A partir de 01/05/23 Retornos definitivos
+  1517→355     Transaction already canceled    373     No further Refund allowed
+  1518→351     Forbidden       374     Refund not allowed. Chargeback requested
+  1519→Confira mais detalhes em Retornos de Cancelamento.
+  1520→
+  1521→Para testar os cenários consulte Tutorial Sandbox > Simular erros.
+  1522→
+  1523→POST: /v2/transactions/{tid}/refunds
+  1524→
+  1525→Parâmetros da requisição:
+  1526→
+  1527→Nome    Tamanho Tipo    Obrigatório     Descrição
+  1528→amount
+  1529→
+  1530→Até 10
+  1531→
+  1532→Numérico
+  1533→
+  1534→Sim
+  1535→
+  1536→Valor do cancelamento sem separador de milhar e casa decimal.
+  1537→
+  1538→Exemplos:
+  1539→
+  1540→R$ 10,00 = 1000
+  1541→R$ 0,50 = 50
+  1542→referenceRefund Até 50  Alfanumérico    Não     Código do cancelamento gerado pelo estabelecimento.
+  1543→urls            urls    Não     
+  1544→Urls/kind               Alfanumérico    Não     Campo que identifica qual o tipo da url: callback.
+  1545→urls/url        Até 500 Alfanumérico    Não     Url que receberá o callback com o status do cancelamento após processado pela Rede. Também é possível cadastrar as url no portal userede. Clique aqui para mais informações
+  1546→Parâmetros da resposta:
+  1547→
+  1548→Nome    Tamanho Tipo    Descrição
+  1549→returnCode      Até 4   Alfanumérico    Código de retorno da transação (vide tabela retornos de cancelamento).
+  1550→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação (vide tabela retornos de cancelamento).
+  1551→refundId
+  1552→
+  1553→36
+  1554→
+  1555→Alfanumérico
+  1556→
+  1557→Código de retorno da solicitação de cancelamento gerado pela Rede. Caso a transação seja cancelada por outro canal que não seja a API, este campo retornará vazio.
+  1558→
+  1559→referenceRefund Até 50  Alfanumérico    Código do cancelamento gerado pelo estabelecimento.
+  1560→tid     20      Alfanumérico    Número identificador único da transação.
+  1561→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede.
+  1562→refundDateTime          Datetime        Data do cancelamento no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1563→cancelId        Até 15  Alfanumérico    Código identificador da transação de solicitação cancelamento, retornado somente em solicitações D+1.
+  1564→URL de notificações
+  1565→A URL de notificações (callback) permite que os dados de uma transação sejam retornados via POST após o processamento dos cancelamentos realizados em D+1. A URL pode ser informada na própria API ou acessando o portal da Rede em menu para vender > e-commerce > notificação automática. Ressaltamos que caso a URL seja informada nos 2 canais, a prioridade do envio das notificações será sempre na que foi informada na API.
+  1566→
+  1567→IMPORTANTE: Alinhado as práticas de mercado para garantir maior segurança, atualize seu certificado público compatível com TLS 1.2. A partir de 29 de junho de 2018, as versões anteriores, como 1.1 e 1.0, deixarão de funcionar.
+  1568→
+  1569→Após informar a URL que receberá a notificação, as informações serão retornadas no seguinte formato:
+  1570→
+  1571→Nome    Tamanho Tipo    Descrição
+  1572→type            Alfanumérico    Tipo de evento utilizado para transação: refund.
+  1573→tid     20      Alfanumérico    Número identificador único da transação.
+  1574→nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede.
+  1575→date            Datetime        Data do cancelamento no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1576→amount  Até 10  Alfanumérico    Valor do cancelamento.
+  1577→status
+  1578→
+  1579→Até 10
+  1580→
+  1581→Alfanumérico
+  1582→
+  1583→Done (Cancelamento efetivado)
+  1584→Denied (Cancelamento negado)
+  1585→Processing (Cancelamento em processamento)
+  1586→cancellationNotice      Até 15  Alfanumérico    Código identificador da transação de solicitação cancelamento (cancelId).
+  1587→refundId
+  1588→
+  1589→36
+  1590→
+  1591→Alfanumérico
+  1592→
+  1593→Código de retorno da solicitação de cancelamento gerado pela Rede.
+  1594→
+  1595→Caso a transação seja cancelada por outro canal que não seja a API, este campo retornará vazio.
+  1596→
+  1597→Consulta de transação
+  1598→A consulta da transação pode ser realizada de duas maneiras. A primeira é informando o tid gerado na transação de autorização. Já a segunda, é informando o número do pedido criado pelo estabelecimento (reference).
+  1599→
+  1600→Obs: O prazo para consulta de pré autorizações pendentes e transações de zero dollar é de 60 dias. Após esse prazo o status da consulta retornará como: not found.
+  1601→
+  1602→Consulta por tid
+  1603→GET: /v2/transactions/{tid}
+  1604→
+  1605→Parâmetros da requisição:
+  1606→
+  1607→Nome    Tamanho Tipo    Obrigatório     Descrição
+  1608→tid     20      Alfanumérico    Sim     Número identificador único da transação.
+  1609→Parâmetros da resposta:
+  1610→
+  1611→Nome    Tamanho Tipo    Descrição
+  1612→requestDateTime         Datetime        Data da requisição no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1613→authorization           authorization   
+  1614→authorization/dateTime          Datetime        Data da transação de autorização no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1615→authorization/returnCode        Até 3   Alfanumérico    Código de retorno da transação.
+  1616→authorization/returnMessage     Até 256 Alfanumérico    Mensagem de retorno da transação.
+  1617→authorization/affiliation       Até 9   Numérico        Número de filiação do estabelecimento (PV).
+  1618→authorization/status
+  1619→
+  1620→Alfanumérico
+  1621→
+  1622→Status da transação:
+  1623→
+  1624→Approved
+  1625→Denied
+  1626→Canceled
+  1627→Pending
+  1628→authorization/reference Até 50  Alfanumérico    Código da transação gerado pelo estabelecimento.
+  1629→authorization/orderId   Até 50  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+  1630→authorization/tid       20      Alfanumérico    Número identificador único da transação.
+  1631→authorization/nsu       Até 12  Alfanumérico    Número sequencial retornado pela Rede.
+  1632→authorization/authorizationCode 6       Alfanumérico    Número de Autorização da transação retornada pelo emissor do cartão.
+  1633→authorization/kind      Até 10  Alfanumérico    Método de pagamento utilizado na transação original (Credit ou Debit).
+  1634→authorization/amount
+  1635→
+  1636→Até 10
+  1637→
+  1638→Numérico
+  1639→
+  1640→Valor total da compra sem separador de milhar.
+  1641→
+  1642→Exemplos:
+  1643→
+  1644→1000 = R$10,00
+  1645→R$ 0,50 = 50
+  1646→authorization/installments      Até 2   Numérico        Número de parcelas.
+  1647→authorization/cardHolderName    Até 30  Alfanumérico    Nome do portador impresso no cartão.
+  1648→authorization/cardBin   6       Alfanumérico    6 primeiros dígitos do cartão.
+  1649→authorization/last4     4       Alfanumérico    4 últimos digitos do cartão.
+  1650→authorization/softDescriptor    Até 18* Alfanumérico    Mensagem que será exibida ao lado no nome do estabelecimento na fatura do portador.
+  1651→authorization/origin
+  1652→
+  1653→Até 2
+  1654→
+  1655→Numérico
+  1656→
+  1657→Identifica a origem da transação.
+  1658→
+  1659→e.Rede - 1
+  1660→authorization/subscription
+  1661→
+  1662→Booleano
+  1663→
+  1664→Informa ao emissor se a transação é proveniente de uma recorrência. Se transação for uma recorrência, enviar true. Caso contrário, enviar false.
+  1665→
+  1666→O não envio desse campo será considerado o valor false.
+  1667→
+  1668→A Rede não gerencia os agendamentos de recorrência, apenas permite aos lojistas indicarem se a transação se originou de uma recorrência.
+  1669→
+  1670→authorization/distributorAffiliation    Até 9   Numérico        Número de filiação do distribuidor (PV).
+  1671→authorization/authorizationEci  Até 2   Alfanumérico    ECI final da transação, retornado pelo emissor ou bandeira no momento da autorização. Representa o nível de segurança atribuído à transação após o processo de autorização.
+  1672→authorization/downgradeEci
+  1673→
+  1674→Booleano
+  1675→
+  1676→Indicador de downgrade em transações 3DS e Data Only. Compara o ECI da autenticação com o ECI da autorização e indica se houve perda do nível de autenticação.
+  1677→
+  1678→Valores possíveis: true (houve downgrade) false (não houve downgrade).
+  1679→
+  1680→Disponível para Mastercard, Visa e Elo.
+  1681→
+  1682→capture         capture 
+  1683→capture/dateTime                Datetime        Data da transação de captura no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1684→capture/nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede na transação de captura.
+  1685→capture/amount  Até 10  Numérico        Valor da captura.
+  1686→threeDSecure            threeDSecure    
+  1687→threeDSecure/embedded           Booleano        Informa se o serviço MPI utilizado será da Rede ou terceiro.
+  1688→threeDSecure/eci        2       Alfanumérico    Código retornado ao MPI pelas Bandeiras que indica o resultado da autenticação do portador junto ao Emissor. Deve ser enviado apenas para a utilização do serviço de autenticação 3DS.Transações de débito devem ser obrigatoriamente autenticadas.
+  1689→threeDSecure/cavv       Até 32  Alfanumérico    Código do criptograma utilizado na autenticação da transação e enviado pelo MPI do estabelecimento (pode conter caracteres especiais). Deve ser enviado apenas para a utilização do serviço de autenticação 3DS.
+  1690→threeDSecure/xid        28      Alfanumérico    ID da transação de autenticação enviado pelo MPI ao estabelecimento (pode conter caracteres especiais). Deve ser enviado apenas para a utilização do serviço de autenticação 3DS. Campo utilizado somente para bandeira Visa.
+  1691→threeDSecure/returnCode 3       Alfanumérico    Código de retorno da transação com 3ds.
+  1692→threeDSecure/returnMessage      Até 256 Alfanumérico    Mensagem de retorno da transação com 3ds.
+  1693→refunds         refunds 
+  1694→refunds/dateTime                Datetime        Data da transação de cancelamento no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1695→refunds/refundId        36      Alfanumérico    Código de retorno da solicitação de cancelamento gerado pela Rede.
+  1696→refunds/referenceRefund Até 50  Alfanumérico    Código do cancelamento gerado pelo estabelecimento.
+  1697→refunds/status
+  1698→
+  1699→Até 10
+  1700→
+  1701→Alfanumérico
+  1702→
+  1703→Status da solicitação de cancelamento.
+  1704→
+  1705→Done (Cancelamento efetivado)
+  1706→Denied (Cancelamento negado)
+  1707→Processing (Cancelamento em processamento)
+  1708→refunds/amount  Até 10  Numérico        Valor do cancelamento.
+  1709→brand   -       -       Grupo de informações recebidas da bandeira sobre a transação.
+  1710→brand/name      -       Alfanumérico    Nome da bandeira. Ex: Mastercard.
+  1711→brand/returnCode        Até 4   Alfanumérico    Código de retorno da transação.
+  1712→brand/returnMessage     Até 256 Alfanumérico    Mensagem de retorno da transação.
+  1713→brand/authorizationCode 6       Alfanumérico    Número da autorização da transação retornada pelo emissor do cartão.
+  1714→brand/brandTid  Até 21  Alfanumérico    Código identificador da transação na respectiva bandeira. Para mais detalhes consulte a seção Recorrência e Card-on-file
+  1715→IMPORTANTE: As consultas transacionais realizadas utilizando o parâmetro tid possuem um prazo máximo de visualização dos dados de até 400 dias. Após esse período, os dados não estarão mais acessíveis para consulta.
+  1716→
+  1717→Consulta por código do pedido (reference)
+  1718→GET: /v2/transactions?reference={codigo_reference}
+  1719→
+  1720→Parâmetros da requisição:
+  1721→
+  1722→Nome    Tamanho Tipo    Obrigatório     Descrição
+  1723→reference       Até 50  Alfanumérico    Sim     Código da transação gerado pelo estabelecimento.
+  1724→Parâmetros da resposta:
+  1725→
+  1726→Nome    Tamanho Tipo    Descrição
+  1727→requestDateTime         Datetime        Data da requisição no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1728→authorization           authorization   
+  1729→authorization/dateTime          Datetime        Data da transação de autorização no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1730→authorization/returnCode        Até 3   Alfanumérico    Código de retorno da transação.
+  1731→authorization/returnMessage     Até 256 Alfanumérico    Mensagem de retorno da transação.
+  1732→authorization/affiliation       Até 9   Numérico        Número de filiação do estabelecimento (PV).
+  1733→authorization/status
+  1734→
+  1735→Alfanumérico
+  1736→
+  1737→Status da transação:
+  1738→
+  1739→Approved
+  1740→Denied
+  1741→Canceled
+  1742→Pending
+  1743→authorization/reference Até 50  Alfanumérico    Código da transação gerado pelo estabelecimento.
+  1744→authorization/orderId   Até 50  Alfanumérico    Código do pedido gerado pelo estabelecimento.
+  1745→authorization/tid       20      Alfanumérico    Número identificador único da transação.
+  1746→authorization/nsu       Até 12  Alfanumérico    Número sequencial retornado pela Rede.
+  1747→authorization/authorizationCode 6       Alfanumérico    Número de Autorização da transação retornada pelo emissor do cartão.
+  1748→authorization/kind      Até 10  Alfanumérico    Método de pagamento utilizado na transação original (Credit ou Debit).
+  1749→authorization/amount
+  1750→
+  1751→Até 10
+  1752→
+  1753→Numérico
+  1754→
+  1755→Valor total da compra sem separador de milhar.
+  1756→
+  1757→Exemplos:
+  1758→
+  1759→1000 = R$10,00
+  1760→R$ 0,50 = 50
+  1761→authorization/installments      Até 2   Numérico        Número de parcelas.
+  1762→authorization/cardHolderName    Até 30  Alfanumérico    Nome do portador impresso no cartão.
+  1763→authorization/cardBin   6       Alfanumérico    6 primeiros dígitos do cartão.
+  1764→authorization/last4     4       Alfanumérico    4 últimos digitos do cartão.
+  1765→authorization/softDescriptor    Até 18* Alfanumérico    Mensagem que será exibida ao lado no nome do estabelecimento na fatura do portador.
+  1766→authorization/origin
+  1767→
+  1768→Até 2
+  1769→
+  1770→Numérico
+  1771→
+  1772→Identifica a origem da transação.
+  1773→
+  1774→e.Rede - 1
+  1775→authorization/subscription
+  1776→
+  1777→Booleano
+  1778→
+  1779→Informa ao emissor se a transação é proveniente de uma recorrência. Se transação for uma recorrência, enviar true. Caso contrário, enviar false.
+  1780→
+  1781→O não envio desse campo será considerado o valor false.
+  1782→
+  1783→A Rede não gerencia os agendamentos de recorrência, apenas permite aos lojistas indicarem se a transação se originou de uma recorrência.
+  1784→
+  1785→authorization/distributorAffiliation    Até 9   Numérico        Número de filiação do distribuidor (PV).
+  1786→authorization/authorizationEci  Até 2   Alfanumérico    ECI final da transação, retornado pelo emissor ou bandeira no momento da autorização. Representa o nível de segurança atribuído à transação após o processo de autorização.
+  1787→authorization/downgradeEci
+  1788→
+  1789→Booleano
+  1790→
+  1791→Indicador de downgrade em transações 3DS e Data Only. Compara o ECI da autenticação com o ECI da autorização e indica se houve perda do nível de autenticação.
+  1792→
+  1793→Valores possíveis: true (houve downgrade) false (não houve downgrade).
+  1794→
+  1795→Disponível para Mastercard, Visa e Elo.
+  1796→
+  1797→capture         capture 
+  1798→capture/dateTime                Datetime        Data da transação de captura no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1799→capture/nsu     Até 12  Alfanumérico    Número sequencial retornado pela Rede na transação de captura.
+  1800→capture/amount  Até 10  Numérico        Valor da captura.
+  1801→threeDSecure            threeDSecure    
+  1802→threeDSecure/embedded           Booleano        Informa se o serviço MPI utilizado será da Rede ou terceiro.
+  1803→threeDSecure/eci        2       Alfanumérico    Código retornado ao MPI pelas Bandeiras que indica o resultado da autenticação do portador junto ao Emissor. Deve ser enviado apenas para a utilização do serviço de autenticação 3DS.Transações de débito devem ser obrigatoriamente autenticadas.
+  1804→threeDSecure/cavv       Até 32  Alfanumérico    Código do criptograma utilizado na autenticação da transação e enviado pelo MPI do estabelecimento (pode conter caracteres especiais). Deve ser enviado apenas para a utilização do serviço de autenticação 3DS.
+  1805→threeDSecure/xid        28      Alfanumérico    ID da transação de autenticação enviado pelo MPI ao estabelecimento (pode conter caracteres especiais). Deve ser enviado apenas para a utilização do serviço de autenticação 3DS. Campo utilizado somente para bandeira Visa.
+  1806→threeDSecure/returnCode 3       Alfanumérico    Código de retorno da transação com 3ds.
+  1807→threeDSecure/returnMessage      Até 256 Alfanumérico    Mensagem de retorno da transação com 3ds.
+  1808→refunds         refunds 
+  1809→refunds/dateTime                Datetime        Data da transação de cancelamento no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1810→refunds/refundId        36      Alfanumérico    Código de retorno da solicitação de cancelamento gerado pela Rede.
+  1811→refunds/referenceRefund Até 50  Alfanumérico    Código do cancelamento gerado pelo estabelecimento.
+  1812→refunds/status
+  1813→
+  1814→Até 10
+  1815→
+  1816→Alfanumérico
+  1817→
+  1818→Status da solicitação de cancelamento.
+  1819→
+  1820→Done (Cancelamento efetivado)
+  1821→Denied (Cancelamento negado)
+  1822→Processing (Cancelamento em processamento)
+  1823→refunds/amount  Até 10  Numérico        Valor do cancelamento.
+  1824→IMPORTANTE: As consultas realizadas através do parâmetro reference possuem um prazo máximo de visualização de até 60 dias para transações quatro partes (Débito e crédito) e de até 90 dias para transações Pix.
+  1825→
+  1826→OBS: Caso você realize uma consulta fora dos prazos informados, tanto para o tid quanto para a reference, nossa API retornará o código de erro 78 (Transaction does not exist).
+  1827→
+  1828→Consulta de cancelamento
+  1829→É utilizada para consultar informações de cancelamento a partir de uma solicitação enviada, sendo possível consultar informando o TID, para uma consulta mais detalhada e o refundId para uma consulta de um cancelamento específico.
+  1830→
+  1831→A consulta do status final do cancelamento poderá ser realizada através da API de consulta de transação, do portal da Rede ou do extrato eletrônico um dia após a requisição de cancelamento ter sido realizada.
+  1832→
+  1833→Consulta de cancelamento por tid
+  1834→
+  1835→GET: /v2/transactions/{tid}/refunds
+  1836→
+  1837→Parâmetros da requisição:
+  1838→
+  1839→Nome    Tamanho Tipo    Obrigatório     Descrição
+  1840→tid     20      Alfanumérico    Sim     Número identificador único da transação.
+  1841→Parâmetros da resposta:
+  1842→
+  1843→Nome    Tamanho Tipo    Descrição
+  1844→refundId
+  1845→
+  1846→36
+  1847→
+  1848→Alfanumérico
+  1849→
+  1850→Código de retorno do cancelamento gerado pela Rede.
+  1851→
+  1852→Caso a transação seja cancelada por outro canal que não seja a API, este campo retornará vazio.
+  1853→
+  1854→refundDateTime          Datetime        Data do cancelamento no formato YYYY-MM-DDThh:mm:ss.sTZD .
+  1855→cancelId        Até 15  Alfanumérico    Código identificador da transação de solicitação cancelamento, retornado somente em solicitações D+1.
+  1856→status
+  1857→
+  1858→Até 10
+  1859→
+  1860→Alfanumérico
+  1861→
+  1862→Status das solicitações de cancelamentos
+  1863→
+  1864→Done (Cancelamento efetivado)
+  1865→Denied (Cancelamento negado)
+  1866→Processing (Cancelamento em processamento)
+  1867→amount  Até 10  Numérico        Valor do cancelamento sem separador de milhar e casa decimal.
+  1868→Consulta de cancelamento por refundId A consulta de cancelamento por refundId lista uma solicitação de cancelamento específica.
+  1869→
+  1870→Parâmetros da requisição:
+  1871→
+  1872→Nome    Tamanho Tipo    Obrigatório     Descrição
+  1873→refundId        36      Alfanumérico    Sim     Código de retorno do cancelamento gerado pela Rede. Caso a transação seja cancelada por outro canal que não seja a API, este campo retornará vazio, não sendo possível consultar por refundId.
+  1874→Parâmetros da resposta:
+  1875→
+  1876→Nome    Tamanho Tipo    Descrição
+  1877→refundId        36      Alfanumérico    Código de retorno do cancelamento gerado pela Rede. Caso a transação seja cancelada por outro canal que não seja a API, este campo retornará vazio, não sendo possível consultar por refundId.
+  1878→tid     20      Alfanumérico    Número identificador único da transação
+  1879→refundDateTime          Datetime        Data do cancelamento no formato YYYY-MM-DDThh:mm:ss.sTZD
+  1880→cancelId        Até 15  Alfanumérico    Código identificador da transação de solicitação cancelamento, retornado somente em solicitações D+1.
+  1881→amount  Até 10  Numérico        Valor do cancelamento sem separador de milhar e casa decimal.
+  1882→statusHistory           statusHistory   
+  1883→statusHistory/status
+  1884→
+  1885→Até 10
+  1886→
+  1887→Alfanumérico
+  1888→
+  1889→Histórico do status das solicitações de cancelamentos
+  1890→
+  1891→Done (Cancelamento efetivado)
+  1892→Denied (Cancelamento negado)
+  1893→Processing (Cancelamento em processamento)
+  1894→statusHistory/dateTime          Datetime        Data da solicitação do cancelamento no formato YYYY-MM-DDThh:mm:ss.sTZD
+  1895→returnCode      Até 3   Alfanumérico    Código de retorno da transação
+  1896→returnMessage   Até 256 Alfanumérico    Mensagem de retorno da transação
+  1897→SoftDescriptor
+  1898→A identificação na fatura (SoftDescriptor ou DBA) é um parâmetro que auxilia o portador a identificar a transação gerada na fatura do cartão.
+  1899→
+  1900→O parâmetro é composto por 22 caracteres. O SoftDescriptor é dividido em duas partes, no qual a primeira parte é cadastrada no portal da Rede e chamamos de hard descriptor, por ser único por transação daquele PV. A segunda parte é dinâmica, e é enviada a cada requisição de transação via API, essa parte é a que chamamos de SoftDescriptor.
+  1901→
+  1902→Esses valores são imputados na mensageria de captura para a bandeira, e separados com um * (asterisco).
+  1903→
+  1904→O hard descriptor pode ter no máximo 12 caracteres e ele será variável dependendo da quantidade de caracteres de SoftDescriptor que vier na requisição. Ou seja, o cadastro do hard descriptor é feito uma única vez, e a forma como aparece na fatura varia de acordo com o tamanho do SoftDescriptor, abaixo exemplificamos as regras de API e.Rede para combinação de ambos os campos:
+  1905→
+  1906→Caso seja enviado na requisição entre 1 e 9 posições no SoftDescriptor, a composição na fatura será 12 caracteres do hard + 1 a 9 caracteres do Soft, com o asterisco, totaliza os 22 caracteres abertos para essa informação.
+  1907→Exemplo: Supondo que seja cadastrado no portal como hard descriptor “REDECOMMERCE” e SoftDescriptor “PRODUTO01”, na fatura do cliente final aparecerá REDECOMMERCE*PRODUTO01
+  1908→
+  1909→Exemplo com espaços no SoftDescriptor: Supondo que seja cadastrado no portal como hard descriptor “REDECOMMERCE” e SoftDescriptor “PRODU ”, na fatura do cliente final aparecerá REDECOMMERCE*PRODU
+  1910→
+  1911→Caso seja enviado na requisição entre 10 e 14 posições no SoftDescriptor, a composição na fatura será 7 caracteres do hard + 10 a 14 caracteres do Soft, com o asterisco, totaliza os 22 caracteres abertos para essa informação.
+  1912→Exemplo: Supondo que seja cadastrado no portal como hard descriptor “REDECOMMERCE” e SoftDescriptor “PRODUTODIGIT01”, na fatura do cliente final aparecerá REDECOM*PRODUTODIGIT01
+  1913→
+  1914→Exemplo com espaços no SoftDescriptor: Supondo que seja cadastrado no portal como hard descriptor “REDECOMMERCE” e SoftDescriptor “PRODU ”, na fatura do cliente final aparecerá REDECOM*PRODU
+  1915→
+  1916→Caso seja enviado na requisição entre 15 e 18 posições no SoftDescriptor, a composição na fatura será 3 caracteres do hard + 15 a 18 do Soft, com o asterisco, totaliza os 22 caracteres abertos para essa informação.
+  1917→Exemplo: Supondo que seja cadastrado no portal como hard descriptor “REDECOMMERCE” e SoftDescriptor “PRODUTODIGITAL0001”, na fatura do cliente final aparecerá RED*PRODUTODIGITAL0001
+  1918→
+  1919→Exemplo com espaços no SoftDescriptor: Supondo que seja cadastrado no portal como hard descriptor “REDECOMMERCE” e SoftDescriptor “PRODU ”, na fatura do cliente final aparecerá RED*PRODU
+  1920→
+  1921→Importante: Caso utilize a MPI Rede, não utilize espaço ou caracteres especiais no SoftDescriptor, pois isso resultará em erros na autenticação da transação.
+  1922→
+  1923→Para utilizar essa funcionalidade, acesse o portal da Rede no menu para vender > e-commerce > Identificação na fatura ou entre em contato com a Central de atendimento da Rede. Caso o nome não seja cadastrado, o serviço não será habilitado.
+  1924→
+  1925→Após a habilitação do serviço via portal, a funcionalidade será disponibilizada dentro de um prazo de até 24 horas.
+  1926→
+  1927→O parâmetro deve ser enviado juntamente à requisição de transações de crédito (autorização ou autorização com captura automática) ou débito.
+  1928→
+  1929→MCC dinâmico
+  1930→O código da categoria do estabelecimento, conhecido como MCC, enviado pelo marketplace ou facilitador, pode ser dinâmico conforme as informações do estabelecimento que esteja efetuando a transação.
+  1931→
+  1932→Para esse cenário, é obrigatório enviar o softdescriptor. Clique aqui para obter mais informações.
+  1933→
+  1934→Para informação referente ao MCC dinâmico, o nome cadastrado no portal, menu para vender > e-commerce > Identificação na fatura, equivale ao nome do facilitador (subcredenciador).
+  1935→
+  1936→Selecione o tipo "MCC dinâmico" no combo box "Examples" da requisição.
+  1937→
+  1938→POST: /v2/transactions
+  1939→
+  1940→Parâmetros da requisição:
+  1941→
+  1942→Nome    Tamanho Tipo    Obrigatório     Descrição
+  1943→softDescriptor  Até 18* Alfanumérico    Sim*    Frase personalizada que será impressa na fatura do portador.
+  1944→paymentFacilitatorID
+  1945→
+  1946→Até 11
+  1947→
+  1948→Numérico
+  1949→
+  1950→Sim*
+  1951→
+  1952→Código do facilitador de pagamento na respectiva bandeira.
+  1953→
+  1954→Quando a transação for originária de um marketplace, o campo marketplaceId deve ser enviado.
+  1955→
+  1956→marketplaceId   Até 11  Alfanumérico    Sim*    Código do marketplace na respectiva bandeira. Obrigatório para marketplaces.
+  1957→independentSalesOrganizationID  Até 11  Numérico        Não     Código da organização de vendas independente.
+  1958→subMerchant             SubMerchant             
+  1959→subMerchant / mcc*      4       Numérico        Sim*    MCC do subestabelecimento comercial.
+  1960→subMerchant / subMerchantID     Até 15  Alfanumérico*   Sim*    Código do subestabelecimento comercial.
+  1961→subMerchant / address   Até 48  Alfanumérico¹   Não*    Endereço do subestabelecimento comercial.
+  1962→subMerchant / city      Até 13  Alfanumérico¹   Não*    Cidade do subestabelecimento comercial.
+  1963→subMerchant / state     2       Alfabético      Sim*    Estado do subestabelecimento comercial.
+  1964→subMerchant / country   Até 3   Alfanumérico    Sim*    País do subestabelecimento comercial.
+  1965→subMerchant / cep       Até 9   Alfanumérico    Sim*    Código postal do subestabelecimento comercial.
+  1966→subMerchant / taxIdNumber       Até 14  Alfanumérico    Sim*    CPF ou CNPJ do subestabelecimento comercial.
+  1967→subMerchant / merchantTaxIdName Até 27  Alfanumérico    Sim     Razão social do subestabelecimento comercial.
+  1968→subMerchant / patEnabled
+  1969→
+  1970→Booleano
+  1971→
+  1972→Sim, para transações VOUCHER
+  1973→
+  1974→True ou False.
+  1975→
+  1976→Indica a adesão das regras PAT por parte do Subseller
+  1977→
+  1978→subMerchant / internationalSellerIndicator
+  1979→
+  1980→Booleano
+  1981→
+  1982→Não*
+  1983→
+  1984→True ou False.
+  1985→
+  1986→Indica se a transação é enviada por um estabelecimento/marketplace internacional.
+  1987→
+  1988→Importante: o não envio do parâmetro internationalSellerIndicator quando a transação for de um marketplace internacional pode resultar em custos adicionais.
+  1989→
+  1990→Os campos de cidade, estado e razão devem ser enviados sem caracteres especiais ou acentos.
+  1991→
+  1992→Para a bandeira ELO, o campo subMerchantID deve ser enviado como numérico. Caso seja enviado como alfanumérico a transação será negada.
+  1993→
+  1994→Devido à LGPD (Lei Geral de proteção de dados), os seguintes campos da chave “subMerchant”: subMerchantID, address, city, state, country, cep e cnpj, mesmo quando enviados na requisição, não são devolvidos nas consultas de transações.
+  1995→
+  1996→Este campo (subMerchant/patEnabled) será utilizado para certificar que o estabelecimento está em conformidade com as regras de arranjo do PAT
+  1997→
+  1998→Para garantir o devido processamento da transação, não se deve incluir caracteres especiais.
+  1999→
+  2000→Parâmetros da resposta:
+
+[showing lines 1-2000 of 6161; use offset=2001 with limit to continue reading]

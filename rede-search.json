@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://developer.userede.com.br/e-rede",
+    "name": "Rede Itaú | Portal do Desenvolvedor",
+    "snippet": "O e.Rede é uma solução de pagamentos on-line prática e segura para realizar vendas pela internet com toda tranquilidade. Com diferentes tipos de integração, ...\nAcesse o menu: e-commerce > chave de integração e clique em “Gerar chave de integração”. Se uma nova chave de integração for gerada, é necessário atualizar ...\nChave de integração: código de segurança gerado pela Rede utilizado para garantir a integridade da transação. Faz parte, junto com o PV, das credenciais de ...",
+    "host_name": "developer.userede.com.br",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://pt.scribd.com/document/748131119/Rede-Itau-Portal-do-Desenvolvedor",
+    "name": "Integração com e.Rede para Desenvolvedores | Cartão de crédito",
+    "snippet": "Acesse o menu: [Link] > para vender > e-commerce > chave de integração e clique em “Gerar chave de integração”. Em caso de perda ou esquecimento da chave de ...",
+    "host_name": "pt.scribd.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer-portal-dev.useredecloud.com.br/chargeback",
+    "name": "Chargeback - Rede Itaú | Portal do Desenvolvedor",
+    "snippet": "O conjunto de APIs de Chargeback permite que o estabelecimento comercial gerencie seus chargebacks da Rede. Nas APIs disponibilizadas, o estabelecimento poderá ...",
+    "host_name": "developer-portal-dev.useredecloud.com.br",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=g8IA3QUiV8o",
+    "name": "Plugin Rede Itaú WooCommerce PIX, Cartão, Parcelamento e 3DS",
+    "snippet": "Quer aceitar PIX, cartão de crédito, débito e parcelamento em até 21x no seu site WooCommerce com segurança e taxas reduzidas?\nNeste vídeo, você vai aprender como instalar e configurar o Plugin Rede API ... Rede, gerar a chave de integração e ativar o endpoint PIX. Ideal ...",
+    "host_name": "www.youtube.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://stripe.com/br/resources/more/how-to-integrate-a-payment-gateway-into-a-website",
+    "name": "Como integrar um gateway de pagamentos a um site | Stripe",
+    "snippet": "1. Crie uma conta Stripe · 2. Obtenha chaves de API · 3. Instale as bibliotecas da Stripe · 4. Integre a Stripe ao seu site · 5. Configure um ...",
+    "host_name": "stripe.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://loja5.zendesk.com/hc/pt-br/articles/360019902552-Obter-a-Flia%C3%A7%C3%A3o-e-Chave-Integra%C3%A7%C3%A3o-token-para-e-Rede-API",
+    "name": "Obter a Fliação e Chave Integração (token) para e.Rede API",
+    "snippet": "A chave de integração é uma chave de uso confidencial, gerada no Portal da Rede. Para gerá-la, certifique-se que seu usuário possua perfil de ...\nRede > para vender > e-commerce > chave de integração e clique em “Gerar chave de integração”. Em caso de perda ou esquecimento da chave de ...",
+    "host_name": "loja5.zendesk.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://apiaryapib2.docs.apiary.io",
+    "name": "Documentação Serviços Rede · Apiary",
+    "snippet": "Nas APIs disponibilizadas, o estabelecimento poderá realizar a consulta de todas as transações de débito e crédito, lançamentos, pagamentos, débitos em geral, ...",
+    "host_name": "apiaryapib2.docs.apiary.io",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://wiki.hubsoft.com.br/modulos/configuracao/integracao/cartao/erede_itau",
+    "name": "Integração Cartão de Crédito - E.Rede Itaú - Wiki HubSoft",
+    "snippet": "Com a integração realizada, vocês poderão receber as cobranças via cartão de crédito através do sistema WEB e também o seu cliente poderá realizar o pagamento ...\nPara permitir que seus clientes realizem pagamento por Cartão no APP do Cliente, configure as permissões de acordo com o seu provedor.",
+    "host_name": "wiki.hubsoft.com.br",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.mypos.com/pt-pt/blog/tecnologia/api-de-pagamento-como-usar?srsltid=AfmBOopTHd92WDHLO-1BHQgKyDQmIe-kl5SrFE2f2a1c-0HODXje-aTq",
+    "name": "API de Pagamento: O que é e Como Usar | myPOS Blog",
+    "snippet": "Saiba como APIs de pagamento facilitam transações online seguras e impulsionam seu negócio.",
+    "host_name": "www.mypos.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.itau.com.br/empresas/pagamentos-recebimentos/link-de-pagamento",
+    "name": "Link de Pagamento Rede | Itaú Empresas",
+    "snippet": "Com o Link de Pagamento Rede você vende online sem precisar de maquininha ou site. Crie um link em poucos cliques e compartilhe onde quiser.",
+    "host_name": "www.itau.com.br",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

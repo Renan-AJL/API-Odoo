@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://developer.userede.com.br/e-rede",
+    "name": "Rede Itaú | Portal do Desenvolvedor",
+    "snippet": "Filiação e Chave de Integração. Para que o estabelecimento comece a transacionar com o e.Rede, é necessário configurar a API com suas credenciais: número de ...\nO e.Rede é uma solução de pagamentos on-line prática e segura para realizar vendas pela internet com toda tranquilidade. Com diferentes tipos de integração, ...\nChave de integração: código de segurança gerado pela Rede utilizado para garantir a integridade da transação. Faz parte, junto com o PV, das credenciais de ...",
+    "host_name": "developer.userede.com.br",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer-portal-dev.useredecloud.com.br/chargeback",
+    "name": "Chargeback - Rede Itaú | Portal do Desenvolvedor",
+    "snippet": "O conjunto de APIs de Chargeback permite que o estabelecimento comercial gerencie seus chargebacks da Rede. Nas APIs disponibilizadas, o estabelecimento poderá ...\nO conjunto de APIs de Chargeback permite que o estabelecimento comercial gerencie seus chargebacks da Rede. Nas APIs disponibilizadas, o estabelecimento ...",
+    "host_name": "developer-portal-dev.useredecloud.com.br",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://pt.scribd.com/document/748131119/Rede-Itau-Portal-do-Desenvolvedor",
+    "name": "Integração com e.Rede para Desenvolvedores | Cartão de crédito",
+    "snippet": "Chave de integração: código de segurança gerado pela Rede utilizado para garantir a integridade da transação. Faz parte, junto com o PV, das credenciais de ...\nHomologação e certificado SSL. Para transacionar com a API do [Link] é necessário que o estabelecimento possua instalado na página de pagamento um certificado ...",
+    "host_name": "pt.scribd.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://apiaryapib2.docs.apiary.io",
+    "name": "Documentação Serviços Rede · Apiary",
+    "snippet": "Para utilização das APIs da Rede é necessário efetuar o cadastro do Parceiro. O cadastro do parceiro é estruturado da seguinte forma: Organização: Entidade ...\nNas APIs disponibilizadas, o estabelecimento poderá realizar a consulta de todas as transações de débito e crédito, lançamentos, pagamentos, débitos em geral, ...",
+    "host_name": "apiaryapib2.docs.apiary.io",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://wiki.hubsoft.com.br/modulos/configuracao/integracao/cartao/erede_itau",
+    "name": "Integração Cartão de Crédito - E.Rede Itaú - Wiki HubSoft",
+    "snippet": "Dentro da plataforma basta criar um novo projeto selecionando e.Rede no campo Pacote de APIs. E posteriormente em Meus Projetos será disponibilizado as ...\nPara permitir que seus clientes realizem pagamento por Cartão no APP do Cliente, configure as permissões de acordo com o seu provedor.",
+    "host_name": "wiki.hubsoft.com.br",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://loja5.zendesk.com/hc/pt-br/articles/360019902552-Obter-a-Flia%C3%A7%C3%A3o-e-Chave-Integra%C3%A7%C3%A3o-token-para-e-Rede-API",
+    "name": "Obter a Fliação e Chave Integração (token) para e.Rede API",
+    "snippet": "Para que o estabelecimento comece a transacionar com o e.Rede, é necessário configurar a API com suas credenciais: número de filiação (PV) e ...",
+    "host_name": "loja5.zendesk.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://helpcenter.uappi.com.br/en/como-configurar-a-integracao-com-a-e-rede-na-uappi",
+    "name": "Como Configurar a Integração com a e.Rede na Uappi?",
+    "snippet": "O que é a Integração com a e.Rede? A e.Rede é um gateway de pagamento integrado à Uappi, permitindo o recebimento via cartão de crédito.",
+    "host_name": "helpcenter.uappi.com.br",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://help.vtex.com/es/docs/tutorials/configurar-pagamento-com-itau-rede",
+    "name": "Configurar pagamento com Itaú Rede - Help Vtex",
+    "snippet": "Em Autorização do provedor, preencha o campo Chave de aplicação com o seu número de filiação (PV) e o campo Token de aplicação com a chave de integração.",
+    "host_name": "help.vtex.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.authorize.net/api/reference/features/payment_transactions.html",
+    "name": "Authorize.net API Documentation - Payment Transactions",
+    "snippet": "The Authorize.net API provides robust features for processing payment transactions through the Authorize.net gateway. The API supports XML and JSON variants.",
+    "host_name": "developer.authorize.net",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=ca_Yo8qzAQQ",
+    "name": "Curso API Efí Pay 2.0 - Endpoints para Links de pagamento - YouTube",
+    "snippet": "Para quem precisa fazer uma gestão dos Links de pagamento de forma mais prática e completa, vamos conhecer os variados endpoints disponíveis ...",
+    "host_name": "www.youtube.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]

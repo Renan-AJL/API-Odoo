@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://developer.userede.com.br/files/traducoes/erede/e-rede_26122025.pdf",
+    "name": "[PDF] Integration Manual e.Rede",
+    "snippet": "Base URL • API Version. For each type of service, a complement will be added to the base URL so that the request can be made afterward.\nProduction https://api.userede.com.br/erede/v2/transactions. To activate the Card Tokenization product in e.Rede, replace the following base ...",
+    "host_name": "developer.userede.com.br",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.userede.com.br/files/erede/integration_manual.pdf",
+    "name": "[PDF] Integration Manual e.Rede",
+    "snippet": "The purpose of this manual is to help the developer to integrate their application with e.Rede, listing the functionalities and methods with examples of ...\nProduction https://api.userede.com.br/erede/v1/transactions. For each type of service, a complement will be added to the base URL so that the request can be ...",
+    "host_name": "developer.userede.com.br",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.userede.com.br/files/traducoes/erede/e-rede_12062024.pdf",
+    "name": "[PDF] Integration Manual e.Rede",
+    "snippet": "The purpose of this manual is to help the developer to integrate their application with e.Rede, listing the functionalities and methods with ...\nURL. Sandbox https://sandbox-erede.useredecloud.com.br/v1/transactions. Production https://api.userede.com.br/erede/v1/transactions. For each ...\ne.Rede is a practical and secure online payment solution to make sales over the internet with complete peace of mind.",
+    "host_name": "developer.userede.com.br",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.authorize.net/api/reference/index.html",
+    "name": "API Reference - Authorize.net Developer Center",
+    "snippet": "All requests to the Authorize.net API are sent via the HTTP POST method to one of our API endpoint URLs. authorize and capture a credit card payment.",
+    "host_name": "developer.authorize.net",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.userede.com.br/files/traducoes/gestao-acessos/access-management_15022023.pdf",
+    "name": "[PDF] Developer portal",
+    "snippet": "Rede APIs in production, register the Organization, User, and Application. Endpoints are the URLs that will be used to call a particular service. Base URL • ...\n• API Version. • Service. Environment. URL. Sandbox https://rl7-sandbox-api.useredecloud.com.br/oauth/token. Production https://api.userede.com.br/redelabs/ ...\nTo use Rede's APIs you will need to configure your application to use the UTF-8 encoding. OAuth - URL Encoding. URL encoding is a mechanism for encoding ...",
+    "host_name": "developer.userede.com.br",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]
