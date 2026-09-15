@@ -517,7 +517,79 @@ var PARTNER_BR_FIELDS = ['cnpj_cpf', 'inscr_est', 'legal_name', 'number', 'l10n_
  * l10n_br_city_id, district podem nao existir. Fazemos duas leituras:
  *   1. Campos core (sempre existem)
  *   2. Campos l10n_br (try/catch, ignora se falhar)
+ *   3. Discovery: tenta encontrar campos x_studio_* para IE/CNPJ/razao social
  */
+
+// Cache de campos IE descobertos no Odoo (para nao descobrir toda vez)
+var _discoveredIeField = null;
+var _discoveredCnpjField = null;
+var _discoveredLegalNameField = null;
+var _discoveredNumberField = null;
+
+async function discoverPartnerFields(client, db, uid, pwd) {
+  // Se ja descobrimos antes, reusa
+  if (_discoveredIeField !== null) return;
+
+  try {
+    // fields_get() retorna metadados de todos os campos
+    var allFields = await executeKw(client, db, uid, pwd, 'res.partner', 'fields_get', [[], ['string', 'type']]);
+    var fieldNames = Object.keys(allFields);
+
+    // Procurar campo IE
+    var ieCandidates = fieldNames.filter(function(f) {
+      var fl = f.toLowerCase();
+      return fl === 'inscr_est' || fl === 'l10n_br_ie' ||
+             fl.indexOf('inscricao_estadual') >= 0 ||
+             fl.indexOf('inscr_est') >= 0 ||
+             (fl.indexOf('ie') >= 0 && fl.indexOf('x_studio') >= 0 && fl.indexOf('email') < 0 && fl.indexOf('field') < 0);
+    });
+    // Prioridade: inscr_est > l10n_br_ie > x_studio_*
+    ieCandidates.sort(function(a, b) {
+      if (a === 'inscr_est') return -1;
+      if (b === 'inscr_est') return 1;
+      if (a === 'l10n_br_ie') return -1;
+      if (b === 'l10n_br_ie') return 1;
+      return a.localeCompare(b);
+    });
+    _discoveredIeField = ieCandidates.length > 0 ? ieCandidates[0] : false;
+
+    // Procurar campo CNPJ/CPF (alem de cnpj_cpf e vat)
+    var cnpjCandidates = fieldNames.filter(function(f) {
+      var fl = f.toLowerCase();
+      return fl === 'cnpj_cpf' || fl === 'l10n_br_cnpj_cpf' ||
+             (fl.indexOf('cnpj') >= 0 && fl.indexOf('x_studio') >= 0);
+    });
+    _discoveredCnpjField = cnpjCandidates.length > 0 ? cnpjCandidates[0] : false;
+
+    // Procurar campo razao social (alem de legal_name)
+    var nameCandidates = fieldNames.filter(function(f) {
+      var fl = f.toLowerCase();
+      return fl === 'legal_name' || fl === 'l10n_br_legal_name' ||
+             (fl.indexOf('razao_social') >= 0 || fl.indexOf('legal_name') >= 0) && fl.indexOf('x_studio') >= 0;
+    });
+    _discoveredLegalNameField = nameCandidates.length > 0 ? nameCandidates[0] : false;
+
+    // Procurar campo numero do endereco
+    var numCandidates = fieldNames.filter(function(f) {
+      var fl = f.toLowerCase();
+      return fl === 'number' || fl === 'l10n_br_number' ||
+             (fl.indexOf('numero') >= 0 && fl.indexOf('x_studio') >= 0);
+    });
+    _discoveredNumberField = numCandidates.length > 0 ? numCandidates[0] : false;
+
+    console.log('[SIEG-EMIT] [DISCOVERY] Campos IE: ' + JSON.stringify(ieCandidates) + ' -> usando: ' + (_discoveredIeField || 'nenhum'));
+    console.log('[SIEG-EMIT] [DISCOVERY] Campos CNPJ: ' + JSON.stringify(cnpjCandidates) + ' -> usando: ' + (_discoveredCnpjField || 'vat'));
+    if (_discoveredLegalNameField) console.log('[SIEG-EMIT] [DISCOVERY] Razao social: ' + _discoveredLegalNameField);
+    if (_discoveredNumberField && _discoveredNumberField !== 'number') console.log('[SIEG-EMIT] [DISCOVERY] Numero endereco: ' + _discoveredNumberField);
+  } catch (e) {
+    console.warn('[SIEG-EMIT] [DISCOVERY] Erro ao descobrir campos: ' + e.message);
+    _discoveredIeField = false;
+    _discoveredCnpjField = false;
+    _discoveredLegalNameField = false;
+    _discoveredNumberField = false;
+  }
+}
+
 async function readPartnerSafe(client, db, uid, pwd, partnerId, extraFields) {
   var fields = PARTNER_SAFE_FIELDS.slice();
   if (extraFields) fields = fields.concat(extraFields);
@@ -533,6 +605,43 @@ async function readPartnerSafe(client, db, uid, pwd, partnerId, extraFields) {
   } catch (e) {
     console.log('[SIEG-EMIT] Campos l10n_br nao disponiveis, usando vat como CNPJ/CPF');
   }
+
+  // Discovery: tenta encontrar campos IE/CNPJ/razao social via fields_get
+  await discoverPartnerFields(client, db, uid, pwd);
+
+  // Se inscr_est ainda vazio, tenta campo descoberto
+  if ((!p.inscr_est || String(p.inscr_est).trim() === '') && _discoveredIeField && _discoveredIeField !== 'inscr_est') {
+    try {
+      var ieRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], [_discoveredIeField]]);
+      if (ieRecs && ieRecs[0] && ieRecs[0][_discoveredIeField]) {
+        p.inscr_est = ieRecs[0][_discoveredIeField];
+        console.log('[SIEG-EMIT] [DEST-IE] IE lida do campo descoberto: ' + _discoveredIeField + ' = ' + p.inscr_est);
+      }
+    } catch (e) {
+      console.warn('[SIEG-EMIT] [DEST-IE] Campo descoberto ' + _discoveredIeField + ' falhou: ' + e.message);
+    }
+  }
+
+  // Se cnpj_cpf ainda vazio, tenta campo descoberto
+  if ((!p.cnpj_cpf || String(p.cnpj_cpf).trim() === '') && _discoveredCnpjField) {
+    try {
+      var cnpjRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], [_discoveredCnpjField]]);
+      if (cnpjRecs && cnpjRecs[0] && cnpjRecs[0][_discoveredCnpjField]) {
+        p.cnpj_cpf = cnpjRecs[0][_discoveredCnpjField];
+      }
+    } catch (e) {}
+  }
+
+  // Se legal_name ainda vazio, tenta campo descoberto
+  if ((!p.legal_name || String(p.legal_name).trim() === '') && _discoveredLegalNameField) {
+    try {
+      var nameRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], [_discoveredLegalNameField]]);
+      if (nameRecs && nameRecs[0] && nameRecs[0][_discoveredLegalNameField]) {
+        p.legal_name = nameRecs[0][_discoveredLegalNameField];
+      }
+    } catch (e) {}
+  }
+
   return p;
 }
 
@@ -568,7 +677,7 @@ async function readPartner(client, db, uid, pwd, partnerId) {
     cnpj_cpf: p.cnpj_cpf || p.vat || '',
     legal_name: p.legal_name || p.name || '',
     xNome: p.name || '',
-    inscr_est: p.inscr_est || '',
+    inscr_est: p.inscr_est || p[_discoveredIeField] || '',
     street: p.street || '',
     number: p.number || 'S/N',
     street2: p.street2 || p.district || '',
