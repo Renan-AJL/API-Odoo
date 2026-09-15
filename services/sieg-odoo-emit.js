@@ -27,6 +27,8 @@
 var xmlrpc = require('xmlrpc');
 var { emitirNota } = require('./sieg-api');
 var config = require('../config');
+var { IeService } = require('./ie.service');
+var _ieService = new IeService();
 
 // ============================================================
 // XML-RPC Helpers
@@ -151,7 +153,41 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   var partnerId = tupId(move.partner_id);
   if (!partnerId) throw new Error('Fatura sem parceiro');
   var partner = await readPartner(client, db, uid, pwd, partnerId);
-  console.log('[SIEG-EMIT] [DESTINATARIO] CNPJ=' + partner.cnpj_cpf + ' xNome=' + partner.xNome + ' cMun=' + partner.city_ibge_code + ' xMun=' + partner.city + ' UF=' + partner.state + ' xLgr=' + partner.street + ' nro=' + partner.number);
+  console.log('[SIEG-EMIT] [DESTINATARIO] CNPJ=' + partner.cnpj_cpf + ' IE=' + (partner.inscr_est || '(vazio)') + ' xNome=' + partner.xNome + ' cMun=' + partner.city_ibge_code + ' xMun=' + partner.city + ' UF=' + partner.state + ' xLgr=' + partner.street + ' nro=' + partner.number);
+
+  // 3b. Auto-lookup IE do destinatario se vazio (SEFAZ cStat 232 exige IE para CFOP 5xxx/6xxx)
+  if (!partner.inscr_est || String(partner.inscr_est).trim() === '') {
+    var partnerCnpj = (partner.cnpj_cpf || '').replace(/\D/g, '');
+    var partnerUf = partner.state || '';
+    if (partnerCnpj.length === 14) {
+      console.log('[SIEG-EMIT] [DEST-IE] IE vazia no Odoo. Tentando auto-lookup CNPJ=' + partnerCnpj + ' UF=' + partnerUf);
+      try {
+        var ieResult = await _ieService.obterIE(partnerCnpj, null, partnerUf);
+        if (ieResult.hasIE && ieResult.ie) {
+          partner.inscr_est = ieResult.ie;
+          console.log('[SIEG-EMIT] [DEST-IE] IE encontrada: ' + ieResult.ie + ' (UF=' + (ieResult.ieState || partnerUf) + ') via ' + ieResult.source);
+          // Tentar salvar IE no Odoo para futuras emissoes
+          try {
+            await executeKw(client, db, uid, pwd, 'res.partner', 'write', [[partnerId], { inscr_est: ieResult.ie }]);
+            console.log('[SIEG-EMIT] [DEST-IE] IE salva no parceiro Odoo (id=' + partnerId + ')');
+          } catch (writeErr) {
+            console.warn('[SIEG-EMIT] [DEST-IE] Nao conseguiu salvar IE no Odoo: ' + writeErr.message);
+          }
+        } else {
+          console.warn('[SIEG-EMIT] [DEST-IE] IE nao encontrada em nenhuma fonte. Motivos: ' + JSON.stringify(ieResult.reasons || []));
+          console.warn('[SIEG-EMIT] [DEST-IE] Emissao provavelmente sera rejeitada pela SEFAZ (cStat 232) se CFOP exigir IE.');
+        }
+      } catch (ieErr) {
+        console.error('[SIEG-EMIT] [DEST-IE] Erro no auto-lookup de IE: ' + ieErr.message);
+      }
+    } else if (partnerCnpj.length === 11) {
+      console.log('[SIEG-EMIT] [DEST-IE] Destinatario CPF (consumidor final) — IE nao necessaria');
+    } else {
+      console.warn('[SIEG-EMIT] [DEST-IE] CNPJ/CPF invalido (' + partnerCnpj.length + ' digitos) — sem auto-lookup de IE');
+    }
+  } else {
+    console.log('[SIEG-EMIT] [DEST-IE] IE ja preenchida no Odoo: ' + partner.inscr_est);
+  }
 
   // 4. Read invoice lines diretamente de account.move.line (evita computed field)
   var allLineIds = await executeKw(client, db, uid, pwd, 'account.move.line', 'search', [[

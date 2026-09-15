@@ -311,6 +311,16 @@ function gerarXmlNFe(data) {
   if (!partner.city) xmlWarnings.push('xMun destinatario vazio');
   if (!partner.state) xmlErrors.push('UF destinatario vazia');
 
+  // Validação IE destinatário por CFOP (cStat 232 — IE do destinatário não informada)
+  // CFOP 5xxx/6xxx com CNPJ destinatário: IE obrigatória
+  var firstCfop = (lines && lines[0] && String(lines[0].cfop || '').charAt(0)) || '';
+  var destIeVal = (partner.inscr_est || '').replace(/\D/g, '');
+  if (docDest2.length === 14 && (firstCfop === '5' || firstCfop === '6') && !destIeVal) {
+    xmlErrors.push('IE do destinatario obrigatoria para CFOP ' + (firstCfop === '5' ? '5xxx' : '6xxx') + ' (CNPJ com CNPJ) — preencha inscr_est no parceiro ou configure CNPJA_API_TOKEN / CONSULTAR_IO_TOKEN para auto-lookup');
+  }
+  logField('IE', partner.inscr_est || '(vazio)', !destIeVal && docDest2.length === 14);
+  logField('indIEDest', _indIEDestCalc);
+
   // --- IDE ---
   console.log('[NFE-XML] [IDE]');
   logField('cMunFG', cMunFG, !cMunFG);
