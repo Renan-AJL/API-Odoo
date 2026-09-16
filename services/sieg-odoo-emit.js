@@ -509,7 +509,7 @@ var PARTNER_SAFE_FIELDS = [
   'name', 'vat', 'street', 'street2', 'city', 'state_id', 'zip',
   'phone', 'email', 'is_company', 'city_id', 'country_id',
 ];
-var PARTNER_BR_FIELDS = ['cnpj_cpf', 'inscr_est', 'legal_name', 'number', 'l10n_br_city_id', 'district'];
+var PARTNER_BR_FIELDS = ['cnpj_cpf', 'inscr_est', 'l10n_br_ie_code', 'legal_name', 'number', 'l10n_br_city_id', 'district'];
 
 /**
  * Leitura segura de res.partner: campos core + l10n_br opcionais.
@@ -677,7 +677,7 @@ async function readPartner(client, db, uid, pwd, partnerId) {
     cnpj_cpf: p.cnpj_cpf || p.vat || '',
     legal_name: p.legal_name || p.name || '',
     xNome: p.name || '',
-    inscr_est: p.inscr_est || p[_discoveredIeField] || '',
+    inscr_est: p.inscr_est || p.l10n_br_ie_code || p[_discoveredIeField] || '',
     street: p.street || '',
     number: p.number || 'S/N',
     street2: p.street2 || p.district || '',
