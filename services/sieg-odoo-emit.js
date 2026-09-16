@@ -609,6 +609,20 @@ async function readPartnerSafe(client, db, uid, pwd, partnerId, extraFields) {
   // Discovery: tenta encontrar campos IE/CNPJ/razao social via fields_get
   await discoverPartnerFields(client, db, uid, pwd);
 
+  // Leitura direta da Inscricao Estadual do Odoo Brasil
+  // Separada dos demais campos l10n_br para nao falhar se outro campo opcional nao existir.
+  if (p.inscr_est === undefined || p.inscr_est === null || String(p.inscr_est).trim() === "") {
+    try {
+      var ieDirectRecs = await executeKw(client, db, uid, pwd, "res.partner", "read", [[partnerId], ["l10n_br_ie_code"]]);
+      if (ieDirectRecs && ieDirectRecs[0] && ieDirectRecs[0].l10n_br_ie_code) {
+        p.inscr_est = ieDirectRecs[0].l10n_br_ie_code;
+        console.log("[SIEG-EMIT] [DEST-IE] IE lida diretamente de l10n_br_ie_code = " + p.inscr_est);
+      }
+    } catch (e) {
+      console.warn("[SIEG-EMIT] [DEST-IE] Leitura direta de l10n_br_ie_code falhou: " + e.message);
+    }
+  }
+
   // Se inscr_est ainda vazio, tenta campo descoberto
   if ((!p.inscr_est || String(p.inscr_est).trim() === '') && _discoveredIeField && _discoveredIeField !== 'inscr_est') {
     try {
