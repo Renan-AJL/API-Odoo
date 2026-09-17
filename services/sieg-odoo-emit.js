@@ -973,21 +973,24 @@ async function extractTaxes(client, db, uid, pwd, line) {
   // Padrão: Lucro Real (CRT 3) — CST 00, ICMS 18% PR interno
   // PIS/COFINS não-cumulativo com base no valor do produto
   var base = parseFloat(line.price_subtotal) || 0;
+  // Arredondamento: SEFAZ exige 2 casas decimais por item.
+  // Se nao arredondar aqui, o total pode divergir (cStat 602/603).
+  var r2 = function(n) { return Math.round((parseFloat(n) || 0) * 100) / 100; };
   var result = {
     csosn: '',
     cst_icms: '00',
     mod_bc: '3',
-    vbc: base,
-    vicms: base * 0.18,
+    vbc: r2(base),
+    vicms: r2(base * 0.18),
     picms: 18.00,
     cst_pis: '01',
-    vbc_pis: base,
+    vbc_pis: r2(base),
     ppis: 1.65,
-    vpis: base * 0.0165,
+    vpis: r2(base * 0.0165),
     cst_cofins: '01',
-    vbc_cofins: base,
+    vbc_cofins: r2(base),
     pcofins: 7.60,
-    vcofins: base * 0.076,
+    vcofins: r2(base * 0.076),
   };
 
   var taxIds = (line.tax_ids || []).map(function(t) { return Array.isArray(t) ? t[0] : t; }).filter(Boolean);
@@ -1021,15 +1024,15 @@ async function extractTaxes(client, db, uid, pwd, line) {
     }
     if (totalIcms > 0) {
       result.picms = totalIcms;
-      result.vicms = base * (totalIcms / 100);
+      result.vicms = r2(base * (totalIcms / 100));
     }
     if (totalPis > 0) {
       result.ppis = totalPis;
-      result.vpis = base * (totalPis / 100);
+      result.vpis = r2(base * (totalPis / 100));
     }
     if (totalCofins > 0) {
       result.pcofins = totalCofins;
-      result.vcofins = base * (totalCofins / 100);
+      result.vcofins = r2(base * (totalCofins / 100));
     }
   } catch (e) { console.warn('[SIEG-EMIT] Erro ao extrair impostos:', e.message); }
 

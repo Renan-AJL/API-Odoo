@@ -492,12 +492,15 @@ ${xmlEndereco(partner, 'enderDest')}
   });
 
   // === total (somar impostos reais das linhas) ===
+  // REGRA SEFAZ: cada item DEVE ser arredondado a 2 casas antes de somar.
+  // O total deve ser a soma exata dos valores que aparecem no XML por item.
+  // Se somarmos valores brutos e arredondarmos só o total, diverge (cStat 603/602).
   let vBC_total = 0, vICMS_total = 0, vPIS_total = 0, vCOFINS_total = 0;
   lines.forEach(line => {
-    vBC_total += parseFloat(line.vbc_icms || line.vbc || 0);
-    vICMS_total += parseFloat(line.vicms || 0);
-    vPIS_total += parseFloat(line.vpis || 0);
-    vCOFINS_total += parseFloat(line.vcofins || 0);
+    vBC_total += round2(parseFloat(line.vbc_icms || line.vbc || 0));
+    vICMS_total += round2(parseFloat(line.vicms || 0));
+    vPIS_total += round2(parseFloat(line.vpis || 0));
+    vCOFINS_total += round2(parseFloat(line.vcofins || 0));
   });
 
   // vTotTrib: NT2024/004 com IBSCBS — a SEFAZ PR-v4_9_86 calcula como 0.00 quando nao ha
