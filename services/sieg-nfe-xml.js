@@ -313,7 +313,14 @@ function gerarXmlNFe(data) {
 
   // IE destinatário: log info (validacao já feita pelo calcIndIEDest)
   var destIeVal = (partner.inscr_est || '').replace(/\D/g, '');
-  var destIeDisplay = partner.inscr_est || (docDest2.length === 14 ? 'ISENTO (indIEDest=2)' : '(vazio)');
+  var destIeDisplay = '';
+  if (destIeVal && destIeVal.length >= 2) {
+    destIeDisplay = destIeVal; // IE numerica valida
+  } else if (docDest2.length === 14) {
+    destIeDisplay = '(vazio — indIEDest=2, isento)';
+  } else {
+    destIeDisplay = '(vazio — indIEDest=9, nao contribuinte)';
+  }
   logField('IE', destIeDisplay, false);
   logField('indIEDest', _indIEDestCalc);
 
@@ -442,8 +449,7 @@ ${xmlEndereco(company, 'enderEmit')}
       ${destTag ? `<${destTag}>${docDest}</${destTag}>` : '<CPF>00000000000</CPF>'}
       <xNome>${esc(partner.legal_name || partner.xNome || '')}</xNome>
 ${xmlEndereco(partner, 'enderDest')}
-      <indIEDest>${indIEDest}</indIEDest>${(partner.inscr_est && onlyNum(partner.inscr_est)) ? `
-      <IE>${onlyNum(partner.inscr_est)}</IE>` : ''}${partner.email ? `
+      <indIEDest>${indIEDest}</indIEDest>${(() => { const ieNum = onlyNum(partner.inscr_est || ''); return (ieNum && ieNum.length >= 2 && ieNum !== 'ISENTO') ? `\n      <IE>${ieNum}</IE>` : ''; })()}${partner.email ? `
       <email>${esc(partner.email)}</email>` : ''}
     </dest>`;
 
@@ -735,11 +741,13 @@ function calcIndIEDest(partner) {
   const ieNum = onlyNum(ie);
   const uf = partner.state || partner.UF || '';
   const docDest = onlyNum(partner.cnpj_cpf || '');
-  // IE preenchida com valor valido -> contribuinte
-  if (ie && ieNum !== '' && ieNum !== 'ISENTO') return '1';
-  // CNPJ sem IE: isento de ICMS (indIEDest=2)
-  // Para CFOP 5xxx/6xxx, SEFAZ exige IE ou ISENTO para CNPJ
-  if (docDest.length === 14) return '2'; // isento
+  // IE preenchida com valor numerico valido -> contribuinte ICMS
+  if (ie && ieNum !== '' && ieNum !== 'ISENTO' && ieNum.length >= 2) return '1';
+  // CNPJ sem IE numerica:
+  //   indIEDest=2 (Isento/nao contribuinte ICMS) — NAO enviar tag <IE>
+  //   O XSD TIeDestNaoIsento so aceita [0-9]{2,14}, literal ISENTO e REJEITADO (cStat 225)
+  //   SEFAZ-PR aceita indIEDest=2 sem tag <IE> (validado em producao 17/09/2026)
+  if (docDest.length === 14) return '2'; // isento/nao contribuinte ICMS
   // CPF sem IE: nao contribuinte
   return '9';
 }
