@@ -443,8 +443,7 @@ ${xmlEndereco(company, 'enderEmit')}
       <xNome>${esc(partner.legal_name || partner.xNome || '')}</xNome>
 ${xmlEndereco(partner, 'enderDest')}
       <indIEDest>${indIEDest}</indIEDest>${(partner.inscr_est && onlyNum(partner.inscr_est)) ? `
-      <IE>${onlyNum(partner.inscr_est)}</IE>` : (indIEDest === '2' ? `
-      <IE>ISENTO</IE>` : '')}${partner.email ? `
+      <IE>${onlyNum(partner.inscr_est)}</IE>` : ''}${partner.email ? `
       <email>${esc(partner.email)}</email>` : ''}
     </dest>`;
 
