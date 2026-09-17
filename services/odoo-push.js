@@ -168,7 +168,7 @@ async function pushBoletosToOdoo(pushData) {
         // 1. Criar attachment
         var attachId = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'ir.attachment', 'create', [{
           name: filename,
-          datas: pdfB64,
+          raw: pdfB64,
           res_model: 'account.move',
           res_id: recordId,
           mimetype: 'application/pdf',

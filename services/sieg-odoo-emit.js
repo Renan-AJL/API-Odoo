@@ -388,7 +388,7 @@ async function postChatterResult(client, db, uid, pwd, moveId, moveName, tipo, i
       var xmlB64 = Buffer.from(xmlContent, 'utf-8').toString('base64');
       var xmlAttach = await executeKw(client, db, uid, pwd, 'ir.attachment', 'create', [{
         name: nfLabel + '_' + safeName + '.xml',
-        datas: xmlB64,
+        raw: xmlB64,
         res_model: 'account.move',
         res_id: moveId,
         mimetype: 'application/xml',
@@ -404,7 +404,7 @@ async function postChatterResult(client, db, uid, pwd, moveId, moveName, tipo, i
       var pdfLabel = tipo === 'nfe' ? 'DANFE' : 'DANFSE';
       var pdfAttach = await executeKw(client, db, uid, pwd, 'ir.attachment', 'create', [{
         name: pdfLabel + '_' + safeName + '.pdf',
-        datas: pdfBase64,
+        raw: pdfBase64,
         res_model: 'account.move',
         res_id: moveId,
         mimetype: 'application/pdf',
