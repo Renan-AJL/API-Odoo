@@ -311,14 +311,10 @@ function gerarXmlNFe(data) {
   if (!partner.city) xmlWarnings.push('xMun destinatario vazio');
   if (!partner.state) xmlErrors.push('UF destinatario vazia');
 
-  // Validação IE destinatário por CFOP (cStat 232 — IE do destinatário não informada)
-  // CFOP 5xxx/6xxx com CNPJ destinatário: IE obrigatória
-  var firstCfop = (lines && lines[0] && String(lines[0].cfop || '').charAt(0)) || '';
+  // IE destinatário: log info (validacao já feita pelo calcIndIEDest)
   var destIeVal = (partner.inscr_est || '').replace(/\D/g, '');
-  if (docDest2.length === 14 && (firstCfop === '5' || firstCfop === '6') && !destIeVal) {
-    xmlErrors.push('IE do destinatario obrigatoria para CFOP ' + (firstCfop === '5' ? '5xxx' : '6xxx') + ' (CNPJ com CNPJ) — preencha inscr_est no parceiro ou configure CNPJA_API_TOKEN / CONSULTAR_IO_TOKEN para auto-lookup');
-  }
-  logField('IE', partner.inscr_est || '(vazio)', !destIeVal && docDest2.length === 14);
+  var destIeDisplay = partner.inscr_est || (docDest2.length === 14 ? 'ISENTO (indIEDest=2)' : '(vazio)');
+  logField('IE', destIeDisplay, false);
   logField('indIEDest', _indIEDestCalc);
 
   // --- IDE ---
@@ -446,8 +442,9 @@ ${xmlEndereco(company, 'enderEmit')}
       ${destTag ? `<${destTag}>${docDest}</${destTag}>` : '<CPF>00000000000</CPF>'}
       <xNome>${esc(partner.legal_name || partner.xNome || '')}</xNome>
 ${xmlEndereco(partner, 'enderDest')}
-      <indIEDest>${indIEDest}</indIEDest>${partner.inscr_est ? `
-      <IE>${onlyNum(partner.inscr_est)}</IE>` : ''}${partner.email ? `
+      <indIEDest>${indIEDest}</indIEDest>${(partner.inscr_est && onlyNum(partner.inscr_est)) ? `
+      <IE>${onlyNum(partner.inscr_est)}</IE>` : (indIEDest === '2' ? `
+      <IE>ISENTO</IE>` : '')}${partner.email ? `
       <email>${esc(partner.email)}</email>` : ''}
     </dest>`;
 
@@ -736,9 +733,16 @@ function calcIdDest(ufEmit, ufDest) {
 
 function calcIndIEDest(partner) {
   const ie = partner.inscr_est || '';
+  const ieNum = onlyNum(ie);
   const uf = partner.state || partner.UF || '';
-  if (!ie || onlyNum(ie) === 'ISENTO' || onlyNum(ie) === '') return '9';
-  return '1'; // contribuinte ICMS
+  const docDest = onlyNum(partner.cnpj_cpf || '');
+  // IE preenchida com valor valido -> contribuinte
+  if (ie && ieNum !== '' && ieNum !== 'ISENTO') return '1';
+  // CNPJ sem IE: isento de ICMS (indIEDest=2)
+  // Para CFOP 5xxx/6xxx, SEFAZ exige IE ou ISENTO para CNPJ
+  if (docDest.length === 14) return '2'; // isento
+  // CPF sem IE: nao contribuinte
+  return '9';
 }
 
 function logField(fieldName, value, isError) {

@@ -1073,10 +1073,21 @@ function parseResult(resultado, tipo) {
 }
 
 async function readCityIbge(client, db, uid, pwd, cityId) {
-  try {
-    var c = await executeKw(client, db, uid, pwd, 'res.city', 'read', [[cityId], ['ibge_code']]);
-    if (c && c[0] && c[0].ibge_code) return String(c[0].ibge_code);
-  } catch (e) {}
+  // Tenta varios nomes de campo IBGE possiveis no Odoo
+  var ibgeFields = ['ibge_code', 'code', 'l10n_br_ibge_code', 'x_studio_ibge_code'];
+  for (var i = 0; i < ibgeFields.length; i++) {
+    try {
+      var c = await executeKw(client, db, uid, pwd, 'res.city', 'read', [[cityId], [ibgeFields[i]]]);
+      if (c && c[0] && c[0][ibgeFields[i]]) {
+        var val = String(c[0][ibgeFields[i]]);
+        if (val.length === 7 && /^\d{7}$/.test(val)) {
+          if (ibgeFields[i] !== 'ibge_code') console.log('[SIEG-EMIT] IBGE lido de res.city.' + ibgeFields[i] + ': ' + val);
+          return val;
+        }
+      }
+    } catch (e) {}
+  }
+  // Tenta l10n_br.city
   try {
     var c2 = await executeKw(client, db, uid, pwd, 'l10n_br.city', 'read', [[cityId], ['ibge_code']]);
     if (c2 && c2[0] && c2[0].ibge_code) return String(c2[0].ibge_code);
@@ -1116,47 +1127,54 @@ async function searchCityIbge(client, db, uid, pwd, cityName, stateId) {
  * Chave: 'CIDADE/UF' (normalizado) -> codigo IBGE 7 digitos
  */
 var IBGE_FALLBACK = {
+  // PR - Parana
   'CURITIBA/PR': '4106902',
-  'SAO PAULO/SP': '3550308',
-  'RIO DE JANEIRO/RJ': '3304557',
-  'BELO HORIZONTE/MG': '3106200',
-  'PORTO ALEGRE/RS': '4314902',
-  'SALVADOR/BA': '2927408',
-  'BRASILIA/DF': '5300108',
-  'FORTALEZA/CE': '2304400',
-  'RECIFE/PE': '2611606',
-  'CURITIBA/PR': '4106902',
-  'GUARULHOS/SP': '3518800',
-  'CAMPINAS/SP': '3509502',
-  'SAO BERNARDO DO CAMPO/SP': '3548708',
-  'SANTOS/SP': '3548500',
-  'RIBEIRAO PRETO/SP': '3543402',
-  'UBERLANDIA/MG': '3170206',
   'LONDRINA/PR': '4113700',
   'MARINGA/PR': '4115200',
   'PONTA GROSSA/PR': '4119905',
   'FOZ DO IGUACU/PR': '4108304',
   'CAMPO MOURAO/PR': '4104803',
   'CASCAVEL/PR': '4104808',
-  'JOINVILLE/SC': '4209102',
-  'FLORIANOPOLIS/SC': '4205407',
-  'BALNEARIO CAMBORIU/SC': '4202008',
+  'PONTAL DO PARANA/PR': '4119601',
+  'SAO JOSE DOS PINHAIS/PR': '4115506',
+  'COLOMBO/PR': '4105805',
+  'GUARAPUAVA/PR': '4109405',
+  'PARANAGUA/PR': '4118200',
+  'PINHAIS/PR': '4119409',
+  'ARAUCARIA/PR': '4101808',
+  'TOLEDO/PR': '4127700',
+  'APUCARANA/PR': '4101400',
+  'ALMIRANTE TAMANDARE/PR': '4101008',
+  'UMUARAMA/PR': '4129307',
+  'CAMBE/PR': '4104303',
+  'IBIPORA/PR': '4111709',
+  'ROLANDIA/PR': '4122404',
+  'MAL. CANDIDO RONDON/PR': '4114903',
+  'SARANDI/PR': '4123302',
+  'MEDIANEIRA/PR': '4106608',
+  'PALOTINA/PR': '4117709',
+  'MATINHOS/PR': '4112103',
+  'CAPOEIRAO/PR': '4103305',
+  'IMBITUVA/PR': '4111006',
+  'TELEMACO BORBA/PR': '4121802',
+  'IRATI/PR': '4110602',
+  'GUARANIACU/PR': '4109801',
+  'PATO BRANCO/PR': '4115500',
+  'FRANCISCO BELTRAO/PR': '4108203',
+  '2 DE MAIO/PR': '4100854',
+  // SP - Sao Paulo
+  'SAO PAULO/SP': '3550308',
+  'GUARULHOS/SP': '3518800',
+  'CAMPINAS/SP': '3509502',
+  'SAO BERNARDO DO CAMPO/SP': '3548708',
+  'SANTOS/SP': '3548500',
+  'RIBEIRAO PRETO/SP': '3543402',
   'ITU/SP': '3523909',
   'JUNDIAI/SP': '3525904',
   'SOROCABA/SP': '3552205',
   'SAO JOSE DOS CAMPOS/SP': '3549904',
   'SANTO ANDRE/SP': '3548807',
   'SAO JOSE DO RIO PRETO/SP': '3549805',
-  'MANAUS/AM': '1302603',
-  'BELEM/PA': '1501402',
-  'GOIANIA/GO': '5208707',
-  'VITORIA/ES': '3205309',
-  'VOLTA REDONDA/RJ': '3306305',
-  'NILOPOLIS/RJ': '3303203',
-  'MESQUITA/RJ': '3302858',
-  'DUQUE DE CAXIAS/RJ': '3301702',
-  'NOVA IGUACU/RJ': '3303500',
-  'SAO GONCALO/RJ': '3304904',
   'MAUA/SP': '3529401',
   'DIADEMA/SP': '3513801',
   'OSASCO/SP': '3534401',
@@ -1164,16 +1182,81 @@ var IBGE_FALLBACK = {
   'MOGI DAS CRUZES/SP': '3530607',
   'SUZANO/SP': '3552503',
   'TABOAO DA SERRA/SP': '3552809',
+  'BAURU/SP': '3506003',
+  'PIRACICABA/SP': '3538709',
+  'SOROCABA/SP': '3552205',
+  'LIMEIRA/SP': '3526902',
+  // RJ - Rio de Janeiro
+  'RIO DE JANEIRO/RJ': '3304557',
+  'VOLTA REDONDA/RJ': '3306305',
+  'NILOPOLIS/RJ': '3303203',
+  'MESQUITA/RJ': '3302858',
+  'DUQUE DE CAXIAS/RJ': '3301702',
+  'NOVA IGUACU/RJ': '3303500',
+  'SAO GONCALO/RJ': '3304904',
+  'NITEROI/RJ': '3303302',
+  'PETROPOLIS/RJ': '3303906',
+  // MG - Minas Gerais
+  'BELO HORIZONTE/MG': '3106200',
+  'UBERLANDIA/MG': '3170206',
+  'CONTAGEM/MG': '3118601',
+  'JUIZ DE FORA/MG': '3137702',
+  // RS - Rio Grande do Sul
+  'PORTO ALEGRE/RS': '4314902',
+  'CAXIAS DO SUL/RS': '4305108',
+  'PELOTAS/RS': '4313407',
+  'SANTA MARIA/RS': '4316907',
+  // SC - Santa Catarina
+  'JOINVILLE/SC': '4209102',
+  'FLORIANOPOLIS/SC': '4205407',
+  'BALNEARIO CAMBORIU/SC': '4202008',
+  'BLUMENAU/SC': '4202404',
+  'LAGES/SC': '4209300',
+  'CRICIUMA/SC': '4204606',
+  'CHAPECO/SC': '4204202',
+  // Outros
+  'SALVADOR/BA': '2927408',
+  'BRASILIA/DF': '5300108',
+  'FORTALEZA/CE': '2304400',
+  'RECIFE/PE': '2611606',
+  'MANAUS/AM': '1302603',
+  'BELEM/PA': '1501402',
+  'GOIANIA/GO': '5208707',
+  'VITORIA/ES': '3205309',
+  'CURITIBA/PR': '4106902',
 };
+
+/**
+ * Normaliza nome de cidade: remove acentos, cedilha, etc.
+ * Para matching na tabela IBGE fallback.
+ */
+function normalizeCityName(name) {
+  if (!name) return '';
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove diacriticos
+    .replace(/\u00e7/g, 'c')          // cedilha -> c
+    .replace(/\u00c7/g, 'C')
+    .toUpperCase()
+    .trim();
+}
 
 function lookupIbgeFallback(cityName, stateCode) {
   if (!cityName || !stateCode) return '';
-  var key = (cityName.toUpperCase().trim() + '/' + stateCode.toUpperCase().trim());
+  var key = (normalizeCityName(cityName) + '/' + stateCode.toUpperCase().trim());
   var code = IBGE_FALLBACK[key];
   if (code) {
     console.log('[SIEG-EMIT] IBGE via tabela fallback: ' + key + ' = ' + code);
+    return code;
   }
-  return code || '';
+  // Fallback: tenta sem preposicoes comuns ("do", "da", "de", "das", "dos")
+  var simplified = key.replace(/\b(D|DA|DE|DO|DAS|DOS)\b/g, '').replace(/\s+/g, ' ').trim();
+  code = IBGE_FALLBACK[simplified];
+  if (code) {
+    console.log('[SIEG-EMIT] IBGE via tabela fallback (simplificado): ' + simplified + ' = ' + code);
+    return code;
+  }
+  return '';
 }
 
 function tupId(val) {
