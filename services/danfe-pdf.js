@@ -329,7 +329,8 @@ async function gerarDanfePdf(nfeProcXml, opts) {
     doc.fontSize(6).font('Helvetica-Bold').text('BOLETO', L, y); y += 8;
     // Se temos boletos via opts, mostrar cada um
     if (optBoletos.length > 0) {
-      optBoletos.forEach(function(bol) {
+      for (var bi = 0; bi < optBoletos.length; bi++) {
+        var bol = optBoletos[bi];
         if (y > doc.page.height - 50) { doc.addPage(); y = doc.page.margins.top; }
         var bolH = 36;
         box(L, y, W, bolH);
@@ -348,7 +349,7 @@ async function gerarDanfePdf(nfeProcXml, opts) {
           }
         }
         y += bolH + 2;
-      });
+      }
     } else if (boletoMatch) {
       box(L, y, W, 36);
       var nnBol = boletoMatch[1] || '';
