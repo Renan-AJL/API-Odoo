@@ -1,0 +1,1590 @@
+     1→/**
+     2→ * services/sieg-odoo-emit.js v2.0.0
+     3→ * =============================================
+     4→ * Processa emissoes pendentes de NF-e/NFS-e via polling Odoo XML-RPC.
+     5→ * 
+     6→ * CAMPOS USADOS (existentes no Odoo do cliente):
+     7→ *   account.move:
+     8→ *     x_studio_nfe_status     (Selection: vazio, pendente, processando, autorizada, erro)
+     9→ *     x_studio_nfe_chave      (Char)
+    10→ *     x_studio_nfe_protocolo  (Char)
+    11→ *     x_studio_nfse_numero    (Char)
+    12→ *     x_studio_nfse_status    (Selection: vazio, pendente, processando, autorizada, erro)
+    13→ *   res.company:
+    14→ *     x_studio_sieg_ultimo_nfe  (Integer)
+    15→ *     x_studio_sieg_ultimo_nfse (Integer)
+    16→ *     x_studio_sieg_serie_nfe   (Char, default 100)
+    17→ *     x_studio_sieg_serie_nfse  (Char, default 1)
+    18→ *   product.product:
+    19→ *     x_studio_c_trib_nac       (Char) — Codigo tributo nacional (NFS-e)
+    20→ *     x_studio_c_nbs            (Char) — Codigo NBS (NFS-e)
+    21→ *     x_studio_aliquota_iss    (Char) — Aliquota ISS (NFS-e)
+    22→ *     x_studio_ibge_code       (Char) — Codigo IBGE municipio
+    23→ *
+    24→ * Chatter: apos emissao, XML + PDF (DANFE/DANFSE) aparecem como anexos.
+    25→ */
+    26→
+    27→var xmlrpc = require('xmlrpc');
+    28→var { emitirNota } = require('./sieg-api');
+    29→var config = require('../config');
+    30→var { IeService } = require('./ie.service');
+    31→var _ieService = new IeService();
+    32→
+    33→// ============================================================
+    34→// XML-RPC Helpers
+    35→// ============================================================
+    36→function createClient(url) {
+    37→  var base = url.replace(/\/+$/, '');
+    38→  var host = base.replace('https://', '').replace('http://', '');
+    39→  var port = base.startsWith('https') ? 443 : 80;
+    40→  var isSecure = base.startsWith('https');
+    41→  var createFn = isSecure ? xmlrpc.createSecureClient : xmlrpc.createClient;
+    42→  return {
+    43→    common: createFn({ host: host, path: '/xmlrpc/2/common', port: port }),
+    44→    models: createFn({ host: host, path: '/xmlrpc/2/object', port: port }),
+    45→  };
+    46→}
+    47→
+    48→function authenticate(client, db, login, password) {
+    49→  return new Promise(function(resolve, reject) {
+    50→    client.common.methodCall('authenticate', [db, login, password, {}], function(err, uid) {
+    51→      if (err) reject(new Error('Auth Odoo falhou: ' + (err.message || JSON.stringify(err))));
+    52→      else if (uid === false || uid === null) reject(new Error('Credenciais Odoo invalidas'));
+    53→      else resolve(uid);
+    54→    });
+    55→  });
+    56→}
+    57→
+    58→function executeKw(client, db, uid, password, model, method, args, kwargs) {
+    59→  return new Promise(function(resolve, reject) {
+    60→    var params = [db, uid, password, model, method, args || []];
+    61→    if (kwargs) params.push(kwargs);
+    62→    client.models.methodCall('execute_kw', params, function(err, result) {
+    63→      if (err) reject(new Error(model + '.' + method + ': ' + (err.message || JSON.stringify(err))));
+    64→      else resolve(result);
+    65→    });
+    66→  });
+    67→}
+    68→
+    69→// ============================================================
+    70→// Main: Process Pending Emissions
+    71→// ============================================================
+    72→async function processPendingEmissions() {
+    73→  var odoo = config.odoo;
+    74→  if (!odoo || !odoo.enabled || !odoo.url) {
+    75→    console.log('[SIEG-EMIT] Odoo nao configurado');
+    76→    return { processed: 0, reason: 'odoo_not_configured' };
+    77→  }
+    78→
+    79→  var client = createClient(odoo.url);
+    80→  var uid = await authenticate(client, odoo.db, odoo.user, odoo.password);
+    81→  var db = odoo.db;
+    82→  var pwd = odoo.password;
+    83→
+    84→  console.log('[SIEG-EMIT] Buscando faturas pendentes...');
+    85→
+    86→  // Buscar NF-e pendentes
+    87→  var nfeIds = await executeKw(client, db, uid, pwd, 'account.move', 'search', [[
+    88→    ['move_type', '=', 'out_invoice'],
+    89→    ['x_studio_nfe_status', '=', 'pendente'],
+    90→  ]], { order: 'id asc', limit: 5 });
+    91→
+    92→  // Buscar NFS-e pendentes
+    93→  var nfseIds = await executeKw(client, db, uid, pwd, 'account.move', 'search', [[
+    94→    ['move_type', '=', 'out_invoice'],
+    95→    ['x_studio_nfse_status', '=', 'pendente'],
+    96→  ]], { order: 'id asc', limit: 5 });
+    97→
+    98→  var allPending = [];
+    99→  for (var i = 0; i < nfeIds.length; i++) {
+   100→    allPending.push({ id: nfeIds[i], tipo: 'nfe' });
+   101→  }
+   102→  for (var j = 0; j < nfseIds.length; j++) {
+   103→    allPending.push({ id: nfseIds[j], tipo: 'nfse' });
+   104→  }
+   105→
+   106→  if (!allPending.length) {
+   107→    console.log('[SIEG-EMIT] Nenhuma fatura pendente');
+   108→    return { processed: 0 };
+   109→  }
+   110→
+   111→  console.log('[SIEG-EMIT] ' + allPending.length + ' fatura(s) pendente(s)');
+   112→  var results = [];
+   113→
+   114→  for (var k = 0; k < allPending.length; k++) {
+   115→    var item = allPending[k];
+   116→    try {
+   117→      var r = await processOne(client, db, uid, pwd, item.id, item.tipo);
+   118→      results.push(r);
+   119→    } catch (err) {
+   120→      console.error('[SIEG-EMIT] ERRO fatura ' + item.id + ':', err.message);
+   121→      await safeUpdateError(client, db, uid, pwd, item.id, item.tipo, err.message);
+   122→      results.push({ move_id: item.id, sucesso: false, tipo: item.tipo, erro: err.message });
+   123→    }
+   124→  }
+   125→
+   126→  var ok = results.filter(function(r) { return r.sucesso; }).length;
+   127→  console.log('[SIEG-EMIT] Concluido: ' + ok + '/' + results.length + ' sucesso');
+   128→  return { processed: results.length, sucesso: ok, detalhes: results };
+   129→}
+   130→
+   131→// ============================================================
+   132→// Process Single Invoice
+   133→// ============================================================
+   134→async function processOne(client, db, uid, pwd, moveId, tipo) {
+   135→  console.log('[SIEG-EMIT] --- Fatura ID: ' + moveId + ' | Tipo: ' + tipo + ' ---');
+   136→
+   137→  // 1. Read account.move (sem invoice_line_ids — pode ser computed nao-stored no Odoo 19)
+   138→  var moves = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], [
+   139→    'name', 'partner_id', 'company_id', 'invoice_date', 'date',
+   140→    'amount_total', 'narration',
+   141→    'x_studio_nfe_status', 'x_studio_nfse_status', 'payment_state',
+   142→    'x_studio_nosso_numero', 'x_studio_itau_resposta_json', 'x_studio_boleto_cancelado',
+   143→    'invoice_line_ids', 'line_ids',
+   144→  ]]);
+   145→  if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
+   146→  var move = moves[0];
+   147→  console.log('[SIEG-EMIT] Fatura: ' + move.name + ' | R$ ' + (move.amount_total || 0));
+   148→
+   149→  // 1b. Read sale order origin (invoice_origin / sale_order_ids) for pedido number
+   150→  var saleOrderNumber = '';
+   151→  try {
+   152→    // Try invoice_origin field first
+   153→    var moveOrigin = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], ['invoice_origin', 'ref']]);
+   154→    if (moveOrigin && moveOrigin[0]) {
+   155→      saleOrderNumber = moveOrigin[0].invoice_origin || moveOrigin[0].ref || '';
+   156→    }
+   157→    // If still empty, try sale_order_ids (M2M field)
+   158→    if (!saleOrderNumber) {
+   159→      var soIds = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], ['sale_order_ids']]);
+   160→      if (soIds && soIds[0] && soIds[0].sale_order_ids && soIds[0].sale_order_ids.length > 0) {
+   161→        var soNames = await executeKw(client, db, uid, pwd, 'sale.order', 'read', [[soIds[0].sale_order_ids[0]], ['name']]);
+   162→        if (soNames && soNames[0]) saleOrderNumber = soNames[0].name || '';
+   163→      }
+   164→    }
+   165→  } catch (e) {
+   166→    console.log('[SIEG-EMIT] Campo invoice_origin/sale_order_ids nao disponivel: ' + e.message);
+   167→  }
+   168→  if (saleOrderNumber) {
+   169→    console.log('[SIEG-EMIT] Pedido de venda origem: ' + saleOrderNumber);
+   170→  }
+   171→
+   172→  // 1c. Read boleto data from Itaú response JSON
+   173→  var boletoInfo = '';
+   174→  var boletoDataList = [];
+   175→  try {
+   176→    var rawJson = move.x_studio_itau_resposta_json || '';
+   177→    if (rawJson) {
+   178→      var jsonStr = rawJson.replace(/'/g, '"').replace(/True/g, 'true').replace(/False/g, 'false').replace(/None/g, 'null');
+   179→      var parsed = JSON.parse(jsonStr);
+   180→      var pagamentos = parsed.pagamentos || [];
+   181→      var boletoParts = [];
+   182→      for (var pi = 0; pi < pagamentos.length; pi++) {
+   183→        var p = pagamentos[pi];
+   184→        if (p.nosso_numero) {
+   185→          var bolEntry = { nosso_numero: p.nosso_numero };
+   186→          var part = 'Boleto: NN=' + p.nosso_numero;
+   187→          if (p.linha_digitavel) {
+   188→            part += ' LD=' + p.linha_digitavel;
+   189→            bolEntry.linha_digitavel = p.linha_digitavel;
+   190→          }
+   191→          if (p.codigo_barras) {
+   192→            part += ' CB=' + p.codigo_barras;
+   193→            bolEntry.codigo_barras = p.codigo_barras;
+   194→          }
+   195→          boletoParts.push(part);
+   196→          boletoDataList.push(bolEntry);
+   197→        }
+   198→      }
+   199→      if (boletoParts.length > 0) {
+   200→        boletoInfo = boletoParts.join(' | ');
+   201→      }
+   202→    }
+   203→    // Also try nosso_numero directly if no JSON boletos found
+   204→    if (boletoDataList.length === 0 && move.x_studio_nosso_numero) {
+   205→      boletoInfo = 'Boleto: NN=' + move.x_studio_nosso_numero;
+   206→      boletoDataList.push({ nosso_numero: move.x_studio_nosso_numero });
+   207→    }
+   208→  } catch (e) {
+   209→    console.log('[SIEG-EMIT] Erro ao ler dados de boleto: ' + e.message);
+   210→  }
+   211→  if (boletoInfo) {
+   212→    console.log('[SIEG-EMIT] Boleto info: ' + boletoInfo.substring(0, 200));
+   213→  }
+   214→
+   215→  // 2. Read company
+   216→  var companyId = tupId(move.company_id);
+   217→  var company = await readCompany(client, db, uid, pwd, companyId);
+   218→  console.log('[SIEG-EMIT] [EMITENTE] CNPJ=' + company.cnpj_cpf + ' IE=' + company.inscr_est + ' cMun=' + company.city_ibge_code + ' xMun=' + company.city + ' UF=' + company.state + ' xLgr=' + company.street + ' nro=' + company.number);
+   219→
+   220→  // 3. Read partner
+   221→  var partnerId = tupId(move.partner_id);
+   222→  if (!partnerId) throw new Error('Fatura sem parceiro');
+   223→  var partner = await readPartner(client, db, uid, pwd, partnerId);
+   224→  console.log('[SIEG-EMIT] [DESTINATARIO] CNPJ=' + partner.cnpj_cpf + ' IE=' + (partner.inscr_est || '(vazio)') + ' xNome=' + partner.xNome + ' cMun=' + partner.city_ibge_code + ' xMun=' + partner.city + ' UF=' + partner.state + ' xLgr=' + partner.street + ' nro=' + partner.number);
+   225→
+   226→  // 3b. Auto-lookup IE do destinatario se vazio (SEFAZ cStat 232 exige IE para CFOP 5xxx/6xxx)
+   227→  if (!partner.inscr_est || String(partner.inscr_est).trim() === '') {
+   228→    var partnerCnpj = (partner.cnpj_cpf || '').replace(/\D/g, '');
+   229→    var partnerUf = partner.state || '';
+   230→    if (partnerCnpj.length === 14) {
+   231→      console.log('[SIEG-EMIT] [DEST-IE] IE vazia no Odoo. Tentando auto-lookup CNPJ=' + partnerCnpj + ' UF=' + partnerUf);
+   232→      try {
+   233→        var ieResult = await _ieService.obterIE(partnerCnpj, null, partnerUf);
+   234→        if (ieResult.hasIE && ieResult.ie) {
+   235→          partner.inscr_est = ieResult.ie;
+   236→          console.log('[SIEG-EMIT] [DEST-IE] IE encontrada: ' + ieResult.ie + ' (UF=' + (ieResult.ieState || partnerUf) + ') via ' + ieResult.source);
+   237→          // Tentar salvar IE no Odoo para futuras emissoes
+   238→          try {
+   239→            await executeKw(client, db, uid, pwd, 'res.partner', 'write', [[partnerId], { inscr_est: ieResult.ie }]);
+   240→            console.log('[SIEG-EMIT] [DEST-IE] IE salva no parceiro Odoo (id=' + partnerId + ')');
+   241→          } catch (writeErr) {
+   242→            console.warn('[SIEG-EMIT] [DEST-IE] Nao conseguiu salvar IE no Odoo: ' + writeErr.message);
+   243→          }
+   244→        } else {
+   245→          console.warn('[SIEG-EMIT] [DEST-IE] IE nao encontrada em nenhuma fonte. Motivos: ' + JSON.stringify(ieResult.reasons || []));
+   246→          console.warn('[SIEG-EMIT] [DEST-IE] Emissao provavelmente sera rejeitada pela SEFAZ (cStat 232) se CFOP exigir IE.');
+   247→        }
+   248→      } catch (ieErr) {
+   249→        console.error('[SIEG-EMIT] [DEST-IE] Erro no auto-lookup de IE: ' + ieErr.message);
+   250→      }
+   251→    } else if (partnerCnpj.length === 11) {
+   252→      console.log('[SIEG-EMIT] [DEST-IE] Destinatario CPF (consumidor final) — IE nao necessaria');
+   253→    } else {
+   254→      console.warn('[SIEG-EMIT] [DEST-IE] CNPJ/CPF invalido (' + partnerCnpj.length + ' digitos) — sem auto-lookup de IE');
+   255→    }
+   256→  } else {
+   257→    console.log('[SIEG-EMIT] [DEST-IE] IE ja preenchida no Odoo: ' + partner.inscr_est);
+   258→  }
+   259→
+   260→  // 4. Read invoice lines diretamente de account.move.line (evita computed field)
+   261→  var allLineIds = await executeKw(client, db, uid, pwd, 'account.move.line', 'search', [[
+   262→    ['move_id', '=', moveId],
+   263→  ]], { order: 'id asc' });
+   264→  console.log('[SIEG-EMIT] Linhas encontradas na fatura: ' + allLineIds.length);
+   265→  var rawLines = await executeKw(client, db, uid, pwd, 'account.move.line', 'read', [allLineIds, [
+   266→    'display_type', 'product_id', 'name', 'quantity', 'price_unit',
+   267→    'price_subtotal', 'tax_ids', 'discount',
+   268→  ]]);
+   269→  // Debug: log todas as linhas
+   270→  for (var li = 0; li < rawLines.length; li++) {
+   271→    var l = rawLines[li];
+   272→    var pName = 'N/A';
+   273→    if (l.product_id) pName = Array.isArray(l.product_id) ? l.product_id[1] : String(l.product_id);
+   274→    console.log('[SIEG-EMIT]   Line ' + li + ': display_type=' + JSON.stringify(l.display_type) + ' product=' + pName + ' qty=' + l.quantity + ' price=' + l.price_unit);
+   275→  }
+   276→  // Filtro principal: linhas com produto associado (mais confiavel que display_type)
+   277→  var invoiceLines = rawLines.filter(function(l) { return l.product_id; });
+   278→  // Fallback: se nenhuma tem product_id, tenta por display_type
+   279→  if (!invoiceLines.length) {
+   280→    invoiceLines = rawLines.filter(function(l) {
+   281→      var dt = l.display_type;
+   282→      return !dt || dt === 'product' || dt === 'service';
+   283→    });
+   284→  }
+   285→  if (!invoiceLines.length) throw new Error('Fatura sem linhas de produto/servico (total: ' + rawLines.length + ', com product: 0)');
+   286→  console.log('[SIEG-EMIT] Linhas de produto: ' + invoiceLines.length);
+   287→
+   288→  // 5. Get next NF number from company
+   289→  var serie, numField, nextNum;
+   290→  if (tipo === 'nfe') {
+   291→    serie = String(company.x_studio_sieg_serie_nfe || '100');
+   292→    numField = 'x_studio_sieg_ultimo_nfe';
+   293→  } else {
+   294→    serie = String(company.x_studio_sieg_serie_nfse || '1');
+   295→    numField = 'x_studio_sieg_ultimo_nfse';
+   296→  }
+   297→  nextNum = (parseInt(company[numField]) || 0) + 1;
+   298→  console.log('[SIEG-EMIT] Serie: ' + serie + ' | nNF: ' + nextNum);
+   299→
+   300→  // 6. Build line data with taxes + product x_studio_ fields
+   301→  var linesData = [];
+   302→  for (var i = 0; i < invoiceLines.length; i++) {
+   303→    var ld = await buildLineData(client, db, uid, pwd, invoiceLines[i]);
+   304→    linesData.push(ld);
+   305→  }
+   306→
+   307→  // 7. Build emission payload
+   308→  // Nota: usar amount_untaxed (sem impostos) para NF-e com CSOSN 103
+   309→  // pois vNF deve ser igual a soma dos componentes (vProd + vICMS + ...)
+   310→  // e para CSOSN 103 o ICMS e 0, entao vNF = vProd
+   311→  var vProdSum = 0;
+   312→  for (var li = 0; li < linesData.length; li++) {
+   313→    vProdSum += parseFloat(linesData[li].price_subtotal) || 0;
+   314→  }
+   315→
+   316→  // Pagamentos: NF-e 4.00 — vPag deve ser igual a vNF (total SEM IBS/CBS).
+   317→  // IBS/CBS sao tributos "por fora" e nao entram no bloco <pag>.
+   318→  // Se vPag > vNF sem vTroco declarado -> cStat 866.
+   319→  var pagamentos = [{
+   320→    tPag: '15', // PIX
+   321→    vPag: String(vProdSum.toFixed(2)),
+   322→  }];
+   323→
+   324→  var emitData = {
+   325→    company: company,
+   326→    partner: partner,
+   327→    order: {
+   328→      name: move.name,
+   329→      number: String(nextNum),
+   330→      date_order: move.invoice_date || move.date,
+   331→      amount_total: vProdSum, // vNF (sem IBS/CBS) — o XML calcula vNFTot internamente
+   332→      note: move.narration || '',
+   333→      sale_order_number: saleOrderNumber || '',
+   334→      boleto_info: boletoInfo || '',
+   335→    },
+   336→    lines: linesData,
+   337→    pagamentos: pagamentos,
+   338→    boletoData: boletoDataList || [],
+   339→    config: {
+   340→      serie: serie,
+   341→      tpAmb: process.env.SIEG_TP_AMB || config.sieg.tpAmb || '2',
+   342→      natOp: 'Venda de Mercadoria',
+   343→      mod: tipo === 'nfe' ? '55' : '01',
+   344→    },
+   345→    tipo: tipo,
+   346→  };
+   347→
+   348→  // NFS-e: build service block from product x_studio_ fields
+   349→  if (tipo === 'nfse') {
+   350→    emitData.service = buildServiceBlock(linesData, move);
+   351→  }
+   352→
+   353→  // 8. Set status to 'processando'
+   354→  var processVals = {};
+   355→  if (tipo === 'nfe') processVals.x_studio_nfe_status = 'processando';
+   356→  else processVals.x_studio_nfse_status = 'processando';
+   357→  await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId], processVals]);
+   358→
+   359→  // 9. Call SIEG API
+   360→  console.log('[SIEG-EMIT] Enviando ao SIEG...');
+   361→  var resultado;
+   362→  try {
+   363→    resultado = await emitirNota(emitData);
+   364→  } catch (siegErr) {
+   365→    // Captura erros HTTP (ex: 409 com detalhes no body)
+   366→    var siegDetail = siegErr.response && siegErr.response.data;
+   367→    var errMsg = 'SIEG HTTP ' + (siegErr.response ? siegErr.response.status : 'erro') + ': ';
+   368→    if (siegDetail) {
+   369→      // Tentar extrair ErrorMessage do formato SIEG (PascalCase)
+   370→      var siegMsg = siegDetail.ErrorMessage || siegDetail.Message || siegDetail.message || '';
+   371→      if (siegMsg) {
+   372→        errMsg += siegMsg;
+   373→      } else {
+   374→        errMsg += typeof siegDetail === 'string' ? siegDetail : JSON.stringify(siegDetail).slice(0, 800);
+   375→      }
+   376→    } else {
+   377→      errMsg += siegErr.message;
+   378→    }
+   379→    console.error('[SIEG-EMIT] Erro SIEG:', errMsg);
+   380→    throw new Error(errMsg);
+   381→  }
+   382→  console.log('[SIEG-EMIT] SIEG retornou - sucesso: ' + resultado.sucesso + (resultado.httpStatus ? ' (HTTP ' + resultado.httpStatus + ')' : ''));
+   383→
+   384→  // Se SIEG retornou erro (IsSuccess=false), extrair mensagem detalhada
+   385→  if (!resultado.sucesso && resultado.erro) {
+   386→    console.error('[SIEG-EMIT] SIEG rejeitou o XML: ' + resultado.erro);
+   387→  }
+   388→
+   389→  // 10. Parse result
+   390→  var info = parseResult(resultado, tipo);
+   391→  var xmlRetornoText = '';
+   392→  var rawXmlAuth = resultado.resposta && (resultado.resposta.Xml || resultado.resposta.xml || resultado.resposta.xmlBase64);
+   393→  if (rawXmlAuth) {
+   394→    xmlRetornoText = (typeof rawXmlAuth === 'string' && rawXmlAuth.length > 200)
+   395→      ? rawXmlAuth
+   396→      : Buffer.from(rawXmlAuth, 'base64').toString('utf-8');
+   397→  }
+   398→
+   399→  // 11. Update account.move with results
+   400→  var updateVals = {};
+   401→  if (info.sucesso) {
+   402→    if (tipo === 'nfe') {
+   403→      updateVals.x_studio_nfe_status = 'autorizada';
+   404→      updateVals.x_studio_nfe_chave = info.chave;
+   405→      updateVals.x_studio_nfe_protocolo = info.protocolo;
+   406→    } else {
+   407→      updateVals.x_studio_nfse_status = 'autorizada';
+   408→      updateVals.x_studio_nfse_numero = String(nextNum);
+   409→    }
+   410→
+   411→    // Increment NF number (only on authorization)
+   412→    try {
+   413→      var companyUpdate = {};
+   414→      companyUpdate[numField] = nextNum;
+   415→      await executeKw(client, db, uid, pwd, 'res.company', 'write', [[companyId], companyUpdate]);
+   416→      console.log('[SIEG-EMIT] Sequencia ' + numField + ' = ' + nextNum);
+   417→    } catch (seqErr) {
+   418→      console.error('[SIEG-EMIT] Erro ao atualizar sequencia:', seqErr.message);
+   419→    }
+   420→  } else {
+   421→    // Falha: NUNCA gravar texto livre num campo Selection (o Odoo descarta e a
+   422→    // fatura some da fila). Grava um valor valido ('erro' ou 'pendente') e
+   423→    // mantem o motivo detalhado no chatter.
+   424→    var errStatus = statusOnError();
+   425→    if (tipo === 'nfe') {
+   426→      updateVals.x_studio_nfe_status = errStatus;
+   427→    } else {
+   428→      updateVals.x_studio_nfse_status = errStatus;
+   429→    }
+   430→    console.warn('[SIEG-EMIT] Emissao NAO autorizada -> status "' + errStatus
+   431→      + '" (motivo: ' + (info.cStat ? info.cStat + ' - ' : '') + (info.motivo || 'n/d') + ')');
+   432→  }
+   433→
+   434→  await writeStatusSafe(client, db, uid, pwd, moveId, tipo, updateVals);
+   435→  console.log('[SIEG-EMIT] Fatura atualizada');
+   436→
+   437→  // 12. Post XML + PDF to Chatter
+   438→  await postChatterResult(client, db, uid, pwd, moveId, move.name, tipo, info, resultado, xmlRetornoText);
+   439→
+   440→  return {
+   441→    move_id: moveId, sucesso: info.sucesso, tipo: tipo,
+   442→    chave: info.chave, numero: nextNum, serie: serie,
+   443→  };
+   444→}
+   445→
+   446→// ============================================================
+   447→// Post XML + PDF to Odoo Chatter
+   448→// ============================================================
+   449→async function postChatterResult(client, db, uid, pwd, moveId, moveName, tipo, info, resultado, xmlRetornoText) {
+   450→  var attachIds = [];
+   451→  var safeName = (moveName || 'Fatura').replace(/[^a-zA-Z0-9\-_]/g, '_');
+   452→  var nfLabel = tipo === 'nfe' ? 'NF-e' : 'NFS-e';
+   453→  var xmlContent = xmlRetornoText || resultado.xmlEnviado || '';
+   454→  var pdfBase64 = resultado.pdfBase64 || '';
+   455→
+   456→  // Attach XML
+   457→  if (xmlContent) {
+   458→    try {
+   459→      var xmlB64 = Buffer.from(xmlContent, 'utf-8').toString('base64');
+   460→      var xmlAttach = await executeKw(client, db, uid, pwd, 'ir.attachment', 'create', [{
+   461→        name: nfLabel + '_' + safeName + '.xml',
+   462→        raw: xmlB64,
+   463→        res_model: 'account.move',
+   464→        res_id: moveId,
+   465→        mimetype: 'application/xml',
+   466→      }]);
+   467→      attachIds.push(xmlAttach);
+   468→      console.log('[SIEG-EMIT] XML anexado (ID: ' + xmlAttach + ')');
+   469→    } catch (e) { console.error('[SIEG-EMIT] Erro anexar XML:', e.message); }
+   470→  }
+   471→
+   472→  // Attach PDF (DANFE / DANFSE)
+   473→  if (pdfBase64) {
+   474→    try {
+   475→      var pdfLabel = tipo === 'nfe' ? 'DANFE' : 'DANFSE';
+   476→      var pdfAttach = await executeKw(client, db, uid, pwd, 'ir.attachment', 'create', [{
+   477→        name: pdfLabel + '_' + safeName + '.pdf',
+   478→        raw: pdfBase64,
+   479→        res_model: 'account.move',
+   480→        res_id: moveId,
+   481→        mimetype: 'application/pdf',
+   482→      }]);
+   483→      attachIds.push(pdfAttach);
+   484→      console.log('[SIEG-EMIT] PDF anexado (ID: ' + pdfAttach + ')');
+   485→    } catch (e) { console.error('[SIEG-EMIT] Erro anexar PDF:', e.message); }
+   486→  }
+   487→
+   488→  // Post chatter message
+   489→  var body = '';
+   490→  if (info.sucesso) {
+   491→    body = '<b>' + nfLabel + ' Emitida com Sucesso!</b><br/>';
+   492→    if (tipo === 'nfe') {
+   493→      body += 'Chave: ' + info.chave + '<br/>';
+   494→      body += 'Protocolo: ' + info.protocolo + '<br/>';
+   495→    } else {
+   496→      body += 'Numero: ' + info.numero + '<br/>';
+   497→    }
+   498→    body += 'Status: ' + info.cStat + ' - ' + info.motivo;
+   499→    body += '<br/><br/><i>Arquivos anexados: XML e ' + (tipo === 'nfe' ? 'DANFE' : 'DANFSE') + ' (PDF)</i>';
+   500→  } else {
+   501→    body = '<b>Erro na Emissao de ' + nfLabel + '</b><br/>';
+   502→    body += 'Status: ' + info.cStat + ' - ' + info.motivo;
+   503→  }
+   504→
+   505→  try {
+   506→    var msgVals = {
+   507→      model: 'account.move',
+   508→      res_id: moveId,
+   509→      body: body,
+   510→      message_type: 'comment',
+   511→    };
+   512→    if (attachIds.length > 0) {
+   513→      msgVals.attachment_ids = [[6, 0, attachIds]];
+   514→    }
+   515→    await executeKw(client, db, uid, pwd, 'mail.message', 'create', [msgVals]);
+   516→    console.log('[SIEG-EMIT] Mensagem postada no chatter');
+   517→  } catch (e) { console.error('[SIEG-EMIT] Erro postar chatter:', e.message); }
+   518→}
+   519→
+   520→// ============================================================
+   521→// Read Company
+   522→// ============================================================
+   523→async function readCompany(client, db, uid, pwd, companyId) {
+   524→  var recs = await executeKw(client, db, uid, pwd, 'res.company', 'read', [[companyId], [
+   525→    'name', 'partner_id', 'street', 'city', 'state_id', 'zip', 'phone', 'email', 'vat',
+   526→    'x_studio_sieg_ultimo_nfe', 'x_studio_sieg_ultimo_nfse',
+   527→    'x_studio_sieg_serie_nfe', 'x_studio_sieg_serie_nfse',
+   528→  ]]);
+   529→  if (!recs || !recs.length) throw new Error('Empresa ' + companyId + ' nao encontrada');
+   530→  var c = recs[0];
+   531→
+   532→  var pId = tupId(c.partner_id);
+   533→  var p = {};
+   534→  if (pId) {
+   535→    try { p = await readPartnerSafe(client, db, uid, pwd, pId); } catch (e) {
+   536→      console.warn('[SIEG-EMIT] Erro ao ler partner da empresa:', e.message);
+   537→    }
+   538→  }
+   539→
+   540→  var stateCode = '', stateIbge = '';
+   541→  var stateId = tupId(c.state_id || p.state_id);
+   542→  if (stateId) {
+   543→    try {
+   544→      var sts = await executeKw(client, db, uid, pwd, 'res.country.state', 'read', [[stateId], ['code', 'ibge_code']]);
+   545→      if (sts && sts[0]) { stateCode = sts[0].code || ''; stateIbge = sts[0].ibge_code || ''; }
+   546→    } catch (e) {}
+   547→  }
+   548→
+   549→  var cityIbge = '';
+   550→  var cityRef = p.l10n_br_city_id || p.city_id;
+   551→  if (cityRef && Array.isArray(cityRef)) cityIbge = await readCityIbge(client, db, uid, pwd, cityRef[0]);
+   552→
+   553→  return {
+   554→    cnpj_cpf: p.cnpj_cpf || c.vat || '22603750000190',
+   555→    legal_name: p.legal_name || c.name || 'AJL FERRO E ACO LTDA',
+   556→    name: c.name || 'AJL',
+   557→    inscr_est: p.inscr_est || '9069585890',
+   558→    street: c.street || p.street || '',
+   559→    number: p.number || 'S/N',
+   560→    street2: p.street2 || p.district || '',
+   561→    city: c.city || p.city || 'Curitiba',
+   562→    state: stateCode || 'PR',
+   563→    zip: c.zip || p.zip || '',
+   564→    city_ibge_code: cityIbge || '4106902',
+   565→    state_ibge: stateIbge || '41',
+   566→    crt: '3',
+   567→    phone: c.phone || p.phone || '',
+   568→    email: c.email || p.email || '',
+   569→    x_studio_sieg_ultimo_nfe: c.x_studio_sieg_ultimo_nfe || 0,
+   570→    x_studio_sieg_ultimo_nfse: c.x_studio_sieg_ultimo_nfse || 0,
+   571→    x_studio_sieg_serie_nfe: c.x_studio_sieg_serie_nfe || '100',
+   572→    x_studio_sieg_serie_nfse: c.x_studio_sieg_serie_nfse || '1',
+   573→  };
+   574→}
+   575→
+   576→// ============================================================
+   577→// Read Partner (safe for Odoo 19 SaaS — l10n_br fields may not exist)
+   578→// ============================================================
+   579→var PARTNER_SAFE_FIELDS = [
+   580→  'name', 'vat', 'street', 'street2', 'city', 'state_id', 'zip',
+   581→  'phone', 'email', 'is_company', 'city_id', 'country_id',
+   582→];
+   583→var PARTNER_BR_FIELDS = ['cnpj_cpf', 'inscr_est', 'l10n_br_ie_code', 'legal_name', 'number', 'l10n_br_city_id', 'district'];
+   584→
+   585→/**
+   586→ * Leitura segura de res.partner: campos core + l10n_br opcionais.
+   587→ * No Odoo 19 SaaS, campos como cnpj_cpf, inscr_est, legal_name, number,
+   588→ * l10n_br_city_id, district podem nao existir. Fazemos duas leituras:
+   589→ *   1. Campos core (sempre existem)
+   590→ *   2. Campos l10n_br (try/catch, ignora se falhar)
+   591→ *   3. Discovery: tenta encontrar campos x_studio_* para IE/CNPJ/razao social
+   592→ */
+   593→
+   594→// Cache de campos IE descobertos no Odoo (para nao descobrir toda vez)
+   595→var _discoveredIeField = null;
+   596→var _discoveredCnpjField = null;
+   597→var _discoveredLegalNameField = null;
+   598→var _discoveredNumberField = null;
+   599→
+   600→async function discoverPartnerFields(client, db, uid, pwd) {
+   601→  // Se ja descobrimos antes, reusa
+   602→  if (_discoveredIeField !== null) return;
+   603→
+   604→  try {
+   605→    // fields_get() retorna metadados de todos os campos
+   606→    var allFields = await executeKw(client, db, uid, pwd, 'res.partner', 'fields_get', [[], ['string', 'type']]);
+   607→    var fieldNames = Object.keys(allFields);
+   608→
+   609→    // Procurar campo IE
+   610→    var ieCandidates = fieldNames.filter(function(f) {
+   611→      var fl = f.toLowerCase();
+   612→      return fl === 'inscr_est' || fl === 'l10n_br_ie' ||
+   613→             fl.indexOf('inscricao_estadual') >= 0 ||
+   614→             fl.indexOf('inscr_est') >= 0 ||
+   615→             (fl.indexOf('ie') >= 0 && fl.indexOf('x_studio') >= 0 && fl.indexOf('email') < 0 && fl.indexOf('field') < 0);
+   616→    });
+   617→    // Prioridade: inscr_est > l10n_br_ie > x_studio_*
+   618→    ieCandidates.sort(function(a, b) {
+   619→      if (a === 'inscr_est') return -1;
+   620→      if (b === 'inscr_est') return 1;
+   621→      if (a === 'l10n_br_ie') return -1;
+   622→      if (b === 'l10n_br_ie') return 1;
+   623→      return a.localeCompare(b);
+   624→    });
+   625→    _discoveredIeField = ieCandidates.length > 0 ? ieCandidates[0] : false;
+   626→
+   627→    // Procurar campo CNPJ/CPF (alem de cnpj_cpf e vat)
+   628→    var cnpjCandidates = fieldNames.filter(function(f) {
+   629→      var fl = f.toLowerCase();
+   630→      return fl === 'cnpj_cpf' || fl === 'l10n_br_cnpj_cpf' ||
+   631→             (fl.indexOf('cnpj') >= 0 && fl.indexOf('x_studio') >= 0);
+   632→    });
+   633→    _discoveredCnpjField = cnpjCandidates.length > 0 ? cnpjCandidates[0] : false;
+   634→
+   635→    // Procurar campo razao social (alem de legal_name)
+   636→    var nameCandidates = fieldNames.filter(function(f) {
+   637→      var fl = f.toLowerCase();
+   638→      return fl === 'legal_name' || fl === 'l10n_br_legal_name' ||
+   639→             (fl.indexOf('razao_social') >= 0 || fl.indexOf('legal_name') >= 0) && fl.indexOf('x_studio') >= 0;
+   640→    });
+   641→    _discoveredLegalNameField = nameCandidates.length > 0 ? nameCandidates[0] : false;
+   642→
+   643→    // Procurar campo numero do endereco
+   644→    var numCandidates = fieldNames.filter(function(f) {
+   645→      var fl = f.toLowerCase();
+   646→      return fl === 'number' || fl === 'l10n_br_number' ||
+   647→             (fl.indexOf('numero') >= 0 && fl.indexOf('x_studio') >= 0);
+   648→    });
+   649→    _discoveredNumberField = numCandidates.length > 0 ? numCandidates[0] : false;
+   650→
+   651→    console.log('[SIEG-EMIT] [DISCOVERY] Campos IE: ' + JSON.stringify(ieCandidates) + ' -> usando: ' + (_discoveredIeField || 'nenhum'));
+   652→    console.log('[SIEG-EMIT] [DISCOVERY] Campos CNPJ: ' + JSON.stringify(cnpjCandidates) + ' -> usando: ' + (_discoveredCnpjField || 'vat'));
+   653→    if (_discoveredLegalNameField) console.log('[SIEG-EMIT] [DISCOVERY] Razao social: ' + _discoveredLegalNameField);
+   654→    if (_discoveredNumberField && _discoveredNumberField !== 'number') console.log('[SIEG-EMIT] [DISCOVERY] Numero endereco: ' + _discoveredNumberField);
+   655→  } catch (e) {
+   656→    console.warn('[SIEG-EMIT] [DISCOVERY] Erro ao descobrir campos: ' + e.message);
+   657→    _discoveredIeField = false;
+   658→    _discoveredCnpjField = false;
+   659→    _discoveredLegalNameField = false;
+   660→    _discoveredNumberField = false;
+   661→  }
+   662→}
+   663→
+   664→async function readPartnerSafe(client, db, uid, pwd, partnerId, extraFields) {
+   665→  var fields = PARTNER_SAFE_FIELDS.slice();
+   666→  if (extraFields) fields = fields.concat(extraFields);
+   667→  var recs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], fields]);
+   668→  if (!recs || !recs.length) throw new Error('Parceiro ' + partnerId + ' nao encontrado');
+   669→  var p = recs[0];
+   670→  // Try Brazilian fields separately
+   671→  try {
+   672→    var brRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], PARTNER_BR_FIELDS]);
+   673→    if (brRecs && brRecs[0]) {
+   674→      for (var k in brRecs[0]) { if (brRecs[0][k] !== undefined) p[k] = brRecs[0][k]; }
+   675→    }
+   676→  } catch (e) {
+   677→    console.log('[SIEG-EMIT] Campos l10n_br nao disponiveis, usando vat como CNPJ/CPF');
+   678→  }
+   679→
+   680→  // Discovery: tenta encontrar campos IE/CNPJ/razao social via fields_get
+   681→  await discoverPartnerFields(client, db, uid, pwd);
+   682→
+   683→  // Leitura direta da Inscricao Estadual do Odoo Brasil
+   684→  // Separada dos demais campos l10n_br para nao falhar se outro campo opcional nao existir.
+   685→  if (p.inscr_est === undefined || p.inscr_est === null || String(p.inscr_est).trim() === "") {
+   686→    try {
+   687→      var ieDirectRecs = await executeKw(client, db, uid, pwd, "res.partner", "read", [[partnerId], ["l10n_br_ie_code"]]);
+   688→      if (ieDirectRecs && ieDirectRecs[0] && ieDirectRecs[0].l10n_br_ie_code) {
+   689→        p.inscr_est = ieDirectRecs[0].l10n_br_ie_code;
+   690→        console.log("[SIEG-EMIT] [DEST-IE] IE lida diretamente de l10n_br_ie_code = " + p.inscr_est);
+   691→      }
+   692→    } catch (e) {
+   693→      console.warn("[SIEG-EMIT] [DEST-IE] Leitura direta de l10n_br_ie_code falhou: " + e.message);
+   694→    }
+   695→  }
+   696→
+   697→  // Se inscr_est ainda vazio, tenta campo descoberto
+   698→  if ((!p.inscr_est || String(p.inscr_est).trim() === '') && _discoveredIeField && _discoveredIeField !== 'inscr_est') {
+   699→    try {
+   700→      var ieRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], [_discoveredIeField]]);
+   701→      if (ieRecs && ieRecs[0] && ieRecs[0][_discoveredIeField]) {
+   702→        p.inscr_est = ieRecs[0][_discoveredIeField];
+   703→        console.log('[SIEG-EMIT] [DEST-IE] IE lida do campo descoberto: ' + _discoveredIeField + ' = ' + p.inscr_est);
+   704→      }
+   705→    } catch (e) {
+   706→      console.warn('[SIEG-EMIT] [DEST-IE] Campo descoberto ' + _discoveredIeField + ' falhou: ' + e.message);
+   707→    }
+   708→  }
+   709→
+   710→  // Se cnpj_cpf ainda vazio, tenta campo descoberto
+   711→  if ((!p.cnpj_cpf || String(p.cnpj_cpf).trim() === '') && _discoveredCnpjField) {
+   712→    try {
+   713→      var cnpjRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], [_discoveredCnpjField]]);
+   714→      if (cnpjRecs && cnpjRecs[0] && cnpjRecs[0][_discoveredCnpjField]) {
+   715→        p.cnpj_cpf = cnpjRecs[0][_discoveredCnpjField];
+   716→      }
+   717→    } catch (e) {}
+   718→  }
+   719→
+   720→  // Se legal_name ainda vazio, tenta campo descoberto
+   721→  if ((!p.legal_name || String(p.legal_name).trim() === '') && _discoveredLegalNameField) {
+   722→    try {
+   723→      var nameRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], [_discoveredLegalNameField]]);
+   724→      if (nameRecs && nameRecs[0] && nameRecs[0][_discoveredLegalNameField]) {
+   725→        p.legal_name = nameRecs[0][_discoveredLegalNameField];
+   726→      }
+   727→    } catch (e) {}
+   728→  }
+   729→
+   730→  return p;
+   731→}
+   732→
+   733→async function readPartner(client, db, uid, pwd, partnerId) {
+   734→  var p = await readPartnerSafe(client, db, uid, pwd, partnerId);
+   735→
+   736→  var stateCode = '';
+   737→  var stId = tupId(p.state_id);
+   738→  if (stId) {
+   739→    try {
+   740→      var sts = await executeKw(client, db, uid, pwd, 'res.country.state', 'read', [[stId], ['code']]);
+   741→      if (sts && sts[0]) stateCode = sts[0].code || '';
+   742→    } catch (e) {}
+   743→  }
+   744→
+   745→  var cityIbge = '';
+   746→  var cityRef = p.l10n_br_city_id || p.city_id;
+   747→  if (cityRef && Array.isArray(cityRef)) cityIbge = await readCityIbge(client, db, uid, pwd, cityRef[0]);
+   748→
+   749→  // Fallback 1: buscar res.city por nome + estado
+   750→  if (!cityIbge && p.city && stateCode) {
+   751→    cityIbge = await searchCityIbge(client, db, uid, pwd, p.city, stId);
+   752→  }
+   753→  // Fallback 2: tabela embutida de cidades principais
+   754→  if (!cityIbge && p.city && stateCode) {
+   755→    cityIbge = lookupIbgeFallback(p.city, stateCode);
+   756→  }
+   757→  if (!cityIbge) {
+   758→    console.warn('[SIEG-EMIT] cMun vazio para parceiro ' + partnerId + ' (' + (p.name || '?') + '): cidade=' + (p.city || '?') + ' UF=' + (stateCode || '?'));
+   759→  }
+   760→
+   761→  return {
+   762→    cnpj_cpf: p.cnpj_cpf || p.vat || '',
+   763→    legal_name: p.legal_name || p.name || '',
+   764→    xNome: p.name || '',
+   765→    inscr_est: p.inscr_est || p.l10n_br_ie_code || p[_discoveredIeField] || '',
+   766→    street: p.street || '',
+   767→    number: p.number || 'S/N',
+   768→    street2: p.street2 || p.district || '',
+   769→    city: p.city || '',
+   770→    state: stateCode,
+   771→    zip: p.zip || '',
+   772→    city_ibge_code: cityIbge,
+   773→    phone: p.phone || '',
+   774→    email: p.email || '',
+   775→    is_consumer: !p.is_company,
+   776→    district: p.district || p.street2 || '',
+   777→  };
+   778→}
+   779→
+   780→// ============================================================
+   781→// NCM Extraction Helper
+   782→// ============================================================
+   783→/**
+   784→ * Extrai codigo NCM (8 digitos) de um valor many2one do Odoo.
+   785→ * Aceita: [id, "7308.90.90"], [id, "7308.90.90 - Descricao"], string pura, numero
+   786→ */
+   787→function extractNcmFromRef(ref) {
+   788→  if (!ref) return '';
+   789→  var str = '';
+   790→  if (Array.isArray(ref)) {
+   791→    str = String(ref[1] || ref[0] || '');
+   792→  } else if (typeof ref === 'string') {
+   793→    str = ref;
+   794→  } else if (typeof ref === 'number') {
+   795→    return String(ref).length === 8 ? String(ref) : '';
+   796→  } else {
+   797→    str = String(ref);
+   798→  }
+   799→  // Tentar regex NNNN.NN.NN
+   800→  var m = str.match(/(\d{4})\.(\d{2})\.(\d{2})/);
+   801→  if (m) return m[1] + m[2] + m[3];
+   802→  // Fallback: so digitos
+   803→  var digits = str.replace(/\D/g, '');
+   804→  return digits.length === 8 ? digits : '';
+   805→}
+   806→
+   807→// ============================================================
+   808→// Build Line Data (with product x_studio_ fields for NFS-e)
+   809→// ============================================================
+   810→async function buildLineData(client, db, uid, pwd, line) {
+   811→  var productId = tupId(line.product_id);
+   812→  var productName = Array.isArray(line.product_id) ? line.product_id[1] : (line.name || 'Item');
+   813→  var defaultCode = '', barcode = '', ncm = '', detailedType = 'product', uomName = 'UN';
+   814→  var prodStudio = {}; // x_studio_ fields from product
+   815→
+   816→  if (productId) {
+   817→    try {
+   818→      // Campos core do produto (sempre existem) — SEM detailed_type (pode nao existir no SaaS)
+   819→      var prods = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
+   820→        'default_code', 'barcode', 'name', 'uom_id',
+   821→      ]]);
+   822→      if (prods && prods[0]) {
+   823→        var pr = prods[0];
+   824→        defaultCode = pr.default_code || '';
+   825→        barcode = pr.barcode || '';
+   826→        productName = pr.name || productName;
+   827→        if (pr.uom_id && Array.isArray(pr.uom_id)) uomName = pr.uom_id[1] || 'UN';
+   828→      }
+   829→
+   830→      // Campo detailed_type (pode nao existir no Odoo 19 SaaS)
+   831→      try {
+   832→        var prodsDt = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['detailed_type']]);
+   833→        if (prodsDt && prodsDt[0] && prodsDt[0].detailed_type) detailedType = prodsDt[0].detailed_type;
+   834→      } catch (eDt) {
+   835→        console.log('[SIEG-EMIT] detailed_type nao disponivel, usando product');
+   836→      }
+   837→
+   838→      // NCM do produto
+   839→      // Campo correto no Odoo 19 SaaS com l10n_br: l10n_br_ncm_code_id (many2one -> l10n_br.ncm.code)
+   840→      // Este campo esta em product.template (nao product.product)
+   841→      // Estrategia:
+   842→      //   T1: Ler product_tmpl_id + l10n_br_ncm_code_id do template
+   843→      //   T2: Tentar ncm_id em product.product (l10n_br_fiscal — pode nao existir)
+   844→      //   T3: fields_get para descobrir campo NCM alternativo
+   845→
+   846→      // === T1: Ler l10n_br_ncm_code_id do product.template ===
+   847→      try {
+   848→        console.log('[SIEG-EMIT-NCM] [T1] Lendo product_tmpl_id + l10n_br_ncm_code_id...');
+   849→        var prodsTmpl = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['product_tmpl_id']]);
+   850→        if (prodsTmpl && prodsTmpl[0] && prodsTmpl[0].product_tmpl_id) {
+   851→          var tmplId = tupId(prodsTmpl[0].product_tmpl_id);
+   852→          console.log('[SIEG-EMIT-NCM] [T1] product_tmpl_id: ' + tmplId);
+   853→          var tmplNcm = await executeKw(client, db, uid, pwd, 'product.template', 'read', [[tmplId], ['l10n_br_ncm_code_id']]);
+   854→          console.log('[SIEG-EMIT-NCM] [T1] l10n_br_ncm_code_id bruto: ' + JSON.stringify(tmplNcm && tmplNcm[0] ? tmplNcm[0].l10n_br_ncm_code_id : 'N/A'));
+   855→          if (tmplNcm && tmplNcm[0] && tmplNcm[0].l10n_br_ncm_code_id) {
+   856→            ncm = extractNcmFromRef(tmplNcm[0].l10n_br_ncm_code_id);
+   857→            if (ncm) console.log('[SIEG-EMIT-NCM] [T1] *** NCM ENCONTRADO: ' + ncm + ' ***');
+   858→          } else {
+   859→            console.warn('[SIEG-EMIT-NCM] [T1] l10n_br_ncm_code_id vazio no template ' + tmplId);
+   860→          }
+   861→        } else {
+   862→          console.warn('[SIEG-EMIT-NCM] [T1] product_tmpl_id vazio para produto ' + productId);
+   863→        }
+   864→      } catch (eT1) {
+   865→        console.error('[SIEG-EMIT-NCM] [T1] FALHOU: ' + eT1.message);
+   866→      }
+   867→
+   868→      // === T2: Tentar ncm_id em product.product (l10n_br_fiscal) ===
+   869→      if (!ncm) {
+   870→        try {
+   871→          console.log('[SIEG-EMIT-NCM] [T2] Tentando ncm_id em product.product...');
+   872→          var prodsNcm = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['ncm_id']]);
+   873→          if (prodsNcm && prodsNcm[0] && prodsNcm[0].ncm_id) {
+   874→            ncm = extractNcmFromRef(prodsNcm[0].ncm_id);
+   875→            if (ncm) console.log('[SIEG-EMIT-NCM] [T2] NCM via ncm_id: ' + ncm);
+   876→          }
+   877→        } catch (eT2) {
+   878→          console.log('[SIEG-EMIT-NCM] [T2] ncm_id nao disponivel: ' + eT2.message);
+   879→        }
+   880→      }
+   881→
+   882→      // === T3: Descobrir campos NCM via fields_get ===
+   883→      if (!ncm) {
+   884→        try {
+   885→          console.log('[SIEG-EMIT-NCM] [T3] Buscando campos NCM via fields_get...');
+   886→          var fieldsInfo = await executeKw(client, db, uid, pwd, 'product.template', 'fields_get', [
+   887→            ['l10n_br_ncm_code_id', 'ncm_id', 'l10n_br_ncm_id', 'ncm_code_id'],
+   888→            ['type', 'relation', 'string']
+   889→          ]);
+   890→          console.log('[SIEG-EMIT-NCM] [T3] fields_get: ' + JSON.stringify(fieldsInfo));
+   891→          var fieldNames = Object.keys(fieldsInfo || {});
+   892→          for (var fi = 0; fi < fieldNames.length; fi++) {
+   893→            var fname = fieldNames[fi];
+   894→            if (fieldsInfo[fname].type === 'many2one') {
+   895→              try {
+   896→                var fv = await executeKw(client, db, uid, pwd, 'product.template', 'read', [[tmplId], [fname]]);
+   897→                if (fv && fv[0] && fv[0][fname]) {
+   898→                  var extracted = extractNcmFromRef(fv[0][fname]);
+   899→                  if (extracted) {
+   900→                    ncm = extracted;
+   901→                    console.log('[SIEG-EMIT-NCM] [T3] NCM via ' + fname + ': ' + ncm);
+   902→                    break;
+   903→                  }
+   904→                }
+   905→              } catch (ef3) {
+   906→                console.log('[SIEG-EMIT-NCM] [T3] ' + fname + ' falhou: ' + ef3.message);
+   907→              }
+   908→            }
+   909→          }
+   910→        } catch (eT3) {
+   911→          console.error('[SIEG-EMIT-NCM] [T3] FALHOU: ' + eT3.message);
+   912→        }
+   913→      }
+   914→
+   915→      // x_studio fields documentados neste Odoo (NFS-e e customizacoes)
+   916→      try {
+   917→        var prods2 = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
+   918→          'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code',
+   919→        ]]);
+   920→        if (prods2 && prods2[0]) {
+   921→          var pr2 = prods2[0];
+   922→          prodStudio = {
+   923→            c_trib_nac: pr2.x_studio_c_trib_nac || '',
+   924→            c_nbs: pr2.x_studio_c_nbs || '',
+   925→            aliquota_iss: pr2.x_studio_aliquota_iss || '',
+   926→            ibge_code: pr2.x_studio_ibge_code || '',
+   927→          };
+   928→        }
+   929→      } catch (e2) {
+   930→        console.log('[SIEG-EMIT] Campos x_studio do produto nao disponiveis: ' + e2.message);
+   931→      }
+   932→      // Fallback final: NCM do env var (se configurado)
+   933→      if (!ncm && process.env.SIEG_DEFAULT_NCM) {
+   934→        ncm = String(process.env.SIEG_DEFAULT_NCM).replace(/\D/g, '');
+   935→        console.log('[SIEG-EMIT-NCM] NCM via SIEG_DEFAULT_NCM env: ' + ncm);
+   936→      }
+   937→      // ALERTA se NCM ainda vazio
+   938→      if (!ncm) {
+   939→        console.error('[SIEG-EMIT-NCM] *** NCM VAZIO para produto ' + productId + ' (' + productName + ') — XML sera invalido ***');
+   940→      }
+   941→    } catch (e) { console.warn('[SIEG-EMIT] Erro ao ler produto ' + productId + ':', e.message); }
+   942→  }
+   943→
+   944→  // Tax extraction
+   945→  var tax = await extractTaxes(client, db, uid, pwd, line);
+   946→
+   947→  // IPI extraction from product x_studio_ fields
+   948→  var cstIpi = '', vbcIpi = '0.00', pipi = '0.00', vipi = '0.00', cenq = '999';
+   949→  if (productId) {
+   950→    try {
+   951→      var ipiFields = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
+   952→        'x_studio_cst_ipi', 'x_studio_aliquota_ipi',
+   953→      ]]);
+   954→      if (ipiFields && ipiFields[0]) {
+   955→        cstIpi = String(ipiFields[0].x_studio_cst_ipi || '').replace(/\D/g, '');
+   956→        pipi = String(ipiFields[0].x_studio_aliquota_ipi || '0');
+   957→      }
+   958→    } catch (eIpi) {
+   959→      // Try product.template IPI fields
+   960→      try {
+   961→        var tmplIpi = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['product_tmpl_id']]);
+   962→        if (tmplIpi && tmplIpi[0] && tmplIpi[0].product_tmpl_id) {
+   963→          var tmplIdIpi = tupId(tmplIpi[0].product_tmpl_id);
+   964→          var tmplIpiFields = await executeKw(client, db, uid, pwd, 'product.template', 'read', [[tmplIdIpi], [
+   965→            'x_studio_cst_ipi', 'x_studio_aliquota_ipi',
+   966→          ]]);
+   967→          if (tmplIpiFields && tmplIpiFields[0]) {
+   968→            cstIpi = String(tmplIpiFields[0].x_studio_cst_ipi || '').replace(/\D/g, '');
+   969→            pipi = String(tmplIpiFields[0].x_studio_aliquota_ipi || '0');
+   970→          }
+   971→        }
+   972→      } catch (e2) {}
+   973→    }
+   974→    // Calculate IPI values if CST is taxable (00, 49, 50, 99)
+   975→    if (cstIpi && ['00','49','50','99'].includes(cstIpi.padStart(2, '0'))) {
+   976→      vbcIpi = String(line.price_subtotal || (line.quantity * line.price_unit) || 0);
+   977→      vipi = String(round2(parseFloat(vbcIpi) * parseFloat(pipi || 0) / 100));
+   978→    }
+   979→  }
+   980→
+   981→  var lineData = {
+   982→    cProd: defaultCode, barcode: barcode,
+   983→    product_name: productName, xProd: productName,
+   984→    ncm: ncm, cfop: '5102', uom: uomName,
+   985→    qty: line.quantity || 0, price_unit: line.price_unit || 0,
+   986→    price_subtotal: line.price_subtotal || (line.quantity * line.price_unit),
+   987→    detailed_type: detailedType,
+   988→    // Tributação Lucro Real (padrão) — sobrescrito se Odoo tiver impostos configurados
+   989→    csosn: tax.csosn || '',
+   990→    cst_icms: tax.cst_icms || '00',
+   991→    mod_bc: tax.mod_bc || '3',
+   992→    orig: '0',
+   993→    vbc_icms: String(tax.vbc || 0),
+   994→    vicms: String(tax.vicms || 0),
+   995→    picms: String(tax.picms || 0),
+   996→    cst_pis: tax.cst_pis || '01',
+   997→    vbc_pis: String(tax.vbc_pis || 0),
+   998→    ppis: String(tax.ppis || 0),
+   999→    vpis: String(tax.vpis || 0),
+  1000→    cst_cofins: tax.cst_cofins || '01',
+  1001→    vbc_cofins: String(tax.vbc_cofins || 0),
+  1002→    pcofins: String(tax.pcofins || 0),
+  1003→    vcofins: String(tax.vcofins || 0),
+  1004→    // IPI
+  1005→    cst_ipi: cstIpi || '',
+  1006→    vbc_ipi: vbcIpi,
+  1007→    pipi: pipi,
+  1008→    vipi: vipi,
+  1009→    cenq: cenq,
+  1010→    // NFS-e fields from product
+  1011→    x_studio_c_trib_nac: prodStudio.c_trib_nac,
+  1012→    x_studio_c_nbs: prodStudio.c_nbs,
+  1013→    x_studio_aliquota_iss: prodStudio.aliquota_iss,
+  1014→    x_studio_ibge_code: prodStudio.ibge_code,
+  1015→  };
+  1016→
+  1017→  // === LOG DETALHADO POR CAMPO (para debug de XML invalido) ===
+  1018→  console.log('[SIEG-EMIT-LINE] === Dados da linha (product ' + productId + ') ===');
+  1019→  console.log('[SIEG-EMIT-LINE]   cProd:      ' + JSON.stringify(lineData.cProd) + (lineData.cProd ? '' : ' *** VAZIO ***'));
+  1020→  console.log('[SIEG-EMIT-LINE]   xProd:      ' + JSON.stringify(lineData.xProd));
+  1021→  console.log('[SIEG-EMIT-LINE]   NCM:        ' + JSON.stringify(lineData.ncm) + (lineData.ncm ? '' : ' *** VAZIO ***'));
+  1022→  console.log('[SIEG-EMIT-LINE]   CFOP:       ' + JSON.stringify(lineData.cfop));
+  1023→  console.log('[SIEG-EMIT-LINE]   uCom:       ' + JSON.stringify(lineData.uom));
+  1024→  console.log('[SIEG-EMIT-LINE]   qCom:       ' + lineData.qty);
+  1025→  console.log('[SIEG-EMIT-LINE]   vUnCom:     ' + lineData.price_unit);
+  1026→  console.log('[SIEG-EMIT-LINE]   vProd:      ' + lineData.price_subtotal);
+  1027→  console.log('[SIEG-EMIT-LINE]   CSOSN:      ' + JSON.stringify(lineData.csosn));
+  1028→  console.log('[SIEG-EMIT-LINE]   CST_ICMS:   ' + JSON.stringify(lineData.cst_icms));
+  1029→  console.log('[SIEG-EMIT-LINE]   modBC:      ' + JSON.stringify(lineData.mod_bc));
+  1030→  console.log('[SIEG-EMIT-LINE]   vBC_ICMS:   ' + lineData.vbc_icms);
+  1031→  console.log('[SIEG-EMIT-LINE]   vICMS:      ' + lineData.vicms);
+  1032→  console.log('[SIEG-EMIT-LINE]   pICMS:      ' + lineData.picms);
+  1033→  console.log('[SIEG-EMIT-LINE]   CST_PIS:    ' + JSON.stringify(lineData.cst_pis));
+  1034→  console.log('[SIEG-EMIT-LINE]   vBC_PIS:    ' + lineData.vbc_pis);
+  1035→  console.log('[SIEG-EMIT-LINE]   pPIS:       ' + lineData.ppis);
+  1036→  console.log('[SIEG-EMIT-LINE]   vPIS:       ' + lineData.vpis);
+  1037→  console.log('[SIEG-EMIT-LINE]   CST_COFINS: ' + JSON.stringify(lineData.cst_cofins));
+  1038→  console.log('[SIEG-EMIT-LINE]   vBC_COFINS: ' + lineData.vbc_cofins);
+  1039→  console.log('[SIEG-EMIT-LINE]   pCOFINS:    ' + lineData.pcofins);
+  1040→  console.log('[SIEG-EMIT-LINE]   vCOFINS:    ' + lineData.vcofins);
+  1041→  console.log('[SIEG-EMIT-LINE]   CST_IPI:    ' + JSON.stringify(lineData.cst_ipi));
+  1042→  console.log('[SIEG-EMIT-LINE]   vBC_IPI:    ' + lineData.vbc_ipi);
+  1043→  console.log('[SIEG-EMIT-LINE]   pIPI:       ' + lineData.pipi);
+  1044→  console.log('[SIEG-EMIT-LINE]   vIPI:       ' + lineData.vipi);
+  1045→
+  1046→  return lineData;
+  1047→}
+  1048→
+  1049→// ============================================================
+  1050→// Build Service Block for NFS-e (reads from product x_studio_ fields)
+  1051→// ============================================================
+  1052→function buildServiceBlock(linesData, move) {
+  1053→  // Use first service line's x_studio_ fields
+  1054→  var cTribNac = '';
+  1055→  var cNBS = '999999999';
+  1056→  var pAliq = '2.00';
+  1057→  var cIntContrib = '';
+  1058→  var xDescServ = move.narration || 'Servico prestado conforme contrato';
+  1059→
+  1060→  for (var i = 0; i < linesData.length; i++) {
+  1061→    var l = linesData[i];
+  1062→    if (l.x_studio_c_trib_nac) cTribNac = l.x_studio_c_trib_nac;
+  1063→    if (l.x_studio_c_nbs) cNBS = l.x_studio_c_nbs;
+  1064→    if (l.x_studio_aliquota_iss) pAliq = String(l.x_studio_aliquota_iss);
+  1065→    if (l.x_studio_ibge_code) cIntContrib = l.x_studio_ibge_code;
+  1066→  }
+  1067→
+  1068→  if (!cTribNac) cTribNac = '140101';
+  1069→
+  1070→  return {
+  1071→    cTribNac: cTribNac,
+  1072→    xDescServ: xDescServ,
+  1073→    cNBS: cNBS,
+  1074→    cIntContrib: cIntContrib,
+  1075→    valor: move.amount_total,
+  1076→    pAliq: pAliq,
+  1077→    tpRetISSQN: '1',
+  1078→    pTotTribFed: '13.45',
+  1079→    pTotTribEst: '0.00',
+  1080→    pTotTribMun: '3.29',
+  1081→  };
+  1082→}
+  1083→
+  1084→// ============================================================
+  1085→// Tax Extraction
+  1086→// ============================================================
+  1087→async function extractTaxes(client, db, uid, pwd, line) {
+  1088→  // Padrão: Lucro Real (CRT 3) — CST 00, ICMS 18% PR interno
+  1089→  // PIS/COFINS não-cumulativo com base no valor do produto
+  1090→  var base = parseFloat(line.price_subtotal) || 0;
+  1091→  // Arredondamento: SEFAZ exige 2 casas decimais por item.
+  1092→  // Se nao arredondar aqui, o total pode divergir (cStat 602/603).
+  1093→  var r2 = function(n) { return Math.round((parseFloat(n) || 0) * 100) / 100; };
+  1094→  var result = {
+  1095→    csosn: '',
+  1096→    cst_icms: '00',
+  1097→    mod_bc: '3',
+  1098→    vbc: r2(base),
+  1099→    vicms: r2(base * 0.18),
+  1100→    picms: 18.00,
+  1101→    cst_pis: '01',
+  1102→    vbc_pis: r2(base),
+  1103→    ppis: 1.65,
+  1104→    vpis: r2(base * 0.0165),
+  1105→    cst_cofins: '01',
+  1106→    vbc_cofins: r2(base),
+  1107→    pcofins: 7.60,
+  1108→    vcofins: r2(base * 0.076),
+  1109→  };
+  1110→
+  1111→  var taxIds = (line.tax_ids || []).map(function(t) { return Array.isArray(t) ? t[0] : t; }).filter(Boolean);
+  1112→  if (!taxIds.length) return result;
+  1113→
+  1114→  try {
+  1115→    var taxes = await executeKw(client, db, uid, pwd, 'account.tax', 'read', [taxIds, [
+  1116→      'name', 'amount', 'amount_type', 'description',
+  1117→    ]]);
+  1118→    if (!taxes || !taxes.length) return result;
+  1119→
+  1120→    var totalIcms = 0, totalPis = 0, totalCofins = 0;
+  1121→    var foundCsosn = '';
+  1122→
+  1123→    for (var i = 0; i < taxes.length; i++) {
+  1124→      var tax = taxes[i];
+  1125→      var n = ((tax.name || tax.description || '').toUpperCase());
+  1126→      var amt = parseFloat(tax.amount) || 0;
+  1127→      if (n.indexOf('ICMS') >= 0 || n.indexOf('CSOSN') >= 0) {
+  1128→        totalIcms += amt;
+  1129→        var m = n.match(/(10[0-9]|20[0-9]|300|400|500|900)/);
+  1130→        if (m) foundCsosn = m[1];
+  1131→      } else if (n.indexOf('PIS') >= 0) { totalPis += amt; }
+  1132→      else if (n.indexOf('COFINS') >= 0) { totalCofins += amt; }
+  1133→    }
+  1134→
+  1135→    // Sobrescreve defaults apenas se o Odoo tiver impostos reais configurados (> 0)
+  1136→    if (foundCsosn) {
+  1137→      result.csosn = foundCsosn;
+  1138→      result.cst_icms = '';
+  1139→    }
+  1140→    if (totalIcms > 0) {
+  1141→      result.picms = totalIcms;
+  1142→      result.vicms = r2(base * (totalIcms / 100));
+  1143→    }
+  1144→    if (totalPis > 0) {
+  1145→      result.ppis = totalPis;
+  1146→      result.vpis = r2(base * (totalPis / 100));
+  1147→    }
+  1148→    if (totalCofins > 0) {
+  1149→      result.pcofins = totalCofins;
+  1150→      result.vcofins = r2(base * (totalCofins / 100));
+  1151→    }
+  1152→  } catch (e) { console.warn('[SIEG-EMIT] Erro ao extrair impostos:', e.message); }
+  1153→
+  1154→  return result;
+  1155→}
+  1156→
+  1157→// ============================================================
+  1158→// Helpers
+  1159→// ============================================================
+  1160→function parseResult(resultado, tipo) {
+  1161→  var resp = resultado.resposta || {};
+  1162→  var chave = '', protocolo = '', cStat = '', motivo = '', numero = '', sucesso = false;
+  1163→
+  1164→  // Se SIEG retornou HTTP 4xx, usar ErrorMessage diretamente como motivo
+  1165→  var siegErro = resultado.erro || '';
+  1166→  if (resultado.httpStatus && resultado.httpStatus >= 400 && resultado.httpStatus < 500) {
+  1167→    // Erro de validacao do XML — extrair mensagem do SIEG
+  1168→    motivo = siegErro || 'Erro HTTP ' + resultado.httpStatus;
+  1169→    if (tipo === 'nfe') {
+  1170→      cStat = String(resultado.statusCode || resp.cStat || resp.status || '');
+  1171→    }
+  1172→    return { sucesso: false, chave: chave, protocolo: protocolo, cStat: cStat, motivo: motivo, numero: numero };
+  1173→  }
+  1174→
+  1175→  if (tipo === 'nfe') {
+  1176→    chave = resp.chNFe || resp.chave || resp.ChaveXml || '';
+  1177→    protocolo = resp.nProt || resp.protocolo || '';
+  1178→    cStat = String(resp.cStat || resp.status || '');
+  1179→    motivo = resp.xMotivo || resp.motivo || (siegErro || 'Processado');
+  1180→    sucesso = (cStat === '100' || cStat === '104' || cStat === '150');
+  1181→  } else {
+  1182→    chave = resp.Chave || resp.chave || '';
+  1183→    protocolo = resp.Protocolo || resp.protocolo || '';
+  1184→    numero = resp.NumeroNfse || resp.nDFSe || resp.numero || '';
+  1185→    cStat = String(resp.CodigoVerificacao || resp.codigo || '');
+  1186→    motivo = resp.Motivo || resp.motivo || siegErro || (resultado.sucesso ? 'Autorizada' : 'Erro na emissao');
+  1187→    sucesso = resultado.sucesso;
+  1188→  }
+  1189→
+  1190→  return { sucesso: sucesso, chave: chave, protocolo: protocolo, cStat: cStat, motivo: motivo, numero: numero };
+  1191→}
+  1192→
+  1193→async function readCityIbge(client, db, uid, pwd, cityId) {
+  1194→  // Tenta varios nomes de campo IBGE possiveis no Odoo
+  1195→  var ibgeFields = ['ibge_code', 'code', 'l10n_br_ibge_code', 'x_studio_ibge_code'];
+  1196→  for (var i = 0; i < ibgeFields.length; i++) {
+  1197→    try {
+  1198→      var c = await executeKw(client, db, uid, pwd, 'res.city', 'read', [[cityId], [ibgeFields[i]]]);
+  1199→      if (c && c[0] && c[0][ibgeFields[i]]) {
+  1200→        var val = String(c[0][ibgeFields[i]]);
+  1201→        if (val.length === 7 && /^\d{7}$/.test(val)) {
+  1202→          if (ibgeFields[i] !== 'ibge_code') console.log('[SIEG-EMIT] IBGE lido de res.city.' + ibgeFields[i] + ': ' + val);
+  1203→          return val;
+  1204→        }
+  1205→      }
+  1206→    } catch (e) {}
+  1207→  }
+  1208→  // Tenta l10n_br.city
+  1209→  try {
+  1210→    var c2 = await executeKw(client, db, uid, pwd, 'l10n_br.city', 'read', [[cityId], ['ibge_code']]);
+  1211→    if (c2 && c2[0] && c2[0].ibge_code) return String(c2[0].ibge_code);
+  1212→  } catch (e2) {}
+  1213→  return '';
+  1214→}
+  1215→
+  1216→/**
+  1217→ * Busca IBGE de cidade pelo nome e estado_id no Odoo
+  1218→ */
+  1219→async function searchCityIbge(client, db, uid, pwd, cityName, stateId) {
+  1220→  if (!cityName || !stateId) return '';
+  1221→  try {
+  1222→    var domain = [['name', 'ilike', cityName]];
+  1223→    if (stateId) domain.push(['state_id', '=', stateId]);
+  1224→    var ids = await executeKw(client, db, uid, pwd, 'res.city', 'search', [domain], { limit: 5 });
+  1225→    if (ids && ids.length > 0) {
+  1226→      // Ler ibge_code de todos os resultados encontrados
+  1227→      var cities = await executeKw(client, db, uid, pwd, 'res.city', 'read', [ids, ['name', 'ibge_code']]);
+  1228→      if (cities) {
+  1229→        for (var i = 0; i < cities.length; i++) {
+  1230→          if (cities[i].ibge_code) {
+  1231→            console.log('[SIEG-EMIT] IBGE encontrado por busca: ' + cities[i].name + ' = ' + cities[i].ibge_code);
+  1232→            return String(cities[i].ibge_code);
+  1233→          }
+  1234→        }
+  1235→      }
+  1236→    }
+  1237→  } catch (e) {
+  1238→    console.log('[SIEG-EMIT] Busca res.city falhou: ' + e.message);
+  1239→  }
+  1240→  return '';
+  1241→}
+  1242→
+  1243→/**
+  1244→ * Tabela de fallback para cidades principais do BR
+  1245→ * Chave: 'CIDADE/UF' (normalizado) -> codigo IBGE 7 digitos
+  1246→ */
+  1247→var IBGE_FALLBACK = {
+  1248→  // PR - Parana (verificado via IBGE API 17/09/2026)
+  1249→  'CURITIBA/PR': '4106902',
+  1250→  'LONDRINA/PR': '4113700',
+  1251→  'MARINGA/PR': '4115200',
+  1252→  'PONTA GROSSA/PR': '4119905',
+  1253→  'FOZ DO IGUACU/PR': '4108304',
+  1254→  'CASCAVEL/PR': '4104808',
+  1255→  'CAMPO MOURAO/PR': '4104303',
+  1256→  'PONTAL DO PARANA/PR': '4119954',
+  1257→  'SAO JOSE DOS PINHAIS/PR': '4125506',
+  1258→  'COLOMBO/PR': '4105805',
+  1259→  'GUARAPUAVA/PR': '4109401',
+  1260→  'PARANAGUA/PR': '4118204',
+  1261→  'PINHAIS/PR': '4119152',
+  1262→  'ARAUCARIA/PR': '4101804',
+  1263→  'TOLEDO/PR': '4127700',
+  1264→  'APUCARANA/PR': '4101408',
+  1265→  'ALMIRANTE TAMANDARE/PR': '4100400',
+  1266→  'UMUARAMA/PR': '4128104',
+  1267→  'CAMBE/PR': '4103701',
+  1268→  'IBIPORA/PR': '4109807',
+  1269→  'ROLANDIA/PR': '4122404',
+  1270→  'MARECHAL CANDIDO RONDON/PR': '4114609',
+  1271→  'MAL. CANDIDO RONDON/PR': '4114609',
+  1272→  'SARANDI/PR': '4126256',
+  1273→  'MEDIANEIRA/PR': '4115804',
+  1274→  'PALOTINA/PR': '4117909',
+  1275→  'MATINHOS/PR': '4115705',
+  1276→  'IMBITUVA/PR': '4110102',
+  1277→  'TELEMACO BORBA/PR': '4127106',
+  1278→  'IRATI/PR': '4110706',
+  1279→  'GUARANIACU/PR': '4109302',
+  1280→  'PATO BRANCO/PR': '4118501',
+  1281→  'FRANCISCO BELTRAO/PR': '4108403',
+  1282→  'PRIMEIRO DE MAIO/PR': '4120507',
+  1283→  '2 DE MAIO/PR': '4120507',
+  1284→  'GUARATUBA/PR': '4109609',
+  1285→  'ANTONINA/PR': '4101200',
+  1286→  'MORRETES/PR': '4116208',
+  1287→  'SAO MIGUEL DO IGUACU/PR': '4125704',
+  1288→  'CAMPO LARGO/PR': '4104204',
+  1289→  'CAMPO MAGRO/PR': '4104253',
+  1290→  'FAZENDA RIO GRANDE/PR': '4107652',
+  1291→  'PIRAQUARA/PR': '4119509',
+  1292→  'QUATRO BARRAS/PR': '4120804',
+  1293→  'ITAPERUCU/PR': '4111258',
+  1294→  'BALSE NOVA/PR': '4102307',
+  1295→  'RIO NEGRO/PR': '4122305',
+  1296→  'SAO MATEUS DO SUL/PR': '4125605',
+  1297→  'UNIAO DA VITORIA/PR': '4128203',
+  1298→  'CASTRO/PR': '4104907',
+  1299→  'IPIRANGA/PR': '4110508',
+  1300→  'PALMEIRA/PR': '4117701',
+  1301→  'LAPA/PR': '4113205',
+  1302→  'PORTO AMAZONAS/PR': '4120101',
+  1303→  'REBOUCAS/PR': '4121505',
+  1304→  'GENERAL CARNEIRO/PR': '4108502',
+  1305→  'BITURUNA/PR': '4102901',
+  1306→  'CERRO AZUL/PR': '4105201',
+  1307→  'JAGUARIAIVA/PR': '4112009',
+  1308→  'SENGES/PR': '4126306',
+  1309→  'QUEDAS DO IGUACU/PR': '4120903',
+  1310→  'GUARAPUAVA/PR': '4109401',
+  1311→  'PINHAO/PR': '4119301',
+  1312→  'RESERVA/PR': '4121703',
+  1313→  'VALE DO RIO DOCE/PR': '4119954',
+  1314→  'CRUZEIRO DO OESTE/PR': '4106605',
+  1315→  'CIANORTE/PR': '4105508',
+  1316→  'GOIOERE/PR': '4108601',
+  1317→  'ASSIS CHATEAUBRIAND/PR': '4102000',
+  1318→  'MARECHAL CANDIDO RONDON/PR': '4114609',
+  1319→  'PALMAS/PR': '4117602',
+  1320→  'PATO BRAGADO/PR': '4118451',
+  1321→  'SANTA HELENA/PR': '4123501',
+  1322→  'NOVA LONDRINA/PR': '4117107',
+  1323→  'JABOTI/PR': '4111704',
+  1324→  // SP - Sao Paulo (verificado via IBGE API 17/09/2026)
+  1325→  'SAO PAULO/SP': '3550308',
+  1326→  'GUARULHOS/SP': '3518800',
+  1327→  'CAMPINAS/SP': '3509502',
+  1328→  'SAO BERNARDO DO CAMPO/SP': '3548708',
+  1329→  'SANTOS/SP': '3548500',
+  1330→  'RIBEIRAO PRETO/SP': '3543402',
+  1331→  'ITU/SP': '3523909',
+  1332→  'JUNDIAI/SP': '3525904',
+  1333→  'SOROCABA/SP': '3552205',
+  1334→  'SAO JOSE DOS CAMPOS/SP': '3549904',
+  1335→  'SANTO ANDRE/SP': '3547809',
+  1336→  'SAO JOSE DO RIO PRETO/SP': '3549805',
+  1337→  'MAUA/SP': '3529401',
+  1338→  'DIADEMA/SP': '3513801',
+  1339→  'OSASCO/SP': '3534401',
+  1340→  'CARAPICUIBA/SP': '3510609',
+  1341→  'MOGI DAS CRUZES/SP': '3530607',
+  1342→  'SUZANO/SP': '3552502',
+  1343→  'TABOAO DA SERRA/SP': '3552809',
+  1344→  'BAURU/SP': '3506003',
+  1345→  'PIRACICABA/SP': '3538709',
+  1346→  'LIMEIRA/SP': '3526902',
+  1347→  // RJ - Rio de Janeiro (verificado via IBGE API 17/09/2026)
+  1348→  'RIO DE JANEIRO/RJ': '3304557',
+  1349→  'VOLTA REDONDA/RJ': '3306305',
+  1350→  'NILOPOLIS/RJ': '3303203',
+  1351→  'MESQUITA/RJ': '3302858',
+  1352→  'DUQUE DE CAXIAS/RJ': '3301702',
+  1353→  'NOVA IGUACU/RJ': '3303500',
+  1354→  'SAO GONCALO/RJ': '3304904',
+  1355→  'NITEROI/RJ': '3303302',
+  1356→  'PETROPOLIS/RJ': '3303906',
+  1357→  // MG - Minas Gerais (verificado via IBGE API 17/09/2026)
+  1358→  'BELO HORIZONTE/MG': '3106200',
+  1359→  'UBERLANDIA/MG': '3170206',
+  1360→  'CONTAGEM/MG': '3118601',
+  1361→  'JUIZ DE FORA/MG': '3136702',
+  1362→  // RS - Rio Grande do Sul (verificado via IBGE API 17/09/2026)
+  1363→  'PORTO ALEGRE/RS': '4314902',
+  1364→  'CAXIAS DO SUL/RS': '4305108',
+  1365→  'PELOTAS/RS': '4314407',
+  1366→  'SANTA MARIA/RS': '4316907',
+  1367→  // SC - Santa Catarina (verificado via IBGE API 17/09/2026)
+  1368→  'JOINVILLE/SC': '4209102',
+  1369→  'FLORIANOPOLIS/SC': '4205407',
+  1370→  'BALNEARIO CAMBORIU/SC': '4202008',
+  1371→  'BLUMENAU/SC': '4202404',
+  1372→  'LAGES/SC': '4209300',
+  1373→  'CRICIUMA/SC': '4204608',
+  1374→  'CHAPECO/SC': '4204202',
+  1375→  // Outros (verificados)
+  1376→  'SALVADOR/BA': '2927408',
+  1377→  'BRASILIA/DF': '5300108',
+  1378→  'FORTALEZA/CE': '2304400',
+  1379→  'RECIFE/PE': '2611606',
+  1380→  'MANAUS/AM': '1302603',
+  1381→  'BELEM/PA': '1501402',
+  1382→  'GOIANIA/GO': '5208707',
+  1383→  'VITORIA/ES': '3205309',
+  1384→};
+  1385→
+  1386→/**
+  1387→ * Normaliza nome de cidade: remove acentos, cedilha, etc.
+  1388→ * Para matching na tabela IBGE fallback.
+  1389→ */
+  1390→function normalizeCityName(name) {
+  1391→  if (!name) return '';
+  1392→  return name
+  1393→    .normalize('NFD')
+  1394→    .replace(/[\u0300-\u036f]/g, '') // remove diacriticos
+  1395→    .replace(/\u00e7/g, 'c')          // cedilha -> c
+  1396→    .replace(/\u00c7/g, 'C')
+  1397→    .toUpperCase()
+  1398→    .trim();
+  1399→}
+  1400→
+  1401→function lookupIbgeFallback(cityName, stateCode) {
+  1402→  if (!cityName || !stateCode) return '';
+  1403→  var key = (normalizeCityName(cityName) + '/' + stateCode.toUpperCase().trim());
+  1404→  var code = IBGE_FALLBACK[key];
+  1405→  if (code) {
+  1406→    console.log('[SIEG-EMIT] IBGE via tabela fallback: ' + key + ' = ' + code);
+  1407→    return code;
+  1408→  }
+  1409→  // Fallback: tenta sem preposicoes comuns ("do", "da", "de", "das", "dos")
+  1410→  var simplified = key.replace(/\b(D|DA|DE|DO|DAS|DOS)\b/g, '').replace(/\s+/g, ' ').trim();
+  1411→  code = IBGE_FALLBACK[simplified];
+  1412→  if (code) {
+  1413→    console.log('[SIEG-EMIT] IBGE via tabela fallback (simplificado): ' + simplified + ' = ' + code);
+  1414→    return code;
+  1415→  }
+  1416→  return '';
+  1417→}
+  1418→
+  1419→function tupId(val) {
+  1420→  if (Array.isArray(val)) return val[0] || 0;
+  1421→  if (typeof val === 'number') return val;
+  1422→  return parseInt(val) || 0;
+  1423→}
+  1424→
+  1425→/**
+  1426→ * Valor gravado no campo Selection quando a emissao falha.
+  1427→ * NFE_STATUS_ON_ERROR=pendente -> a fatura volta para a fila e e retentada.
+  1428→ * Padrao 'erro' -> exige reprocessamento manual.
+  1429→ */
+  1430→function statusOnError() {
+  1431→  var v = String(process.env.NFE_STATUS_ON_ERROR || 'erro').trim().toLowerCase();
+  1432→  return v === 'pendente' ? 'pendente' : 'erro';
+  1433→}
+  1434→
+  1435→/**
+  1436→ * Grava o status com fallback: se o Odoo recusar o valor da Selection,
+  1437→ * tenta 'pendente' para a fatura nunca ficar fora da fila silenciosamente.
+  1438→ */
+  1439→async function writeStatusSafe(client, db, uid, pwd, moveId, tipo, vals) {
+  1440→  var field = tipo === 'nfe' ? 'x_studio_nfe_status' : 'x_studio_nfse_status';
+  1441→  try {
+  1442→    await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId], vals]);
+  1443→  } catch (e) {
+  1444→    console.error('[SIEG-EMIT] Falha ao gravar status (' + vals[field] + '): ' + e.message);
+  1445→    var fb = {};
+  1446→    fb[field] = 'pendente';
+  1447→    try {
+  1448→      await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId], fb]);
+  1449→      console.warn('[SIEG-EMIT] Status revertido para "pendente" (retentativa possivel)');
+  1450→    } catch (e2) { console.error('[SIEG-EMIT] Falha no fallback de status:', e2.message); }
+  1451→  }
+  1452→}
+  1453→
+  1454→async function safeUpdateError(client, db, uid, pwd, moveId, tipo, errMsg) {
+  1455→  try {
+  1456→    var vals = {};
+  1457→    var st = statusOnError();
+  1458→    if (tipo === 'nfe') vals.x_studio_nfe_status = st;
+  1459→    else vals.x_studio_nfse_status = st;
+  1460→    await writeStatusSafe(client, db, uid, pwd, moveId, tipo, vals);
+  1461→    await executeKw(client, db, uid, pwd, 'mail.message', 'create', [{
+  1462→      model: 'account.move', res_id: moveId,
+  1463→      body: '<b>Erro na Emissao de ' + (tipo === 'nfe' ? 'NF-e' : 'NFS-e') + '</b><br/>' + errMsg.substring(0, 500),
+  1464→      message_type: 'comment',
+  1465→    }]);
+  1466→  } catch (e) { console.error('[SIEG-EMIT] Falha ao registrar erro:', e.message); }
+  1467→}
+  1468→
+  1469→// ============================================================
+  1470→// Process Pending Cancellations (polling para status 'cancelando')
+  1471→// ============================================================
+  1472→/**
+  1473→ * Busca faturas com x_studio_nfe_status = 'cancelando' e envia o
+  1474→ * evento de cancelamento à SEFAZ PR, depois atualiza o Odoo.
+  1475→ * Chamado pelo runSiegPoll no server.js junto com processPendingEmissions.
+  1476→ */
+  1477→async function processPendingCancellations() {
+  1478→  var odoo = config.odoo;
+  1479→  if (!odoo || !odoo.enabled || !odoo.url) {
+  1480→    return { processed: 0, reason: 'odoo_not_configured' };
+  1481→  }
+  1482→
+  1483→  var client = createClient(odoo.url);
+  1484→  var uid = await authenticate(client, odoo.db, odoo.user, odoo.password);
+  1485→  var db = odoo.db;
+  1486→  var pwd = odoo.password;
+  1487→
+  1488→  var ids = await executeKw(client, db, uid, pwd, 'account.move', 'search', [[
+  1489→    ['move_type', '=', 'out_invoice'],
+  1490→    ['x_studio_nfe_status', '=', 'cancelando'],
+  1491→  ]], { order: 'id asc', limit: 5 });
+  1492→
+  1493→  if (!ids.length) return { processed: 0 };
+  1494→
+  1495→  console.log('[SIEG-CANCEL-POLL] ' + ids.length + ' fatura(s) aguardando cancelamento');
+  1496→
+  1497→  var { cancelarNFe } = require('./nfe-cancelamento');
+  1498→
+  1499→  var results = [];
+  1500→  for (var i = 0; i < ids.length; i++) {
+  1501→    var moveId = ids[i];
+  1502→    try {
+  1503→      var r = await cancelOneInvoice(client, db, uid, pwd, moveId, cancelarNFe);
+  1504→      results.push(r);
+  1505→    } catch (err) {
+  1506→      console.error('[SIEG-CANCEL-POLL] ERRO fatura ' + moveId + ':', err.message);
+  1507→      try {
+  1508→        await executeKw(client, db, uid, pwd, 'account.move', 'write',
+  1509→          [[moveId], { x_studio_nfe_status: 'erro' }]);
+  1510→        await executeKw(client, db, uid, pwd, 'mail.message', 'create', [{
+  1511→          model: 'account.move', res_id: moveId,
+  1512→          body: '<b>Erro no Cancelamento</b><br/>' + err.message.substring(0, 500),
+  1513→          message_type: 'comment',
+  1514→        }]);
+  1515→      } catch (e2) { console.error('[SIEG-CANCEL-POLL] Falha ao gravar erro:', e2.message); }
+  1516→      results.push({ move_id: moveId, sucesso: false, erro: err.message });
+  1517→    }
+  1518→  }
+  1519→
+  1520→  var ok = results.filter(function(r) { return r.sucesso; }).length;
+  1521→  console.log('[SIEG-CANCEL-POLL] Concluido: ' + ok + '/' + results.length + ' cancelada(s)');
+  1522→  return { processed: results.length, sucesso: ok };
+  1523→}
+  1524→
+  1525→async function cancelOneInvoice(client, db, uid, pwd, moveId, cancelarNFe) {
+  1526→  var moves = await executeKw(client, db, uid, pwd, 'account.move', 'read',
+  1527→    [[moveId], ['name', 'x_studio_nfe_chave', 'x_studio_nfe_protocolo',
+  1528→                'x_studio_nfe_status', 'company_id']]);
+  1529→  if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
+  1530→  var move = moves[0];
+  1531→
+  1532→  var chave     = (move.x_studio_nfe_chave || '').replace(/\D/g, '');
+  1533→  var protocolo = String(move.x_studio_nfe_protocolo || '').trim();
+  1534→  var justificativa = 'Cancelamento solicitado pelo emitente via Odoo';
+  1535→  if (justificativa.length < 15) justificativa = 'Cancelamento solicitado pelo emitente via Odoo';
+  1536→
+  1537→  console.log('[SIEG-CANCEL-POLL] Fatura ' + move.name + ' | chave=' + chave.slice(0, 15) + '...');
+  1538→
+  1539→  if (!chave || chave.length !== 44) throw new Error('Chave de acesso invalida (' + chave.length + ' digitos). Nota precisa estar autorizada.');
+  1540→  if (!protocolo) throw new Error('Protocolo de autorizacao ausente na fatura ' + move.name);
+  1541→
+  1542→  var companyId = Array.isArray(move.company_id) ? move.company_id[0] : move.company_id;
+  1543→  var companies = await executeKw(client, db, uid, pwd, 'res.company', 'read', [[companyId], ['vat']]);
+  1544→  var cnpj = ((companies && companies[0] && companies[0].vat) || '').replace(/\D/g, '');
+  1545→  if (!cnpj) throw new Error('CNPJ do emitente nao encontrado na empresa');
+  1546→
+  1547→  // Marcar como processando para nao processar duas vezes em paralelo
+  1548→  await executeKw(client, db, uid, pwd, 'account.move', 'write',
+  1549→    [[moveId], { x_studio_nfe_status: 'processando' }]);
+  1550→
+  1551→  var resultado = await cancelarNFe({ chave, protocolo, cnpj, justificativa });
+  1552→
+  1553→  var statusNovo = resultado.sucesso ? 'cancelada' : 'erro';
+  1554→  await executeKw(client, db, uid, pwd, 'account.move', 'write',
+  1555→    [[moveId], {
+  1556→      x_studio_nfe_status: statusNovo,
+  1557→      x_studio_nfe_protocolo: resultado.nProt || protocolo,
+  1558→    }]);
+  1559→
+  1560→  if (resultado.sucesso) {
+  1561→    try {
+  1562→      await executeKw(client, db, uid, pwd, 'account.move', 'button_draft', [[moveId]]);
+  1563→      await executeKw(client, db, uid, pwd, 'account.move', 'button_cancel', [[moveId]]);
+  1564→      console.log('[SIEG-CANCEL-POLL] Fatura ' + move.name + ' revertida no Odoo');
+  1565→    } catch (e) {
+  1566→      console.warn('[SIEG-CANCEL-POLL] Nao foi possivel reverter a fatura: ' + e.message);
+  1567→    }
+  1568→  }
+  1569→
+  1570→  var msgCorpo = resultado.sucesso
+  1571→    ? '<b>NF-e Cancelada na SEFAZ</b><br/>'
+  1572→      + 'Protocolo: ' + (resultado.nProt || protocolo) + '<br/>'
+  1573→      + 'Data: ' + (resultado.dhRecbto || '') + '<br/>'
+  1574→      + 'Justificativa: ' + justificativa
+  1575→    : '<b>Cancelamento rejeitado pela SEFAZ</b><br/>'
+  1576→      + 'Status: ' + resultado.cStat + ' - ' + resultado.xMotivo + '<br/>'
+  1577→      + 'Justificativa enviada: ' + justificativa;
+  1578→
+  1579→  try {
+  1580→    await executeKw(client, db, uid, pwd, 'mail.message', 'create', [{
+  1581→      model: 'account.move', res_id: moveId,
+  1582→      body: msgCorpo, message_type: 'comment',
+  1583→    }]);
+  1584→  } catch (e) { console.warn('[SIEG-CANCEL-POLL] Erro ao postar chatter:', e.message); }
+  1585→
+  1586→  return { move_id: moveId, sucesso: resultado.sucesso, fatura: move.name, cStat: resultado.cStat };
+  1587→}
+  1588→
+  1589→module.exports = { processPendingEmissions, processPendingCancellations };
+  1590→
