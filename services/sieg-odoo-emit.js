@@ -139,7 +139,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     'name', 'partner_id', 'company_id', 'invoice_date', 'date',
     'amount_total', 'narration',
     'x_studio_nfe_status', 'x_studio_nfse_status', 'payment_state',
-    'x_studio_nosso_numero', 'x_studio_itau_resposta_json', 'x_studio_boleto_cancelado',
+    'x_studio_itau_nosso_numero', 'x_studio_itau_resposta_json', 'x_studio_boleto_cancelado',
     'invoice_line_ids', 'line_ids',
   ]]);
   if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
@@ -201,9 +201,9 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       }
     }
     // Also try nosso_numero directly if no JSON boletos found
-    if (boletoDataList.length === 0 && move.x_studio_nosso_numero) {
-      boletoInfo = 'Boleto: NN=' + move.x_studio_nosso_numero;
-      boletoDataList.push({ nosso_numero: move.x_studio_nosso_numero });
+    if (boletoDataList.length === 0 && move.x_studio_itau_nosso_numero) {
+      boletoInfo = 'Boleto: NN=' + move.x_studio_itau_nosso_numero;
+      boletoDataList.push({ nosso_numero: move.x_studio_itau_nosso_numero });
     }
   } catch (e) {
     console.log('[SIEG-EMIT] Erro ao ler dados de boleto: ' + e.message);

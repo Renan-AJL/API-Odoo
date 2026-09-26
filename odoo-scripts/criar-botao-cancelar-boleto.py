@@ -33,7 +33,7 @@ model_id = model_ids[0]
 codigo = """import urllib.request, json
 from odoo.exceptions import UserError
 
-nosso_numero = record.x_studio_nosso_numero or ''
+nosso_numero = record.x_studio_itau_nosso_numero or ''
 
 if not nosso_numero:
     raise UserError('Fatura nao possui Nosso Numero. Nao ha boleto para cancelar.')
