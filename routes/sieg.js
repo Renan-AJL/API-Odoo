@@ -154,7 +154,11 @@ router.post('/danfe', apiKeyAuth, async (req, res) => {
   try {
     const xml = req.body.xml;
     if (!xml) return res.status(400).json({ erro: 'XML obrigatorio' });
-    const pdf = await gerarDanfe(xml);
+    const opts = {
+      saleOrderNumber: req.body.sale_order_number || '',
+      boletoData: req.body.boleto_data || [],
+    };
+    const pdf = await gerarDanfe(xml, opts);
     res.json({ sucesso: true, pdf_base64: pdf });
   } catch (err) {
     res.status(500).json({ sucesso: false, erro: err.message });

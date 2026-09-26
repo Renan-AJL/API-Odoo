@@ -156,9 +156,10 @@ function xmlImpostoItem(line, crt, ibsInfo) {
   }
 
   // --- IPI ---
-  // Emitir IPI somente quando o Odoo realmente fornecer o CST do item.
+  // Emitir IPI quando o Odoo fornecer CST IPI do item (CRT 3=Lucro Real, ou qualquer CRT com cst_ipi definido)
+  // v2.0: Tambem emite para Simples Nacional (CRT 1) quando cst_ipi esta definido
   let ipiBlock = '';
-  if (String(crt || '') === '3' && line.cst_ipi) {
+  if (line.cst_ipi) {
     const cstIpi = String(line.cst_ipi).replace(/\D/g, '').padStart(2, '0');
     const vBCIpi = num(line.vbc_ipi || '0.00');
     const pIpi   = num4(line.pipi || '0.00');
@@ -495,12 +496,13 @@ ${xmlEndereco(partner, 'enderDest')}
   // REGRA SEFAZ: cada item DEVE ser arredondado a 2 casas antes de somar.
   // O total deve ser a soma exata dos valores que aparecem no XML por item.
   // Se somarmos valores brutos e arredondarmos só o total, diverge (cStat 603/602).
-  let vBC_total = 0, vICMS_total = 0, vPIS_total = 0, vCOFINS_total = 0;
+  let vBC_total = 0, vICMS_total = 0, vPIS_total = 0, vCOFINS_total = 0, vIPI_total = 0;
   lines.forEach(line => {
     vBC_total += round2(parseFloat(line.vbc_icms || line.vbc || 0));
     vICMS_total += round2(parseFloat(line.vicms || 0));
     vPIS_total += round2(parseFloat(line.vpis || 0));
     vCOFINS_total += round2(parseFloat(line.vcofins || 0));
+    vIPI_total += round2(parseFloat(line.vipi || 0));
   });
 
   // vTotTrib: NT2024/004 com IBSCBS — a SEFAZ PR-v4_9_86 calcula como 0.00 quando nao ha
@@ -525,7 +527,7 @@ ${xmlEndereco(partner, 'enderDest')}
         <vSeg>0.00</vSeg>
         <vDesc>0.00</vDesc>
         <vII>0.00</vII>
-        <vIPI>0.00</vIPI>
+        <vIPI>${num(vIPI_total)}</vIPI>
         <vIPIDevol>0.00</vIPIDevol>
         <vPIS>${num(vPIS_total)}</vPIS>
         <vCOFINS>${num(vCOFINS_total)}</vCOFINS>
@@ -600,6 +602,14 @@ ${xmlEndereco(partner, 'enderDest')}
 
   // === infAdic ===
   var infCplText = stripHtml(order.note || order.infCpl || '');
+  // Incluir numero do pedido de venda (sale order origin)
+  if (order.sale_order_number && infCplText.indexOf('Pedido') === -1) {
+    infCplText = 'Pedido: ' + order.sale_order_number + '. ' + infCplText;
+  }
+  // Incluir dados do boleto no infCpl para DANFE
+  if (order.boleto_info && infCplText.indexOf('Boleto') === -1) {
+    infCplText = order.boleto_info + ' ' + infCplText;
+  }
   if (infCplText) {
     xml += `\n    <infAdic>
       <infCpl>${esc(infCplText.substring(0, 2000))}</infCpl>

@@ -596,6 +596,35 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
 .sel-bar{display:none;align-items:center;gap:10px;padding:9px 12px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;margin-top:10px;font-size:13px}
 .sel-bar.on{display:flex}
 @media(max-width:600px){.main{padding:12px}.filters{flex-direction:column}.fg{width:100%}}
+/* ── DANFE Modal ──────────────────────────────────────────────── */
+.danfe-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;justify-content:center;align-items:flex-start;padding:30px 10px;overflow-y:auto}
+.danfe-overlay.on{display:flex}
+.danfe-modal{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;width:100%;max-width:900px;padding:0;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,.6)}
+.danfe-header{background:var(--bg3);padding:18px 24px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--bd)}
+.danfe-header h2{font-size:16px;font-weight:700;color:#fff;margin:0;flex:1}
+.danfe-close{background:none;border:none;color:var(--tx2);font-size:22px;cursor:pointer;padding:4px 8px;line-height:1}
+.danfe-close:hover{color:#fff}
+.danfe-body{padding:20px 24px;font-size:13px;color:var(--tx)}
+.danfe-section{margin-bottom:20px}
+.danfe-section h3{font-size:13px;font-weight:700;color:var(--ac);text-transform:uppercase;letter-spacing:.5px;margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid var(--bd)}
+.danfe-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px}
+.danfe-grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px 20px}
+.danfe-field{display:flex;flex-direction:column;gap:2px}
+.danfe-field label{font-size:10px;color:var(--tx2);text-transform:uppercase;letter-spacing:.3px}
+.danfe-field span{font-size:13px;color:var(--tx);word-break:break-all}
+.danfe-field span.mono{font-family:monospace}
+.danfe-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+.danfe-table th{padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--tx2);background:var(--bg3);border-bottom:1px solid var(--bd);white-space:nowrap}
+.danfe-table td{padding:7px 10px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:top}
+.danfe-table tr:hover td{background:rgba(255,255,255,.02)}
+.danfe-table .r{text-align:right}
+.danfe-totals{background:var(--bg3);border-radius:8px;padding:14px 18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:8px}
+.danfe-totals .tf{display:flex;flex-direction:column;gap:2px}
+.danfe-totals .tf label{font-size:10px;color:var(--tx2);text-transform:uppercase}
+.danfe-totals .tf span{font-size:14px;font-weight:600;color:#fff}
+.danfe-info{background:var(--bg3);border-radius:8px;padding:12px 16px;font-size:12px;color:var(--tx2);white-space:pre-wrap;line-height:1.6;margin-top:8px}
+.danfe-loading{text-align:center;padding:60px;color:var(--tx2)}
+.danfe-loading .spin{margin-right:8px}
 </style>
 </head><body>
 
@@ -609,9 +638,6 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
 
 <div class="tabs">
   <div class="tab on" onclick="tab('sieg',this)">📄 SIEG</div>
-  <div class="tab" onclick="tab('odoo',this)">📊 Odoo</div>
-  <div class="tab" onclick="tab('itau',this)">🏦 Itaú</div>
-  <div class="tab" onclick="tab('te',this)">🚚 TudoEntregue</div>
   <div class="tab" onclick="tab('status',this)">⚙️ Status</div>
 </div>
 
@@ -709,34 +735,6 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
   </div>
 </div>
 
-<!-- ══ ODOO ══════════════════════════════════════════════════════ -->
-<div id="p-odoo" class="pane">
-  <div class="panel">
-    <div class="ph"><h3>⚙️ Ações Odoo</h3></div>
-    <div class="pb">
-      <div style="max-width:500px;margin:0 auto;padding:20px 0">
-        <p style="margin-bottom:16px;color:var(--tx2);font-size:13px">
-          Cria/atualiza o botão <b>Cancelar Boleto</b> na fatura e a ação programada <b>Importar Extrato Itau</b> (diário 06:00) no Odoo via XML-RPC.
-        </p>
-        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:600">Senha do Odoo (admin)</label>
-        <input type="password" id="odoo-pass" placeholder="Senha do usuário admin do Odoo" style="width:100%;padding:8px 12px;border:1px solid var(--bd);border-radius:6px;margin-bottom:12px;box-sizing:border-box;font-size:14px">
-        <button class="btn" id="btn-setup-odoo" onclick="setupOdooActions()" style="width:100%;padding:10px;font-size:14px">Criar Ações no Odoo</button>
-        <div id="setup-result" style="margin-top:12px;font-size:13px"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ══ ITAÚ ══════════════════════════════════════════════════════ -->
-<div id="p-itau" class="pane">
-  <div class="panel"><div class="pb"><div class="empty">Em breve — Itaú</div></div></div>
-</div>
-
-<!-- ══ TE ════════════════════════════════════════════════════════ -->
-<div id="p-te" class="pane">
-  <div class="panel"><div class="pb"><div class="empty">Em breve — TudoEntregue</div></div></div>
-</div>
-
 <!-- ══ STATUS ════════════════════════════════════════════════════ -->
 <div id="p-status" class="pane">
   <div class="panel">
@@ -746,6 +744,19 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
 </div>
 
 </div><!-- /main -->
+
+<!-- ── DANFE Modal ──────────────────────────────────────────────── -->
+<div class="danfe-overlay" id="danfe-overlay" onclick="if(event.target===this)closeDanfe()">
+  <div class="danfe-modal">
+    <div class="danfe-header">
+      <h2 id="danfe-title">DANFE</h2>
+      <button class="danfe-close" onclick="closeDanfe()">&times;</button>
+    </div>
+    <div class="danfe-body" id="danfe-body">
+      <div class="danfe-loading"><span class="spin"></span>Carregando DANFE...</div>
+    </div>
+  </div>
+</div>
 
 <script>
 function today(){ return new Date().toISOString().slice(0,10); }
@@ -924,6 +935,7 @@ async function loadRec(){
         +'<div class="row-dropdown">'
         +'<a href="#" class="dl-link" data-url="'+xmlUrl+'" data-file="NFe_'+ce+'.xml">⬇ Baixar XML</a>'
         +'<a href="#" class="dl-link" data-url="'+pdfUrl+'" data-file="NFe_'+ce+'.pdf">⬇ Baixar PDF</a>'
+        +'<a href="#" class="ver-danfe-link" data-chave="'+ce+'" data-tipo="'+tipoAtual+'">📋 Ver DANFE</a>'
         +'</div></div>';
     } else { html+='—'; }
     html+='</td></tr>';
@@ -1050,6 +1062,13 @@ document.addEventListener('click',function(e){
     document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
     return;
   }
+  var danfeLink = e.target.closest('.ver-danfe-link');
+  if(danfeLink){
+    e.preventDefault();
+    verDanfe(danfeLink.dataset.chave, danfeLink.dataset.tipo);
+    document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
+    return;
+  }
   if(!e.target.closest('.row-menu')) document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
 });
 
@@ -1080,6 +1099,284 @@ async function setupOdooActions(){
     res.innerHTML='<div style="background:#3d0a0a;color:#f87171;padding:12px;border-radius:6px"><b>Erro:</b> '+e.message+'</div>';
   }
   btn.disabled=false; btn.textContent='Criar Ações no Odoo';
+}
+
+// ── DANFE Modal ──────────────────────────────────────────────────
+function closeDanfe(){
+  document.getElementById('danfe-overlay').classList.remove('on');
+}
+
+function danfeField(label, val, mono){
+  return '<div class="danfe-field"><label>'+label+'</label><span'+(mono?' class="mono"':'')+'>'+(val||'—')+'</span></div>';
+}
+
+function danfeFmtCnpj(v){
+  if(!v) return '—';
+  v=v.replace(/\D/g,'');
+  if(v.length===14) return v.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,'$1.$2.$3/$4-$5');
+  if(v.length===11) return v.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/,'$1.$2.$3-$4');
+  return v;
+}
+
+function danfeFmtVal(v){
+  if(v===null||v===undefined||v==='') return '—';
+  return 'R$ '+parseFloat(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+async function verDanfe(chave, tipo){
+  var overlay=document.getElementById('danfe-overlay');
+  var body=document.getElementById('danfe-body');
+  var title=document.getElementById('danfe-title');
+  title.textContent='DANFE — '+chave;
+  body.innerHTML='<div class="danfe-loading"><span class="spin"></span>Carregando DANFE...</div>';
+  overlay.classList.add('on');
+
+  try{
+    var xmlUrl='/admin/api/sieg/xml/'+chave+'?tipoXml='+tipo;
+    var resp=await fetch(xmlUrl,{credentials:'include'});
+    if(!resp.ok){ body.innerHTML='<div class="err-box">⚠️ Erro ao buscar XML (HTTP '+resp.status+')</div>'; return; }
+    var xmlText=await resp.text();
+
+    var parser=new DOMParser();
+    var doc=parser.parseFromString(xmlText,'text/xml');
+
+    var nfe=doc.querySelector('nfe\\:infNFe, infNFe')||doc.getElementsByTagName('infNFe')[0];
+    if(!nfe){
+      var nfeProc=doc.querySelector('nfeProc');
+      if(nfeProc) nfe=nfeProc.querySelector('nfe\\:infNFe, infNFe')||nfeProc.getElementsByTagName('infNFe')[0];
+    }
+    if(!nfe){ body.innerHTML='<div class="err-box">⚠️ XML não contém infNFe</div>'; return; }
+
+    function q(tag){
+      var m=nfe.querySelector('nfe\\:'+tag);
+      if(m) return m;
+      var els=nfe.getElementsByTagName(tag);
+      return els.length?els[0]:null;
+    }
+    function qt(tag){ var e=q(tag); return e?e.textContent:''; }
+
+    // Ide
+    var nNF=qt('nNF'), serie=qt('serie'), dhEmi=qt('dhEmi'), natOp=qt('natOp'), mod=qt('mod'), tpNF=qt('tpNF');
+    var cUF=qt('cUF'), cNF=qt('cNF');
+
+    // Emitente
+    var emitRz=qt('xNomeEmit')||qt('xNome');
+    var emitCnpj=q('CNPJEmit')?q('CNPJEmit').textContent:(q('CPFEmit')?q('CPFEmit').textContent:'');
+    var emitIE=qt('IEemit')||'';
+    var emitLgr=qt('xLgrEmit')||qt('xLgr')||'', emitNro=qt('nroEmit')||qt('nro')||'', emitCpl=qt('xCplEmit')||qt('xCpl')||'', emitBairro=qt('xBairroEmit')||qt('xBairro')||'', emitCMun=qt('cMunEmit')||qt('cMun')||'', emitXMun=qt('xMunEmit')||qt('xMun')||'', emitUF=qt('UFEmit')||qt('UF')||'', emitCEP=qt('CEPEmit')||qt('CEP')||'';
+    var emitEnd=emitLgr+(emitNro?', '+emitNro:'')+(emitCpl?' - '+emitCpl:'')+', '+emitBairro+', '+emitXMun+'/'+emitUF+(emitCEP?' — CEP '+emitCEP:'');
+
+    // Destinatário
+    var destRz=qt('xNomeDest')||'';
+    var destCnpjEl=q('CNPJDest'); if(!destCnpjEl) destCnpjEl=q('CPFDest');
+    var destCnpj=destCnpjEl?destCnpjEl.textContent:'';
+    var destIE=qt('IEDest')||'';
+    var destLgr=qt('xLgrDest')||'', destNro=qt('nroDest')||'', destCpl=qt('xCplDest')||'', destBairro=qt('xBairroDest')||'', destXMun=qt('xMunDest')||'', destUF=qt('UFDest')||'', destCEP=qt('CEPDest')||'';
+    var destEnd=destLgr+(destNro?', '+destNro:'')+(destCpl?' - '+destCpl:'')+', '+destBairro+', '+destXMun+'/'+destUF+(destCEP?' — CEP '+destCEP:'');
+
+    // Produtos
+    var dets=nfe.querySelectorAll('nfe\\:det, det');
+    if(!dets.length){
+      var detsColl=nfe.getElementsByTagName('det');
+      dets=detsColl;
+    }
+    var prodsHtml='';
+    for(var i=0;i<dets.length;i++){
+      var det=dets[i];
+      var prodEl=det.querySelector('nfe\\:prod, prod');
+      if(!prodEl) prodEl=det.getElementsByTagName('prod')[0];
+      if(!prodEl) continue;
+      function pq(tag){ var e=prodEl.querySelector('nfe\\:'+tag); if(!e) e=prodEl.getElementsByTagName(tag)[0]; return e?e.textContent:''; }
+
+      var impostoEl=det.querySelector('nfe\\:imposto, imposto');
+      if(!impostoEl) impostoEl=det.getElementsByTagName('imposto')[0];
+      function iq(tag){ if(!impostoEl) return ''; var e=impostoEl.querySelector('nfe\\:'+tag); if(!e) e=impostoEl.getElementsByTagName(tag)[0]; return e?e.textContent:''; }
+
+      var icmsBase=iq('vBC')||'';
+      var icmsVal=iq('vICMS')||'';
+      var icmsAliq=iq('pICMS')||'';
+      var ipiVal=iq('vIPI')||iq('vIPIST')||'';
+
+      prodsHtml+='<tr>'
+        +'<td>'+pq('cProd')+'</td>'
+        +'<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+pq('xProd')+'">'+pq('xProd')+'</td>'
+        +'<td class="r">'+pq('NCM')+'</td>'
+        +'<td class="r">'+pq('CFOP')+'</td>'
+        +'<td>'+pq('uCom')+'</td>'
+        +'<td class="r">'+pq('qCom')+'</td>'
+        +'<td class="r">'+danfeFmtVal(pq('vUnCom'))+'</td>'
+        +'<td class="r" style="font-weight:600">'+danfeFmtVal(pq('vProd'))+'</td>'
+        +'<td class="r">'+danfeFmtVal(icmsBase)+'</td>'
+        +'<td class="r">'+danfeFmtVal(icmsVal)+'</td>'
+        +'<td class="r">'+danfeFmtVal(ipiVal)+'</td>'
+        +'<td class="r">'+icmsAliq+'%</td>'
+        +'</tr>';
+    }
+
+    // Totais
+    var icmsTot=q('ICMSTot');
+    function tq(tag){ if(!icmsTot) return ''; var e=icmsTot.querySelector('nfe\\:'+tag); if(!e) e=icmsTot.getElementsByTagName(tag)[0]; return e?e.textContent:''; }
+    var vBC=tq('vBC'), vICMS=tq('vICMS'), vProd=tq('vProd'), vIPI=tq('vIPI'), vNF=tq('vNF'), vST=tq('vST'), vPIS=tq('vPIS'), vCOFINS=tq('vCOFINS'), vDesc=tq('vDesc'), vFrete=tq('vFrete'), vSeg=tq('vSeg'), vOutro=tq('vOutro');
+
+    // Transportadora
+    var transpRz=qt('xNomeTrans')||'';
+    var transpCnpj=q('CNPJTrans')?q('CNPJTrans').textContent:(q('CPFTrans')?q('CPFTrans').textContent:'');
+    var transpIE=qt('IETrans')||'';
+    var transpEnd=qt('xEnderTrans')||'';
+    var transpUF=qt('UFTrans')||'';
+    var transpMun=qt('xMunTrans')||'';
+    var modFrete=qt('modFrete')||'';
+
+    // Volumes
+    var volEls=nfe.querySelectorAll('nfe\\:vol, vol');
+    if(!volEls.length) volEls=nfe.getElementsByTagName('vol');
+    var volHtml='';
+    for(var vi=0;vi<volEls.length;vi++){
+      var vol=volEls[vi];
+      function vq(tag){ var e=vol.querySelector('nfe\\:'+tag); if(!e) e=vol.getElementsByTagName(tag)[0]; return e?e.textContent:''; }
+      volHtml+='<div class="danfe-grid3">'
+        +danfeField('Quantidade',vq('qVol'))
+        +danfeField('Espécie',vq('esp'))
+        +danfeField('Marca',vq('marca'))
+        +'</div><div class="danfe-grid3">'
+        +danfeField('Peso Bruto',vq('pesoB')?vq('pesoB')+' kg':'')
+        +danfeField('Peso Líquido',vq('pesoL')?vq('pesoL')+' kg':'')
+        +danfeField('Numeração',vq('nVol'))
+        +'</div>';
+    }
+
+    // Fatura / Duplicatas
+    var fatEl=nfe.querySelector('nfe\\:fat, fat');
+    if(!fatEl) fatEl=nfe.getElementsByTagName('fat')[0];
+    var fatNum='',fatVOrig='',fatVDesc='',fatVLiq='';
+    if(fatEl){
+      function fq(tag){ var e=fatEl.querySelector('nfe\\:'+tag); if(!e) e=fatEl.getElementsByTagName(tag)[0]; return e?e.textContent:''; }
+      fatNum=fq('nFat'); fatVOrig=fq('vOrig'); fatVDesc=fq('vDesc'); fatVLiq=fq('vLiq');
+    }
+    var dupEls=nfe.querySelectorAll('nfe\\:dup, dup');
+    if(!dupEls.length) dupEls=nfe.getElementsByTagName('dup');
+    var dupHtml='';
+    for(var di2=0;di2<dupEls.length;di2++){
+      var dup=dupEls[di2];
+      function dq2(tag){ var e=dup.querySelector('nfe\\:'+tag); if(!e) e=dup.getElementsByTagName(tag)[0]; return e?e.textContent:''; }
+      dupHtml+='<tr><td>'+dq2('nDup')+'</td><td>'+(dq2('dVenc')?new Date(dq2('dVenc')+'T12:00:00').toLocaleDateString('pt-BR'):'—')+'</td><td class="r" style="font-weight:600">'+danfeFmtVal(dq2('vDup'))+'</td></tr>';
+    }
+
+    // Info Complementares
+    var infCpl=qt('infCpl')||'';
+
+    // Protocolo
+    var protoEl=doc.querySelector('nfe\\:protNFe, protNFe');
+    if(!protoEl) protoEl=doc.getElementsByTagName('protNFe')[0];
+    var nProt='',dhRecbto='';
+    if(protoEl){
+      var infProt=protoEl.querySelector('nfe\\:infProt, infProt')||protoEl.getElementsByTagName('infProt')[0];
+      if(infProt){
+        var npEl=infProt.querySelector('nfe\\:nProt, nProt')||infProt.getElementsByTagName('nProt')[0];
+        var dhEl=infProt.querySelector('nfe\\:dhRecbto, dhRecbto')||infProt.getElementsByTagName('dhRecbto')[0];
+        if(npEl) nProt=npEl.textContent;
+        if(dhEl) dhRecbto=dhEl.textContent;
+      }
+    }
+
+    // Build HTML
+    var h='';
+    // Header section
+    h+='<div class="danfe-section"><h3>Identificação da NF-e</h3>'
+      +'<div class="danfe-grid">'
+      +danfeField('Número',nNF,true)
+      +danfeField('Série',serie)
+      +danfeField('Chave de Acesso',chave,true)
+      +danfeField('Protocolo',nProt,true)
+      +danfeField('Data Emissão',dhEmi?new Date(dhEmi).toLocaleString('pt-BR'):'—')
+      +danfeField('Natureza Operação',natOp)
+      +danfeField('Modelo',mod)
+      +danfeField('Tipo',tpNF==='0'?'Entrada':tpNF==='1'?'Saída':tpNF)
+      +'</div></div>';
+
+    // Emitente
+    h+='<div class="danfe-section"><h3>Emitente</h3>'
+      +'<div class="danfe-grid">'
+      +danfeField('Razão Social',emitRz)
+      +danfeField('CNPJ/CPF',danfeFmtCnpj(emitCnpj),true)
+      +danfeField('IE',emitIE,true)
+      +danfeField('Endereço',emitEnd)
+      +'</div></div>';
+
+    // Destinatário
+    h+='<div class="danfe-section"><h3>Destinatário</h3>'
+      +'<div class="danfe-grid">'
+      +danfeField('Razão Social',destRz)
+      +danfeField('CNPJ/CPF',danfeFmtCnpj(destCnpj),true)
+      +danfeField('IE',destIE,true)
+      +danfeField('Endereço',destEnd)
+      +'</div></div>';
+
+    // Produtos
+    if(prodsHtml){
+      h+='<div class="danfe-section"><h3>Produtos / Serviços</h3>'
+        +'<div style="overflow-x:auto"><table class="danfe-table"><thead><tr>'
+        +'<th>Código</th><th>Descrição</th><th>NCM</th><th>CFOP</th><th>Un</th><th>Qtd</th><th>V.Unit</th><th>V.Total</th><th>BC ICMS</th><th>V.ICMS</th><th>V.IPI</th><th>Alíq</th>'
+        +'</tr></thead><tbody>'+prodsHtml+'</tbody></table></div></div>';
+    }
+
+    // Totais
+    h+='<div class="danfe-section"><h3>Totais</h3>'
+      +'<div class="danfe-totals">'
+      +'<div class="tf"><label>Base ICMS</label><span>'+danfeFmtVal(vBC)+'</span></div>'
+      +'<div class="tf"><label>Valor ICMS</label><span>'+danfeFmtVal(vICMS)+'</span></div>'
+      +'<div class="tf"><label>Valor Produtos</label><span>'+danfeFmtVal(vProd)+'</span></div>'
+      +'<div class="tf"><label>Valor IPI</label><span>'+danfeFmtVal(vIPI)+'</span></div>'
+      +'<div class="tf"><label>Valor ST</label><span>'+danfeFmtVal(vST)+'</span></div>'
+      +'<div class="tf"><label>Desconto</label><span>'+danfeFmtVal(vDesc)+'</span></div>'
+      +'<div class="tf"><label>Frete</label><span>'+danfeFmtVal(vFrete)+'</span></div>'
+      +'<div class="tf"><label>Seguro</label><span>'+danfeFmtVal(vSeg)+'</span></div>'
+      +'<div class="tf"><label>Outras Despesas</label><span>'+danfeFmtVal(vOutro)+'</span></div>'
+      +'<div class="tf" style="grid-column:span 2"><label>VALOR TOTAL DA NOTA</label><span style="color:#3fb950;font-size:16px">'+danfeFmtVal(vNF)+'</span></div>'
+      +'</div></div>';
+
+    // Transportadora
+    var modFreteMap={'0':'Por conta do emitente (CIF)','1':'Por conta do destinatário (FOB)','2':'Por conta de terceiros','9':'Sem frete'};
+    h+='<div class="danfe-section"><h3>Transportadora / Frete</h3>'
+      +'<div class="danfe-grid">'
+      +danfeField('Razão Social',transpRz)
+      +danfeField('CNPJ/CPF',danfeFmtCnpj(transpCnpj),true)
+      +danfeField('IE',transpIE,true)
+      +danfeField('Modalidade Frete',modFreteMap[modFrete]||modFrete)
+      +danfeField('Endereço',transpEnd+(transpMun?' — '+transpMun:'')+(transpUF?'/'+transpUF:''))
+      +'</div>';
+    if(volHtml) h+=volHtml;
+    h+='</div>';
+
+    // Fatura / Duplicatas
+    if(fatNum||dupHtml){
+      h+='<div class="danfe-section"><h3>Fatura / Duplicatas</h3>';
+      if(fatNum){
+        h+='<div class="danfe-grid3">'
+          +danfeField('Número Fatura',fatNum)
+          +danfeField('Valor Original',danfeFmtVal(fatVOrig))
+          +danfeField('Valor Desconto',danfeFmtVal(fatVDesc))
+          +'</div><div class="danfe-grid3">'
+          +danfeField('Valor Líquido',danfeFmtVal(fatVLiq))
+          +'</div>';
+      }
+      if(dupHtml){
+        h+='<table class="danfe-table" style="margin-top:10px"><thead><tr><th>Nº Duplicata</th><th>Vencimento</th><th>Valor</th></tr></thead><tbody>'+dupHtml+'</tbody></table>';
+      }
+      h+='</div>';
+    }
+
+    // Info Complementares
+    if(infCpl){
+      h+='<div class="danfe-section"><h3>Informações Complementares</h3>'
+        +'<div class="danfe-info">'+infCpl.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div></div>';
+    }
+
+    body.innerHTML=h;
+
+  }catch(err){
+    body.innerHTML='<div class="err-box">⚠️ Erro ao processar XML: '+err.message+'</div>';
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────
@@ -1120,7 +1417,7 @@ router.post('/api/setup-odoo-actions', auth, async (req, res) => {
       "if not nosso_numero:",
       "    raise UserError('Fatura nao possui Nosso Numero. Nao ha boleto para cancelar.')",
       "",
-      "url     = 'https://odoo-middleware-unified.onrender.com/api/v1/itau/cancelar'",
+      "url     = 'https://api-odoo-rhzf.onrender.com/api/v1/itau/cancelar'",
       "payload = json.dumps({'nosso_numero': nosso_numero}).encode('utf-8')",
       "req     = urllib.request.Request(url, data=payload, headers={",
       "    'Content-Type': 'application/json',",
@@ -1168,7 +1465,7 @@ router.post('/api/setup-odoo-actions', auth, async (req, res) => {
       "import urllib.request, json",
       "from odoo.exceptions import UserError",
       "",
-      "url = 'https://odoo-middleware-unified.onrender.com/api/v1/itau/extrato/cron?secret=" + CRON_SECRET + "'",
+      "url = 'https://api-odoo-rhzf.onrender.com/api/v1/itau/extrato/cron?secret=" + CRON_SECRET + "'",
       "req = urllib.request.Request(url, method='GET')",
       "req.add_header('Content-Type', 'application/json')",
       "",

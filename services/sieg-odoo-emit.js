@@ -139,10 +139,78 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     'name', 'partner_id', 'company_id', 'invoice_date', 'date',
     'amount_total', 'narration',
     'x_studio_nfe_status', 'x_studio_nfse_status', 'payment_state',
+    'x_studio_nosso_numero', 'x_studio_itau_resposta_json', 'x_studio_boleto_cancelado',
+    'invoice_line_ids', 'line_ids',
   ]]);
   if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
   var move = moves[0];
   console.log('[SIEG-EMIT] Fatura: ' + move.name + ' | R$ ' + (move.amount_total || 0));
+
+  // 1b. Read sale order origin (invoice_origin / sale_order_ids) for pedido number
+  var saleOrderNumber = '';
+  try {
+    // Try invoice_origin field first
+    var moveOrigin = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], ['invoice_origin', 'ref']]);
+    if (moveOrigin && moveOrigin[0]) {
+      saleOrderNumber = moveOrigin[0].invoice_origin || moveOrigin[0].ref || '';
+    }
+    // If still empty, try sale_order_ids (M2M field)
+    if (!saleOrderNumber) {
+      var soIds = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], ['sale_order_ids']]);
+      if (soIds && soIds[0] && soIds[0].sale_order_ids && soIds[0].sale_order_ids.length > 0) {
+        var soNames = await executeKw(client, db, uid, pwd, 'sale.order', 'read', [[soIds[0].sale_order_ids[0]], ['name']]);
+        if (soNames && soNames[0]) saleOrderNumber = soNames[0].name || '';
+      }
+    }
+  } catch (e) {
+    console.log('[SIEG-EMIT] Campo invoice_origin/sale_order_ids nao disponivel: ' + e.message);
+  }
+  if (saleOrderNumber) {
+    console.log('[SIEG-EMIT] Pedido de venda origem: ' + saleOrderNumber);
+  }
+
+  // 1c. Read boleto data from Itaú response JSON
+  var boletoInfo = '';
+  var boletoDataList = [];
+  try {
+    var rawJson = move.x_studio_itau_resposta_json || '';
+    if (rawJson) {
+      var jsonStr = rawJson.replace(/'/g, '"').replace(/True/g, 'true').replace(/False/g, 'false').replace(/None/g, 'null');
+      var parsed = JSON.parse(jsonStr);
+      var pagamentos = parsed.pagamentos || [];
+      var boletoParts = [];
+      for (var pi = 0; pi < pagamentos.length; pi++) {
+        var p = pagamentos[pi];
+        if (p.nosso_numero) {
+          var bolEntry = { nosso_numero: p.nosso_numero };
+          var part = 'Boleto: NN=' + p.nosso_numero;
+          if (p.linha_digitavel) {
+            part += ' LD=' + p.linha_digitavel;
+            bolEntry.linha_digitavel = p.linha_digitavel;
+          }
+          if (p.codigo_barras) {
+            part += ' CB=' + p.codigo_barras;
+            bolEntry.codigo_barras = p.codigo_barras;
+          }
+          boletoParts.push(part);
+          boletoDataList.push(bolEntry);
+        }
+      }
+      if (boletoParts.length > 0) {
+        boletoInfo = boletoParts.join(' | ');
+      }
+    }
+    // Also try nosso_numero directly if no JSON boletos found
+    if (boletoDataList.length === 0 && move.x_studio_nosso_numero) {
+      boletoInfo = 'Boleto: NN=' + move.x_studio_nosso_numero;
+      boletoDataList.push({ nosso_numero: move.x_studio_nosso_numero });
+    }
+  } catch (e) {
+    console.log('[SIEG-EMIT] Erro ao ler dados de boleto: ' + e.message);
+  }
+  if (boletoInfo) {
+    console.log('[SIEG-EMIT] Boleto info: ' + boletoInfo.substring(0, 200));
+  }
 
   // 2. Read company
   var companyId = tupId(move.company_id);
@@ -262,9 +330,12 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       date_order: move.invoice_date || move.date,
       amount_total: vProdSum, // vNF (sem IBS/CBS) — o XML calcula vNFTot internamente
       note: move.narration || '',
+      sale_order_number: saleOrderNumber || '',
+      boleto_info: boletoInfo || '',
     },
     lines: linesData,
     pagamentos: pagamentos,
+    boletoData: boletoDataList || [],
     config: {
       serie: serie,
       tpAmb: process.env.SIEG_TP_AMB || config.sieg.tpAmb || '2',
@@ -873,6 +944,40 @@ async function buildLineData(client, db, uid, pwd, line) {
   // Tax extraction
   var tax = await extractTaxes(client, db, uid, pwd, line);
 
+  // IPI extraction from product x_studio_ fields
+  var cstIpi = '', vbcIpi = '0.00', pipi = '0.00', vipi = '0.00', cenq = '999';
+  if (productId) {
+    try {
+      var ipiFields = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
+        'x_studio_cst_ipi', 'x_studio_aliquota_ipi',
+      ]]);
+      if (ipiFields && ipiFields[0]) {
+        cstIpi = String(ipiFields[0].x_studio_cst_ipi || '').replace(/\D/g, '');
+        pipi = String(ipiFields[0].x_studio_aliquota_ipi || '0');
+      }
+    } catch (eIpi) {
+      // Try product.template IPI fields
+      try {
+        var tmplIpi = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['product_tmpl_id']]);
+        if (tmplIpi && tmplIpi[0] && tmplIpi[0].product_tmpl_id) {
+          var tmplIdIpi = tupId(tmplIpi[0].product_tmpl_id);
+          var tmplIpiFields = await executeKw(client, db, uid, pwd, 'product.template', 'read', [[tmplIdIpi], [
+            'x_studio_cst_ipi', 'x_studio_aliquota_ipi',
+          ]]);
+          if (tmplIpiFields && tmplIpiFields[0]) {
+            cstIpi = String(tmplIpiFields[0].x_studio_cst_ipi || '').replace(/\D/g, '');
+            pipi = String(tmplIpiFields[0].x_studio_aliquota_ipi || '0');
+          }
+        }
+      } catch (e2) {}
+    }
+    // Calculate IPI values if CST is taxable (00, 49, 50, 99)
+    if (cstIpi && ['00','49','50','99'].includes(cstIpi.padStart(2, '0'))) {
+      vbcIpi = String(line.price_subtotal || (line.quantity * line.price_unit) || 0);
+      vipi = String(round2(parseFloat(vbcIpi) * parseFloat(pipi || 0) / 100));
+    }
+  }
+
   var lineData = {
     cProd: defaultCode, barcode: barcode,
     product_name: productName, xProd: productName,
@@ -896,6 +1001,12 @@ async function buildLineData(client, db, uid, pwd, line) {
     vbc_cofins: String(tax.vbc_cofins || 0),
     pcofins: String(tax.pcofins || 0),
     vcofins: String(tax.vcofins || 0),
+    // IPI
+    cst_ipi: cstIpi || '',
+    vbc_ipi: vbcIpi,
+    pipi: pipi,
+    vipi: vipi,
+    cenq: cenq,
     // NFS-e fields from product
     x_studio_c_trib_nac: prodStudio.c_trib_nac,
     x_studio_c_nbs: prodStudio.c_nbs,
@@ -927,6 +1038,10 @@ async function buildLineData(client, db, uid, pwd, line) {
   console.log('[SIEG-EMIT-LINE]   vBC_COFINS: ' + lineData.vbc_cofins);
   console.log('[SIEG-EMIT-LINE]   pCOFINS:    ' + lineData.pcofins);
   console.log('[SIEG-EMIT-LINE]   vCOFINS:    ' + lineData.vcofins);
+  console.log('[SIEG-EMIT-LINE]   CST_IPI:    ' + JSON.stringify(lineData.cst_ipi));
+  console.log('[SIEG-EMIT-LINE]   vBC_IPI:    ' + lineData.vbc_ipi);
+  console.log('[SIEG-EMIT-LINE]   pIPI:       ' + lineData.pipi);
+  console.log('[SIEG-EMIT-LINE]   vIPI:       ' + lineData.vipi);
 
   return lineData;
 }

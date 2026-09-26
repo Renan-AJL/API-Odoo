@@ -5,6 +5,8 @@
  * da chave de acesso). Layout retrato A4 no padrao do DANFE simplificado:
  * canhoto, identificacao, emitente/destinatario, impostos, itens e dados
  * adicionais.
+ *
+ * v2.0 — Inclui IPI, Numero do Pedido, Boleto (cod barras / linha digitavel)
  */
 var PDFDocument = require('pdfkit');
 var bwipjs = require('bwip-js');
@@ -67,9 +69,13 @@ async function barcode(chave) {
 /**
  * Gera o PDF do DANFE.
  * @param {string} nfeProcXml XML autorizado (nfeProc) ou NFe + protNFe
+ * @param {Object} [opts] Opcoes adicionais
+ * @param {string} [opts.saleOrderNumber] Numero do pedido de venda (ex: S00042)
+ * @param {Array} [opts.boletoData] Dados do boleto [{nosso_numero, linha_digitavel, codigo_barras}]
  * @returns {Promise<Buffer>}
  */
-async function gerarDanfePdf(nfeProcXml) {
+async function gerarDanfePdf(nfeProcXml, opts) {
+  opts = opts || {};
   var xml = String(nfeProcXml || '');
   var infNFe = bloco(xml, 'infNFe');
   if (!infNFe) throw new Error('XML sem <infNFe> — nao eh possivel gerar o DANFE.');
@@ -186,18 +192,20 @@ async function gerarDanfePdf(nfeProcXml) {
 
   // --- Totais ---
   doc.fontSize(6).font('Helvetica-Bold').text('CALCULO DO IMPOSTO', L, y); y += 8;
-  var c5 = W / 5;
-  campo(L, y, c5, 20, 'BASE DE CALCULO DO ICMS', moeda(tag(total, 'vBC')), 7);
-  campo(L + c5, y, c5, 20, 'VALOR DO ICMS', moeda(tag(total, 'vICMS')), 7);
-  campo(L + 2 * c5, y, c5, 20, 'BASE DE CALCULO ICMS ST', moeda(tag(total, 'vBCST')), 7);
-  campo(L + 3 * c5, y, c5, 20, 'VALOR DO ICMS ST', moeda(tag(total, 'vST')), 7);
-  campo(L + 4 * c5, y, c5, 20, 'VALOR TOTAL DOS PRODUTOS', moeda(tag(total, 'vProd')), 7, true);
+  var c6 = W / 6;
+  campo(L, y, c6, 20, 'BASE DE CALCULO DO ICMS', moeda(tag(total, 'vBC')), 7);
+  campo(L + c6, y, c6, 20, 'VALOR DO ICMS', moeda(tag(total, 'vICMS')), 7);
+  campo(L + 2 * c6, y, c6, 20, 'BASE DE CALCULO ICMS ST', moeda(tag(total, 'vBCST')), 7);
+  campo(L + 3 * c6, y, c6, 20, 'VALOR DO ICMS ST', moeda(tag(total, 'vST')), 7);
+  campo(L + 4 * c6, y, c6, 20, 'VALOR DO IPI', moeda(tag(total, 'vIPI')), 7);
+  campo(L + 5 * c6, y, c6, 20, 'VALOR TOTAL DOS PRODUTOS', moeda(tag(total, 'vProd')), 7, true);
   y += 20;
-  campo(L, y, c5, 20, 'VALOR DO FRETE', moeda(tag(total, 'vFrete')), 7);
-  campo(L + c5, y, c5, 20, 'VALOR DO SEGURO', moeda(tag(total, 'vSeg')), 7);
-  campo(L + 2 * c5, y, c5, 20, 'DESCONTO', moeda(tag(total, 'vDesc')), 7);
-  campo(L + 3 * c5, y, c5, 20, 'OUTRAS DESPESAS', moeda(tag(total, 'vOutro')), 7);
-  campo(L + 4 * c5, y, c5, 20, 'VALOR TOTAL DA NOTA', moeda(tag(total, 'vNF')), 8, true);
+  campo(L, y, c6, 20, 'VALOR DO FRETE', moeda(tag(total, 'vFrete')), 7);
+  campo(L + c6, y, c6, 20, 'VALOR DO SEGURO', moeda(tag(total, 'vSeg')), 7);
+  campo(L + 2 * c6, y, c6, 20, 'DESCONTO', moeda(tag(total, 'vDesc')), 7);
+  campo(L + 3 * c6, y, c6, 20, 'OUTRAS DESPESAS', moeda(tag(total, 'vOutro')), 7);
+  campo(L + 4 * c6, y, c6, 20, 'IPI DEVOLVIDO', moeda(tag(total, 'vIPIDevol')), 7);
+  campo(L + 5 * c6, y, c6, 20, 'VALOR TOTAL DA NOTA', moeda(tag(total, 'vNF')), 8, true);
   y += 24;
 
   // --- Transportador ---
@@ -218,10 +226,11 @@ async function gerarDanfePdf(nfeProcXml) {
   // --- Itens ---
   doc.fontSize(6).font('Helvetica-Bold').text('DADOS DOS PRODUTOS / SERVICOS', L, y); y += 8;
   var cols = [
-    { t: 'COD', w: 0.08 }, { t: 'DESCRICAO', w: 0.30 }, { t: 'NCM', w: 0.07 },
-    { t: 'CST', w: 0.05 }, { t: 'CFOP', w: 0.05 }, { t: 'UN', w: 0.04 },
-    { t: 'QTD', w: 0.08 }, { t: 'V.UNIT', w: 0.10 }, { t: 'V.TOTAL', w: 0.10 },
-    { t: 'BC ICMS', w: 0.07 }, { t: 'V.ICMS', w: 0.06 },
+    { t: 'COD', w: 0.07 }, { t: 'DESCRICAO', w: 0.24 }, { t: 'NCM', w: 0.06 },
+    { t: 'CST', w: 0.04 }, { t: 'CFOP', w: 0.04 }, { t: 'UN', w: 0.03 },
+    { t: 'QTD', w: 0.07 }, { t: 'V.UNIT', w: 0.08 }, { t: 'V.TOTAL', w: 0.08 },
+    { t: 'BC ICMS', w: 0.06 }, { t: 'V.ICMS', w: 0.05 },
+    { t: 'CST IPI', w: 0.04 }, { t: 'V.IPI', w: 0.06 }, { t: 'PIPI%', w: 0.04 },
   ];
   var x = L;
   box(L, y, W, 12);
@@ -236,6 +245,9 @@ async function gerarDanfePdf(nfeProcXml) {
     if (y > doc.page.height - 130) { doc.addPage(); y = doc.page.margins.top; }
     var prod = bloco(det, 'prod');
     var icms = bloco(det, 'ICMS');
+    var ipi = bloco(det, 'IPI');
+    var ipiTrib = bloco(ipi, 'IPITrib');
+    var ipiNT = bloco(ipi, 'IPINT');
     var h = 12;
     box(L, y, W, h);
     var vals = [
@@ -243,6 +255,9 @@ async function gerarDanfePdf(nfeProcXml) {
       tag(icms, 'CST') || tag(icms, 'CSOSN'), tag(prod, 'CFOP'), tag(prod, 'uCom'),
       qtd(tag(prod, 'qCom')), moeda(tag(prod, 'vUnCom')), moeda(tag(prod, 'vProd')),
       moeda(tag(icms, 'vBC')), moeda(tag(icms, 'vICMS')),
+      tag(ipiTrib, 'CST') || tag(ipiNT, 'CST') || '',
+      moeda(tag(ipiTrib, 'vIPI')),
+      tag(ipiTrib, 'pIPI') ? parseFloat(tag(ipiTrib, 'pIPI')).toFixed(2) : '',
     ];
     var xx = L;
     cols.forEach(function (c, i) {
@@ -260,9 +275,114 @@ async function gerarDanfePdf(nfeProcXml) {
   doc.fontSize(6).font('Helvetica-Bold').text('DADOS ADICIONAIS', L, y); y += 8;
   var infoAd = (homolog ? 'AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL. ' : '') +
     (tag(infAdic, 'infCpl') || '') + ' ' + (tag(infAdic, 'infAdFisco') || '');
+  // Incluir numero do pedido de venda se disponivel
+  if (opts.saleOrderNumber) {
+    if (infoAd.indexOf('Pedido') === -1) {
+      infoAd = 'Pedido: ' + opts.saleOrderNumber + '. ' + infoAd;
+    }
+  }
   box(L, y, W, 60);
   doc.fontSize(6.5).font('Helvetica').text(infoAd.trim() || '-', L + 4, y + 4, { width: W - 8, height: 52 });
   y += 66;
+
+  // --- Cobranca (Duplicatas / Boleto) ---
+  var cobr = bloco(infNFe, 'cobr');
+  var dups = blocos(cobr, 'dup');
+  if (dups.length > 0) {
+    if (y > doc.page.height - 60) { doc.addPage(); y = doc.page.margins.top; }
+    doc.fontSize(6).font('Helvetica-Bold').text('FATURA / DUPLICATAS', L, y); y += 8;
+    var fatBlock = bloco(cobr, 'fat');
+    var fatNum = tag(fatBlock, 'nFat');
+    var fatOrig = moeda(tag(fatBlock, 'vOrig'));
+    var fatLiq = moeda(tag(fatBlock, 'vLiq'));
+    campo(L, y, W * 0.30, 18, 'NUMERO', fatNum, 6.5);
+    campo(L + W * 0.30, y, W * 0.35, 18, 'VALOR ORIGINAL', fatOrig, 6.5);
+    campo(L + W * 0.65, y, W * 0.35, 18, 'VALOR LIQUIDO', fatLiq, 6.5);
+    y += 20;
+    // Duplicatas com vencimento e valor
+    var dupColW = W / Math.min(dups.length, 6);
+    var dupX = L;
+    dups.forEach(function (dup, di) {
+      if (di > 0 && di % 6 === 0) { y += 18; dupX = L; }
+      if (y > doc.page.height - 40) { doc.addPage(); y = doc.page.margins.top; }
+      var nDup = tag(dup, 'nDup');
+      var dVenc = tag(dup, 'dVenc');
+      var vDup = moeda(tag(dup, 'vDup'));
+      box(dupX, y, dupColW, 18);
+      doc.fontSize(5).font('Helvetica').text('Dup ' + nDup, dupX + 2, y + 2, { width: dupColW - 4, lineBreak: false });
+      doc.fontSize(5.5).font('Helvetica').text(dVenc + '  R$ ' + vDup, dupX + 2, y + 9, { width: dupColW - 4, lineBreak: false, ellipsis: true });
+      dupX += dupColW;
+    });
+    y += 22;
+  }
+
+  // --- Boleto (linha digitavel / codigo de barras) ---
+  // Busca dados de boleto no infAdic (formato: Boleto: NN=xxx LD=xxx CB=xxx)
+  // Ou via opts.boletoData passado pelo sieg-odoo-emit
+  var boletoMatch = infoAd.match(/Boleto:\s*NN[=:]\s*(\S+)(?:\s+LD[=:]\s*(\S+))?(?:\s+CB[=:]\s*(\S+))?/i);
+  // Tambem busca linha digitavel no padrao 47 digitos
+  var ldMatch = infoAd.match(/(\d{5}\.\d{5}\s\d{5}\.\d{6}\s\d{5}\.\d{6}\s\d{1}\s\d{14})/);
+  // Dados do boleto via opts
+  var optBoletos = opts.boletoData || [];
+  if (boletoMatch || ldMatch || optBoletos.length > 0) {
+    if (y > doc.page.height - 80) { doc.addPage(); y = doc.page.margins.top; }
+    doc.fontSize(6).font('Helvetica-Bold').text('BOLETO', L, y); y += 8;
+    // Se temos boletos via opts, mostrar cada um
+    if (optBoletos.length > 0) {
+      optBoletos.forEach(function(bol) {
+        if (y > doc.page.height - 50) { doc.addPage(); y = doc.page.margins.top; }
+        var bolH = 36;
+        box(L, y, W, bolH);
+        if (bol.nosso_numero) {
+          doc.fontSize(6).font('Helvetica').text('Nosso Numero: ' + bol.nosso_numero, L + 4, y + 3, { width: W - 8 });
+        }
+        if (bol.linha_digitavel) {
+          doc.fontSize(6).font('Helvetica').text('Linha Digitavel: ' + bol.linha_digitavel, L + 4, y + 11, { width: W - 8 });
+        }
+        if (bol.codigo_barras) {
+          try {
+            var bolPng3 = await barcode(bol.codigo_barras);
+            doc.image(bolPng3, L + 4, y + 21, { width: W - 12, height: 12 });
+          } catch (e) {
+            doc.fontSize(5.5).font('Helvetica').text('Cod. Barras: ' + bol.codigo_barras, L + 4, y + 22, { width: W - 8 });
+          }
+        }
+        y += bolH + 2;
+      });
+    } else if (boletoMatch) {
+      box(L, y, W, 36);
+      var nnBol = boletoMatch[1] || '';
+      var ldBol = boletoMatch[2] || '';
+      var cbBol = boletoMatch[3] || '';
+      if (nnBol) {
+        doc.fontSize(6).font('Helvetica').text('Nosso Numero: ' + nnBol, L + 4, y + 3, { width: W - 8 });
+      }
+      if (ldBol) {
+        doc.fontSize(6).font('Helvetica').text('Linha Digitavel: ' + ldBol, L + 4, y + 12, { width: W - 8 });
+      }
+      if (cbBol) {
+        try {
+          var bolPng = await barcode(cbBol);
+          doc.image(bolPng, L + 4, y + 21, { width: W - 12, height: 12 });
+        } catch (e) {
+          doc.fontSize(5.5).font('Helvetica').text('Cod. Barras: ' + cbBol, L + 4, y + 22, { width: W - 8 });
+        }
+      }
+      y += 40;
+    } else if (ldMatch) {
+      box(L, y, W, 36);
+      doc.fontSize(6).font('Helvetica').text('Linha Digitavel:', L + 4, y + 3, { width: W - 8 });
+      doc.fontSize(7).font('Helvetica-Bold').text(ldMatch[1], L + 4, y + 12, { width: W - 8 });
+      var cbDigits = ldMatch[1].replace(/[^0-9]/g, '');
+      if (cbDigits.length >= 44) {
+        try {
+          var bolPng2 = await barcode(cbDigits.substring(0, 44));
+          doc.image(bolPng2, L + 4, y + 23, { width: W - 12, height: 12 });
+        } catch (e) {}
+      }
+      y += 40;
+    }
+  }
 
   doc.fontSize(5.5).fillColor('#666')
     .text('DANFE gerado pelo middleware AJL (emissao propria com certificado A1) em ' + dataFmt(new Date().toISOString()), L, y);

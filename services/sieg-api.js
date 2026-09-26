@@ -177,8 +177,12 @@ async function emitirNFSe(dadosOdoo) {
 
 /**
  * DANFE (PDF) — local por padrao; SIEG apenas se NFE_DANFE_PROVIDER=sieg
+ * @param {string} xmlAutorizado XML nfeProc autorizado
+ * @param {Object} [opts] Opcoes adicionais para o DANFE
+ * @param {string} [opts.saleOrderNumber] Numero do pedido de venda
+ * @param {Array} [opts.boletoData] Dados do boleto [{nosso_numero, linha_digitavel, codigo_barras}]
  */
-async function gerarDanfe(xmlAutorizado) {
+async function gerarDanfe(xmlAutorizado, opts) {
   if (String(process.env.NFE_DANFE_PROVIDER || 'local').toLowerCase() === 'sieg') {
     const headers = await getAuthHeaders();
     const resp = await axios.post(SIEG_BASE + '/api/v1/gerarDanfeViaXml', {
@@ -186,7 +190,7 @@ async function gerarDanfe(xmlAutorizado) {
     }, { headers, timeout: 30000 });
     return resp.data;
   }
-  const pdf = await gerarDanfePdf(xmlAutorizado);
+  const pdf = await gerarDanfePdf(xmlAutorizado, opts);
   console.log('[DANFE] PDF gerado localmente (' + pdf.length + ' bytes)');
   return pdf.toString('base64');
 }
@@ -228,7 +232,10 @@ async function emitirNota(dadosOdoo) {
       }
       resultado.pdfBase64 = tipo === 'nfse'
         ? await gerarDanfse(xmlAutorizado)
-        : await gerarDanfe(xmlAutorizado);
+        : await gerarDanfe(xmlAutorizado, {
+            saleOrderNumber: (dadosOdoo.order && dadosOdoo.order.sale_order_number) || '',
+            boletoData: dadosOdoo.boletoData || [],
+          });
       resultado.pdfGerado = true;
     } catch (errPdf) {
       console.error('[SIEG-API] Erro ao gerar PDF (nota ainda pode estar autorizada):', errPdf.message);
