@@ -1,0 +1,1532 @@
+     1→/**
+     2→ * routes/admin.js — Painel Admin AJL (v4 — filtros SIEG estilo imagem)
+     3→ */
+     4→'use strict';
+     5→const express = require('express');
+     6→const crypto  = require('crypto');
+     7→const router  = express.Router();
+     8→const config  = require('../config');
+     9→const xmlrpc  = require('xmlrpc');
+    10→
+    11→// ── Cache ZIP em memória (chave -> xmlString, TTL 30min) ─────────
+    12→var _zipCache = {}; // { chave: { xml: string, ts: number } }
+    13→var ZIP_CACHE_TTL = 30 * 60 * 1000;
+    14→function cacheSet(chave, xml) { _zipCache[chave] = { xml, ts: Date.now() }; }
+    15→function cacheGet(chave) {
+    16→  var e = _zipCache[chave];
+    17→  if (!e) return null;
+    18→  if (Date.now() - e.ts > ZIP_CACHE_TTL) { delete _zipCache[chave]; return null; }
+    19→  return e.xml;
+    20→}
+    21→setInterval(function() {
+    22→  var now = Date.now();
+    23→  Object.keys(_zipCache).forEach(function(k) { if (now - _zipCache[k].ts > ZIP_CACHE_TTL) delete _zipCache[k]; });
+    24→}, 10 * 60 * 1000);
+    25→
+    26→// ── Auth ──────────────────────────────────────────────────────────
+    27→const ADMIN_USER   = process.env.ADMIN_USER     || 'admin';
+    28→const ADMIN_PASS   = process.env.ADMIN_PASSWORD || 'ajl2025';
+    29→const TOKEN_SECRET = process.env.ADMIN_TOKEN_SECRET || process.env.API_SECRET_KEY || 'ajl-admin-secret';
+    30→const COOKIE_NAME  = 'ajl_admin_token';
+    31→const COOKIE_TTL   = 8 * 60 * 60 * 1000;
+    32→
+    33→function parseCookies(req) {
+    34→  var list = {};
+    35→  var header = req.headers && req.headers.cookie;
+    36→  if (!header) return list;
+    37→  header.split(';').forEach(function(c) {
+    38→    var idx = c.indexOf('=');
+    39→    if (idx < 0) return;
+    40→    var k = c.slice(0, idx).trim();
+    41→    var v = c.slice(idx + 1).trim();
+    42→    if (v[0] === '"') v = v.slice(1, -1);
+    43→    list[k] = decodeURIComponent(v);
+    44→  });
+    45→  return list;
+    46→}
+    47→
+    48→function makeToken(user) {
+    49→  var exp     = Date.now() + COOKIE_TTL;
+    50→  var payload = user + ':' + exp;
+    51→  var sig     = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
+    52→  return payload + ':' + sig;
+    53→}
+    54→
+    55→function validateToken(token) {
+    56→  if (!token) return false;
+    57→  var idx = token.lastIndexOf(':');
+    58→  if (idx < 0) return false;
+    59→  var sig     = token.slice(idx + 1);
+    60→  var payload = token.slice(0, idx);
+    61→  var parts   = payload.split(':');
+    62→  if (parts.length < 2) return false;
+    63→  var exp     = parseInt(parts[parts.length - 1]);
+    64→  if (isNaN(exp) || Date.now() > exp) return false;
+    65→  var expected = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
+    66→  return sig === expected;
+    67→}
+    68→
+    69→function auth(req, res, next) {
+    70→  var cookies = parseCookies(req);
+    71→  if (validateToken(cookies[COOKIE_NAME])) return next();
+    72→  var ah = req.headers['authorization'] || '';
+    73→  if (ah.startsWith('Bearer ') && validateToken(ah.slice(7))) return next();
+    74→  if (req.path.startsWith('/api/')) return res.status(401).json({ erro: 'Não autenticado' });
+    75→  res.redirect('/admin/login');
+    76→}
+    77→
+    78→function withTimeout(p, ms) {
+    79→  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout ' + ms + 'ms')), ms))]);
+    80→}
+    81→
+    82→function odooClient(url) {
+    83→  var base = (url || '').replace(/\/+$/, '');
+    84→  var host = base.replace(/^https?:\/\//, '');
+    85→  var secure = base.startsWith('https');
+    86→  var fn = secure ? xmlrpc.createSecureClient : xmlrpc.createClient;
+    87→  return {
+    88→    common: fn({ host, path: '/xmlrpc/2/common', port: secure ? 443 : 80 }),
+    89→    models: fn({ host, path: '/xmlrpc/2/object', port: secure ? 443 : 80 }),
+    90→  };
+    91→}
+    92→
+    93→function odooAuth(c, db, user, pass) {
+    94→  return withTimeout(new Promise((res, rej) => {
+    95→    c.common.methodCall('authenticate', [db, user, pass, {}], (err, uid) => {
+    96→      if (err || !uid) rej(new Error('Auth falhou: ' + (err && (err.faultString || err.message) || 'uid nulo')));
+    97→      else res(uid);
+    98→    });
+    99→  }), 15000);
+   100→}
+   101→
+   102→function odooKw(c, db, uid, pass, model, method, args, kwargs) {
+   103→  var params = [db, uid, pass, model, method, args || []];
+   104→  if (kwargs) params.push(kwargs);
+   105→  return withTimeout(new Promise((res, rej) => {
+   106→    c.models.methodCall('execute_kw', params, (err, r) => {
+   107→      if (err) rej(new Error(err.faultString || err.message)); else res(r);
+   108→    });
+   109→  }), 20000);
+   110→}
+   111→
+   112→// ── Login ─────────────────────────────────────────────────────────
+   113→router.get('/login', (req, res) => res.send(loginHtml(req.query.erro ? 'Usuário ou senha inválidos.' : '')));
+   114→
+   115→router.use(express.json());
+   116→router.post('/login', express.urlencoded({ extended: false }), (req, res) => {
+   117→  if (req.body.usuario === ADMIN_USER && req.body.senha === ADMIN_PASS) {
+   118→    var token = makeToken(req.body.usuario);
+   119→    var secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+   120→    res.setHeader('Set-Cookie',
+   121→      COOKIE_NAME + '=' + encodeURIComponent(token) +
+   122→      '; Path=/admin; HttpOnly; SameSite=Lax; Max-Age=' + Math.floor(COOKIE_TTL / 1000) +
+   123→      (secure ? '; Secure' : ''));
+   124→    return res.redirect('/admin');
+   125→  }
+   126→  res.redirect('/admin/login?erro=1');
+   127→});
+   128→
+   129→router.get('/logout', (req, res) => {
+   130→  res.setHeader('Set-Cookie', COOKIE_NAME + '=; Path=/admin; HttpOnly; Max-Age=0');
+   131→  res.redirect('/admin/login');
+   132→});
+   133→
+   134→router.get('/', auth, (req, res) => res.send(dashHtml()));
+   135→
+   136→// ════════════════════════════════════════════════════════════════
+   137→// APIs — SIEG
+   138→// ════════════════════════════════════════════════════════════════
+   139→
+   140→router.get('/api/sieg/emitidas', auth, async (req, res) => {
+   141→  try {
+   142→    var cfg = config.odoo;
+   143→    if (!cfg.url) return res.json({ erro: 'ODOO_URL não configurada', registros: [] });
+   144→    var { dataInicio, dataFim, status: st, busca } = req.query;
+   145→    var c   = odooClient(cfg.url);
+   146→    var uid = await odooAuth(c, cfg.db, cfg.user, cfg.password);
+   147→    var ekw = (m, mt, a, k) => odooKw(c, cfg.db, uid, cfg.password, m, mt, a, k);
+   148→    var domain = [['move_type', '=', 'out_invoice'], ['x_studio_nfe_chave', '!=', false]];
+   149→    if (st && st !== 'todos') domain.push(['x_studio_nfe_status', '=', st]);
+   150→    if (dataInicio) domain.push(['invoice_date', '>=', dataInicio]);
+   151→    if (dataFim)    domain.push(['invoice_date', '<=', dataFim]);
+   152→    if (busca)      domain.push(['name', 'ilike', busca]);
+   153→    var ids = await ekw('account.move', 'search', [domain], { order: 'invoice_date desc', limit: 200 });
+   154→    var registros = [];
+   155→    if (ids.length) {
+   156→      var rows = await ekw('account.move', 'read', [ids, [
+   157→        'name', 'partner_id', 'invoice_date', 'amount_total',
+   158→        'x_studio_nfe_status', 'x_studio_nfe_chave', 'x_studio_nfe_protocolo',
+   159→      ]]);
+   160→      registros = rows.map(r => ({
+   161→        id: r.id,
+   162→        numero: r.name,
+   163→        cliente: Array.isArray(r.partner_id) ? r.partner_id[1] : String(r.partner_id || ''),
+   164→        data: r.invoice_date,
+   165→        valor: r.amount_total,
+   166→        status: r.x_studio_nfe_status,
+   167→        chave: r.x_studio_nfe_chave,
+   168→        protocolo: r.x_studio_nfe_protocolo,
+   169→      }));
+   170→    }
+   171→    res.json({ total: registros.length, registros });
+   172→  } catch(e) {
+   173→    console.error('[ADMIN] sieg/emitidas erro:', e.message);
+   174→    res.json({ erro: e.message, registros: [] });
+   175→  }
+   176→});
+   177→
+   178→// NF-e recebidas — idêntico ao bcc8d068, + filtro nomeDestinatario
+   179→router.get('/api/sieg/recebidas', auth, async (req, res) => {
+   180→  try {
+   181→    var axios = require('axios');
+   182→    var { getAuthHeaders } = require('../services/sieg-auth');
+   183→    var headers = await withTimeout(getAuthHeaders(), 15000);
+   184→    var { dataInicio, dataFim, cnpjEmitente, cnpjDestinatario, pagina, tipoXml, nomeEmitente, nomeDestinatario } = req.query;
+   185→
+   186→    var skip = ((parseInt(pagina) || 1) - 1) * 50;
+   187→    var body = {
+   188→      TipoXml: parseInt(tipoXml) || 1,
+   189→      Take: 50,
+   190→      Skip: skip,
+   191→    };
+   192→    if (dataInicio)       body.DataEmissaoInicio = dataInicio + 'T00:00:00Z';
+   193→    if (dataFim)          body.DataEmissaoFim    = dataFim   + 'T23:59:59Z';
+   194→    if (cnpjEmitente)     body.CNPJemit          = cnpjEmitente.replace(/\D/g, '');
+   195→    if (cnpjDestinatario) body.CNPJdest          = cnpjDestinatario.replace(/\D/g, '');
+   196→
+   197→    console.log('[ADMIN] sieg/recebidas body:', JSON.stringify(body));
+   198→
+   199→    var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+   200→      headers, timeout: 25000, responseType: 'arraybuffer',
+   201→    }), 30000);
+   202→
+   203→    var respBuffer = resp.data;
+   204→    console.log('[ADMIN] sieg/recebidas HTTP', resp.status, 'bytes:', respBuffer && respBuffer.length);
+   205→
+   206→    if (!Buffer.isBuffer(respBuffer) && !respBuffer) {
+   207→      return res.json({ erro: 'Resposta vazia da SIEG', registros: [] });
+   208→    }
+   209→
+   210→    var AdmZip = require('adm-zip');
+   211→    var zip = new AdmZip(respBuffer);
+   212→    var entries = zip.getEntries();
+   213→    console.log('[ADMIN] ZIP entries:', entries.length);
+   214→
+   215→    var registros = [];
+   216→    var chavesVistas = {};
+   217→    for (var entry of entries) {
+   218→      if (entry.isDirectory) continue;
+   219→      try {
+   220→        var xmlStr = zip.readAsText(entry);
+   221→        var xml = xmlStr
+   222→          .replace(/\s+xmlns(?::[^=]+)?="[^"]*"/g, '')
+   223→          .replace(/<([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '<'; })
+   224→          .replace(/<\/([A-Za-z]+):[A-Za-z]/g, function(m,p){ return '</'; });
+   225→
+   226→        function xt(tag) {
+   227→          var re = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + tag + '>', 'i');
+   228→          var m = xml.match(re);
+   229→          return m ? m[1].replace(/<[^>]+>/g, '').trim() : '';
+   230→        }
+   231→        function xb(parent, tag) {
+   232→          var rp = new RegExp('<' + parent + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + parent + '>', 'i');
+   233→          var mp = xml.match(rp);
+   234→          if (!mp) return '';
+   235→          var re2 = new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\/' + tag + '>', 'i');
+   236→          var m2 = mp[1].match(re2);
+   237→          return m2 ? m2[1].replace(/<[^>]+>/g, '').trim() : '';
+   238→        }
+   239→
+   240→        var chaveM = xml.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i)
+   241→                  || xml.match(/<chNFe>(\d{44})</)
+   242→                  || xml.match(/<chCTe>(\d{44})</);
+   243→        var chave = chaveM ? chaveM[1] : '';
+   244→
+   245→        if (chave && chavesVistas[chave]) continue;
+   246→        if (chave) chavesVistas[chave] = true;
+   247→        if (chave) cacheSet(chave, xmlStr);
+   248→
+   249→        var emitNome = xb('emit','xFant') || xb('emit','xNome') || '';
+   250→        var emitCNPJ = xb('emit','CNPJ')  || xb('emit','CPF')   || '';
+   251→        var destNome = xb('dest','xNome') || '';
+   252→        var destCNPJ = xb('dest','CNPJ')  || xb('dest','CPF')   || '';
+   253→        var dhEmi    = xt('dhEmi') || xt('dEmi') || '';
+   254→        var vNF      = parseFloat(xt('vNF') || xt('vCT') || xt('vTPrest') || '0') || 0;
+   255→        var nNF      = xt('nNF') || xt('nCT') || xt('nMDF') || '';
+   256→        var serie    = xt('serie') || '';
+   257→
+   258→        registros.push({
+   259→          chave, numero: nNF, serie,
+   260→          emitente: emitNome, cnpjEmitente: emitCNPJ,
+   261→          destinatario: destNome, cnpjDestinatario: destCNPJ,
+   262→          dataEmissao: dhEmi.slice(0, 10), valor: vNF,
+   263→        });
+   264→        if (registros.length <= 2) {
+   265→          console.log('[ADMIN] XML parse sample — emit:', emitNome, 'dest:', destNome, 'nNF:', nNF, 'vNF:', vNF, 'chave:', chave.slice(0,10));
+   266→        }
+   267→      } catch(ezip) {
+   268→        console.warn('[ADMIN] Erro ao parsear entry', entry.entryName, ezip.message);
+   269→      }
+   270→    }
+   271→
+   272→    if (nomeEmitente) {
+   273→      var ne = nomeEmitente.toUpperCase();
+   274→      registros = registros.filter(function(r) { return (r.emitente || '').toUpperCase().indexOf(ne) !== -1; });
+   275→    }
+   276→    if (nomeDestinatario) {
+   277→      var nd = nomeDestinatario.toUpperCase();
+   278→      registros = registros.filter(function(r) { return (r.destinatario || '').toUpperCase().indexOf(nd) !== -1; });
+   279→    }
+   280→    res.json({ total: registros.length, registros, pagina: parseInt(pagina) || 1 });
+   281→  } catch(e) {
+   282→    console.error('[ADMIN] sieg/recebidas erro:', e.message);
+   283→    res.json({ erro: 'SIEG: ' + e.message, registros: [] });
+   284→  }
+   285→});
+   286→
+   287→// Download XML individual
+   288→router.get('/api/sieg/xml/:chave', auth, async (req, res) => {
+   289→  try {
+   290→    var chave = req.params.chave;
+   291→    var cached = cacheGet(chave);
+   292→    if (cached) {
+   293→      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+   294→      res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.xml"');
+   295→      return res.send(cached);
+   296→    }
+   297→    var axios  = require('axios');
+   298→    var AdmZip = require('adm-zip');
+   299→    var { getAuthHeaders } = require('../services/sieg-auth');
+   300→    var headers = await withTimeout(getAuthHeaders(), 15000);
+   301→    var tipoXml = parseInt(req.query.tipoXml) || 1;
+   302→    var aamm = chave.slice(2, 6);
+   303→    var ano  = '20' + aamm.slice(0, 2);
+   304→    var mes  = aamm.slice(2, 4);
+   305→    var di   = ano + '-' + mes + '-01';
+   306→    var dfDate = new Date(parseInt(ano), parseInt(mes), 0);
+   307→    var df   = ano + '-' + mes + '-' + String(dfDate.getDate()).padStart(2,'0');
+   308→    console.log('[ADMIN] xml/chave fallback SIEG — chave:', chave.slice(0,10)+'...', 'período:', di, '-', df);
+   309→    var body = { TipoXml: tipoXml, Take: 500, Skip: 0,
+   310→      DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
+   311→    };
+   312→    var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+   313→      headers, timeout: 30000, responseType: 'arraybuffer',
+   314→    }), 35000);
+   315→    var zip     = new AdmZip(resp.data);
+   316→    var entries = zip.getEntries();
+   317→    var found   = null;
+   318→    for (var entry of entries) {
+   319→      if (entry.isDirectory) continue;
+   320→      var xmlStr = zip.readAsText(entry);
+   321→      var km = xmlStr.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
+   322→      if (km) cacheSet(km[1], xmlStr);
+   323→      if (xmlStr.indexOf(chave) !== -1) found = xmlStr;
+   324→    }
+   325→    if (!found) return res.status(404).json({ erro: 'XML não encontrado no cofre SIEG para esta chave' });
+   326→    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+   327→    res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.xml"');
+   328→    res.send(found);
+   329→  } catch(e) {
+   330→    console.error('[ADMIN] xml/chave erro:', e.message);
+   331→    res.status(500).json({ erro: e.message });
+   332→  }
+   333→});
+   334→
+   335→// Download PDF — gera DANFE local via danfe-pdf.js (GetPdf SIEG retorna 404)
+   336→router.get('/api/sieg/pdf/:chave', auth, async (req, res) => {
+   337→  try {
+   338→    var chave   = req.params.chave;
+   339→    var tipoXml = parseInt(req.query.tipoXml) || 1;
+   340→
+   341→    // 1. Tentar cache XML (populado na listagem)
+   342→    var xmlStr = cacheGet(chave);
+   343→
+   344→    // 2. Fallback: buscar mês da chave no cofre SIEG
+   345→    if (!xmlStr) {
+   346→      var axios  = require('axios');
+   347→      var AdmZip = require('adm-zip');
+   348→      var { getAuthHeaders } = require('../services/sieg-auth');
+   349→      var headers = await withTimeout(getAuthHeaders(), 15000);
+   350→      var aamm = chave.slice(2, 6);
+   351→      var ano  = '20' + aamm.slice(0, 2);
+   352→      var mes  = aamm.slice(2, 4);
+   353→      var di   = ano + '-' + mes + '-01';
+   354→      var dfD  = new Date(parseInt(ano), parseInt(mes), 0);
+   355→      var df   = ano + '-' + mes + '-' + String(dfD.getDate()).padStart(2,'0');
+   356→      console.log('[ADMIN] pdf fallback SIEG — chave:', chave.slice(0,10)+'...', 'período:', di, '-', df);
+   357→      var zResp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', {
+   358→        TipoXml: tipoXml, Take: 500, Skip: 0,
+   359→        DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
+   360→      }, { headers, timeout: 30000, responseType: 'arraybuffer' }), 35000);
+   361→      var zip = new AdmZip(zResp.data);
+   362→      for (var entry of zip.getEntries()) {
+   363→        if (entry.isDirectory) continue;
+   364→        var xs = zip.readAsText(entry);
+   365→        var km = xs.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
+   366→        if (km) cacheSet(km[1], xs);
+   367→        if (xs.indexOf(chave) !== -1) xmlStr = xs;
+   368→      }
+   369→    }
+   370→
+   371→    if (!xmlStr) {
+   372→      return res.status(404).json({
+   373→        erro: 'XML não encontrado no cofre SIEG — não é possível gerar o DANFE.',
+   374→        dica: 'Recarregue a listagem antes de baixar o PDF (popula o cache do XML).',
+   375→        chave,
+   376→      });
+   377→    }
+   378→
+   379→    // 3. Gerar DANFE localmente (pdfkit + bwip-js)
+   380→    var { gerarDanfePdf } = require('../services/danfe-pdf');
+   381→    var pdfBuf = await gerarDanfePdf(xmlStr);
+   382→    console.log('[ADMIN] pdf DANFE local OK —', pdfBuf.length, 'bytes, chave:', chave.slice(0,10)+'...');
+   383→    res.setHeader('Content-Type', 'application/pdf');
+   384→    res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + chave + '.pdf"');
+   385→    res.send(pdfBuf);
+   386→  } catch(e) {
+   387→    console.error('[ADMIN] pdf/chave erro:', e.message);
+   388→    res.status(500).json({ erro: e.message });
+   389→  }
+   390→});
+   391→
+   392→// Download ZIP direto da SIEG
+   393→
+   394→// POST /api/sieg/pdf-zip — gera ZIP com PDFs DANFE das chaves enviadas
+   395→router.post('/api/sieg/pdf-zip', auth, async (req, res) => {
+   396→  try {
+   397→    var chaves = (req.body && req.body.chaves) || [];
+   398→    var tipoXml = parseInt((req.body && req.body.tipoXml) || 1) || 1;
+   399→    if (!chaves.length) return res.status(400).json({ erro: 'Nenhuma chave informada' });
+   400→    if (chaves.length > 100) return res.status(400).json({ erro: 'Máximo 100 NF-e por vez' });
+   401→
+   402→    var { gerarDanfePdf } = require('../services/danfe-pdf');
+   403→    var AdmZip = require('adm-zip');
+   404→    var zip = new AdmZip();
+   405→    var erros = [];
+   406→
+   407→    for (var chave of chaves) {
+   408→      try {
+   409→        // 1. tenta cache
+   410→        var xmlStr = cacheGet(chave);
+   411→        // 2. sem cache → busca SIEG
+   412→        if (!xmlStr) {
+   413→          var axios  = require('axios');
+   414→          var { getAuthHeaders } = require('../services/sieg-auth');
+   415→          var headers = await withTimeout(getAuthHeaders(), 15000);
+   416→          var aamm = chave.slice(2, 6);
+   417→          var ano  = '20' + aamm.slice(0, 2);
+   418→          var mes  = aamm.slice(2, 4);
+   419→          var di   = ano + '-' + mes + '-01';
+   420→          var dfD  = new Date(parseInt(ano), parseInt(mes), 0);
+   421→          var df   = ano + '-' + mes + '-' + String(dfD.getDate()).padStart(2,'0');
+   422→          var zResp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', {
+   423→            TipoXml: tipoXml, Take: 500, Skip: 0,
+   424→            DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
+   425→          }, { headers, timeout: 30000, responseType: 'arraybuffer' }), 35000);
+   426→          var tmpZip = new AdmZip(zResp.data);
+   427→          for (var entry of tmpZip.getEntries()) {
+   428→            if (entry.isDirectory) continue;
+   429→            var xs = tmpZip.readAsText(entry);
+   430→            var km = xs.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
+   431→            if (km) cacheSet(km[1], xs);
+   432→            if (xs.indexOf(chave) !== -1) xmlStr = xs;
+   433→          }
+   434→        }
+   435→        if (!xmlStr) { erros.push(chave.slice(0,10)+'... (XML não encontrado)'); continue; }
+   436→        var pdfBuf = await gerarDanfePdf(xmlStr);
+   437→        zip.addFile('NFe_' + chave + '.pdf', pdfBuf);
+   438→      } catch(eChave) {
+   439→        erros.push(chave.slice(0,10)+'... (' + eChave.message + ')');
+   440→      }
+   441→    }
+   442→
+   443→    if (zip.getEntries().length === 0) {
+   444→      return res.status(404).json({ erro: 'Nenhum PDF gerado. ' + erros.join('; ') });
+   445→    }
+   446→
+   447→    var zipBuf = zip.toBuffer();
+   448→    var nome = 'danfe-' + new Date().toISOString().slice(0,10) + '.zip';
+   449→    res.setHeader('Content-Type', 'application/zip');
+   450→    res.setHeader('Content-Disposition', 'attachment; filename="' + nome + '"');
+   451→    res.send(zipBuf);
+   452→  } catch(e) {
+   453→    console.error('[ADMIN] pdf-zip erro:', e.message);
+   454→    res.status(500).json({ erro: e.message });
+   455→  }
+   456→});
+   457→
+   458→router.get('/api/sieg/download-zip', auth, async (req, res) => {
+   459→  try {
+   460→    var axios = require('axios');
+   461→    var { getAuthHeaders } = require('../services/sieg-auth');
+   462→    var headers = await withTimeout(getAuthHeaders(), 15000);
+   463→    var { dataInicio, dataFim, tipoXml } = req.query;
+   464→    var hoje = new Date();
+   465→    var tresAtras = new Date(hoje); tresAtras.setDate(hoje.getDate() - 3);
+   466→    var di = dataInicio || tresAtras.toISOString().slice(0,10);
+   467→    var df = dataFim    || hoje.toISOString().slice(0,10);
+   468→    var body = {
+   469→      TipoXml: parseInt(tipoXml) || 1,
+   470→      Take: 200, Skip: 0,
+   471→      DataEmissaoInicio: di + 'T00:00:00Z',
+   472→      DataEmissaoFim:    df + 'T23:59:59Z',
+   473→    };
+   474→    var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+   475→      headers, timeout: 30000, responseType: 'arraybuffer',
+   476→    }), 35000);
+   477→    var tipoLabel = { 1:'recebidas', 2:'emitidas-cofre', 3:'cte', 4:'nfse', 6:'nfce' };
+   478→    var nome = 'sieg-nfe-' + (tipoLabel[parseInt(tipoXml)||1] || 'docs') + '-' + di + '-a-' + df + '.zip';
+   479→    res.setHeader('Content-Type', 'application/zip');
+   480→    res.setHeader('Content-Disposition', 'attachment; filename="' + nome + '"');
+   481→    res.send(Buffer.from(resp.data));
+   482→  } catch(e) {
+   483→    res.status(500).json({ erro: e.message });
+   484→  }
+   485→});
+   486→
+   487→router.get('/api/status', auth, (req, res) => {
+   488→  var sieg = { tpAmb: process.env.SIEG_TP_AMB === '1' ? 'Produção' : 'Homologação' };
+   489→  res.json({
+   490→    ok: true,
+   491→    uptime_s: Math.floor(process.uptime()),
+   492→    ambiente: sieg.tpAmb,
+   493→    timestamp: new Date().toISOString(),
+   494→  });
+   495→});
+   496→
+   497→// ════════════════════════════════════════════════════════════════
+   498→// HTML
+   499→// ════════════════════════════════════════════════════════════════
+   500→function loginHtml(erro) {
+   501→  return `<!DOCTYPE html><html lang="pt-BR"><head>
+   502→<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+   503→<title>AJL Admin — Login</title>
+   504→<style>
+   505→*{box-sizing:border-box;margin:0;padding:0}
+   506→body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:linear-gradient(135deg,#1a1a2e,#0f3460);min-height:100vh;display:flex;align-items:center;justify-content:center}
+   507→.card{background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:48px 40px;width:100%;max-width:400px}
+   508→h1{font-size:26px;font-weight:700;color:#1a1a2e;text-align:center;margin-bottom:6px}
+   509→h1 span{color:#e84545}
+   510→.sub{text-align:center;color:#666;font-size:13px;margin-bottom:32px}
+   511→label{display:block;font-size:12px;font-weight:600;color:#444;margin-bottom:6px;text-transform:uppercase}
+   512→input{width:100%;padding:12px 14px;border:2px solid #e5e5e5;border-radius:8px;font-size:15px;outline:none;transition:border .2s;margin-bottom:18px}
+   513→input:focus{border-color:#0f3460}
+   514→button{width:100%;padding:14px;background:#0f3460;color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer}
+   515→button:hover{background:#1a4a8a}
+   516→.erro{background:#fff0f0;color:#c00;border:1px solid #fcc;border-radius:8px;padding:12px;font-size:13px;margin-bottom:18px;text-align:center}
+   517→</style></head><body>
+   518→<div class="card">
+   519→  <h1>AJL <span>Admin</span></h1>
+   520→  <div class="sub">Painel de Controle</div>
+   521→  ${erro ? `<div class="erro">⚠️ ${erro}</div>` : ''}
+   522→  <form method="POST" action="/admin/login">
+   523→    <label>Usuário</label><input name="usuario" type="text" required autocomplete="username">
+   524→    <label>Senha</label><input name="senha" type="password" required autocomplete="current-password">
+   525→    <button type="submit">Entrar</button>
+   526→  </form>
+   527→</div></body></html>`;
+   528→}
+   529→
+   530→function dashHtml() {
+   531→  return `<!DOCTYPE html><html lang="pt-BR"><head>
+   532→<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+   533→<title>AJL Admin</title>
+   534→<style>
+   535→*{box-sizing:border-box;margin:0;padding:0}
+   536→:root{--bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--bd:#30363d;--tx:#c9d1d9;--tx2:#8b949e;--ac:#58a6ff;--gr:#3fb950;--rd:#f85149;--yw:#d29922;--pu:#bc8cff}
+   537→body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh}
+   538→.topbar{background:var(--bg2);border-bottom:1px solid var(--bd);padding:0 24px;display:flex;align-items:center;height:56px;position:sticky;top:0;z-index:100;gap:16px}
+   539→.topbar h1{font-size:18px;font-weight:700;color:#fff}.topbar h1 span{color:#f85149}
+   540→.tag{font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600}
+   541→.tag-prod{background:#1f3a1f;color:#3fb950;border:1px solid #238636}
+   542→.tag-hom{background:#3a2e1f;color:#d29922;border:1px solid #bb8009}
+   543→.ml{margin-left:auto}.topbar a{color:var(--tx2);font-size:13px;text-decoration:none}
+   544→.topbar a:hover{color:var(--tx)}
+   545→.tabs{background:var(--bg2);border-bottom:1px solid var(--bd);padding:0 20px;display:flex;overflow-x:auto}
+   546→.tab{padding:14px 18px;font-size:13px;font-weight:500;color:var(--tx2);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;user-select:none}
+   547→.tab:hover{color:var(--tx)}.tab.on{color:var(--ac);border-bottom-color:var(--ac)}
+   548→.subtabs{display:flex;gap:0;margin-bottom:20px;background:var(--bg3);border-radius:8px;padding:4px;width:fit-content}
+   549→.stab{padding:7px 18px;border-radius:6px;font-size:13px;font-weight:500;color:var(--tx2);cursor:pointer;transition:all .15s;user-select:none}
+   550→.stab:hover{color:var(--tx)}.stab.on{background:var(--bg2);color:var(--ac);box-shadow:0 1px 4px rgba(0,0,0,.3)}
+   551→.main{padding:24px;max-width:1400px;margin:0 auto}
+   552→.pane{display:none}.pane.on{display:block}
+   553→.panel{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;overflow:hidden;margin-bottom:20px}
+   554→.ph{padding:16px 20px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+   555→.ph h3{font-size:14px;font-weight:600;color:#fff;flex:1}
+   556→.pb{padding:20px}
+   557→.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+   558→.fg{display:flex;flex-direction:column;gap:4px}
+   559→.fg label{font-size:11px;color:var(--tx2);text-transform:uppercase;letter-spacing:.4px}
+   560→.fg input,.fg select{background:var(--bg3);border:1px solid var(--bd);color:var(--tx);padding:7px 12px;border-radius:6px;font-size:13px;outline:none;min-width:110px}
+   561→.fg input:focus,.fg select:focus{border-color:var(--ac)}
+   562→.btn{padding:7px 14px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:500}
+   563→.btn-p{background:var(--ac);color:#fff}.btn-p:hover{background:#79b8ff}
+   564→.btn-o{background:transparent;color:var(--tx2);border:1px solid var(--bd)}.btn-o:hover{border-color:var(--tx);color:var(--tx)}
+   565→.btn-xl{background:#1e3a1e;color:#3fb950;border:1px solid #238636;padding:7px 14px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer}.btn-xl:hover{background:#1a5c1a}
+   566→.bgroup{display:flex;gap:6px;flex-wrap:wrap}
+   567→.tw{overflow-x:auto;margin-top:16px}
+   568→table{width:100%;border-collapse:collapse;font-size:13px}
+   569→th{padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--tx2);border-bottom:1px solid var(--bd);white-space:nowrap}
+   570→td{padding:11px 12px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:middle}
+   571→tr:last-child td{border-bottom:none}tr:hover td{background:rgba(255,255,255,.02)}
+   572→.b{display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.3px}
+   573→.b-ok{background:#1a3a1a;color:#3fb950;border:1px solid #238636}
+   574→.b-warn{background:#3a2e1f;color:#d29922;border:1px solid #bb8009}
+   575→.b-err{background:#3a1a1a;color:#f85149;border:1px solid #b91c1c}
+   576→.b-can{background:#1f1a3a;color:#bc8cff;border:1px solid #6e40c9}
+   577→.b-gray{background:#21262d;color:#8b949e;border:1px solid #30363d}
+   578→.sum{font-size:13px;color:var(--tx2);margin-top:12px;padding:10px 12px;background:var(--bg3);border-radius:6px;border:1px solid var(--bd)}
+   579→.loading,.empty{text-align:center;padding:48px;color:var(--tx2);font-size:14px}
+   580→.spin{display:inline-block;width:18px;height:18px;border:2px solid var(--bd);border-top-color:var(--ac);border-radius:50%;animation:sp .7s linear infinite;margin-right:8px;vertical-align:middle}
+   581→@keyframes sp{to{transform:rotate(360deg)}}
+   582→.err-box{background:#1a0a0a;border:1px solid #5a2020;border-radius:8px;padding:16px;color:#f85149;font-size:13px;margin-top:12px}
+   583→.row-menu{position:relative;display:inline-block}
+   584→.row-dropdown{display:none;position:absolute;right:0;top:100%;background:var(--bg2);border:1px solid var(--bd);border-radius:8px;min-width:150px;z-index:50;box-shadow:0 4px 20px rgba(0,0,0,.4);overflow:hidden}
+   585→.row-dropdown a{display:block;padding:10px 14px;font-size:13px;color:var(--tx);text-decoration:none;white-space:nowrap}
+   586→.row-dropdown a:hover{background:var(--bg3)}
+   587→.row-dropdown.open{display:block}
+   588→/* novos estilos */
+   589→input[type=checkbox]{width:15px;height:15px;accent-color:var(--ac);cursor:pointer;vertical-align:middle}
+   590→th.chk,td.chk{width:32px;padding-left:10px}
+   591→td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
+   592→.mais-opcoes{font-size:12px;color:var(--ac);cursor:pointer;user-select:none;white-space:nowrap}
+   593→.mais-opcoes:hover{text-decoration:underline}
+   594→.extra-filters{display:none;flex-wrap:wrap;gap:10px;margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)}
+   595→.extra-filters.open{display:flex}
+   596→.sel-bar{display:none;align-items:center;gap:10px;padding:9px 12px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;margin-top:10px;font-size:13px}
+   597→.sel-bar.on{display:flex}
+   598→@media(max-width:600px){.main{padding:12px}.filters{flex-direction:column}.fg{width:100%}}
+   599→/* ── DANFE Modal ──────────────────────────────────────────────── */
+   600→.danfe-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;justify-content:center;align-items:flex-start;padding:30px 10px;overflow-y:auto}
+   601→.danfe-overlay.on{display:flex}
+   602→.danfe-modal{background:var(--bg2);border:1px solid var(--bd);border-radius:12px;width:100%;max-width:900px;padding:0;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,.6)}
+   603→.danfe-header{background:var(--bg3);padding:18px 24px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--bd)}
+   604→.danfe-header h2{font-size:16px;font-weight:700;color:#fff;margin:0;flex:1}
+   605→.danfe-close{background:none;border:none;color:var(--tx2);font-size:22px;cursor:pointer;padding:4px 8px;line-height:1}
+   606→.danfe-close:hover{color:#fff}
+   607→.danfe-body{padding:20px 24px;font-size:13px;color:var(--tx)}
+   608→.danfe-section{margin-bottom:20px}
+   609→.danfe-section h3{font-size:13px;font-weight:700;color:var(--ac);text-transform:uppercase;letter-spacing:.5px;margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid var(--bd)}
+   610→.danfe-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px}
+   611→.danfe-grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px 20px}
+   612→.danfe-field{display:flex;flex-direction:column;gap:2px}
+   613→.danfe-field label{font-size:10px;color:var(--tx2);text-transform:uppercase;letter-spacing:.3px}
+   614→.danfe-field span{font-size:13px;color:var(--tx);word-break:break-all}
+   615→.danfe-field span.mono{font-family:monospace}
+   616→.danfe-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+   617→.danfe-table th{padding:8px 10px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--tx2);background:var(--bg3);border-bottom:1px solid var(--bd);white-space:nowrap}
+   618→.danfe-table td{padding:7px 10px;border-bottom:1px solid var(--bd);color:var(--tx);vertical-align:top}
+   619→.danfe-table tr:hover td{background:rgba(255,255,255,.02)}
+   620→.danfe-table .r{text-align:right}
+   621→.danfe-totals{background:var(--bg3);border-radius:8px;padding:14px 18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:8px}
+   622→.danfe-totals .tf{display:flex;flex-direction:column;gap:2px}
+   623→.danfe-totals .tf label{font-size:10px;color:var(--tx2);text-transform:uppercase}
+   624→.danfe-totals .tf span{font-size:14px;font-weight:600;color:#fff}
+   625→.danfe-info{background:var(--bg3);border-radius:8px;padding:12px 16px;font-size:12px;color:var(--tx2);white-space:pre-wrap;line-height:1.6;margin-top:8px}
+   626→.danfe-loading{text-align:center;padding:60px;color:var(--tx2)}
+   627→.danfe-loading .spin{margin-right:8px}
+   628→</style>
+   629→</head><body>
+   630→
+   631→<div class="topbar">
+   632→  <h1>AJL <span>Admin</span></h1>
+   633→  <span id="env-tag" class="tag tag-hom">...</span>
+   634→  <span id="up" style="font-size:12px;color:var(--tx2)"></span>
+   635→  <div class="ml"></div>
+   636→  <a href="/admin/logout">Sair</a>
+   637→</div>
+   638→
+   639→<div class="tabs">
+   640→  <div class="tab on" onclick="tab('sieg',this)">📄 SIEG</div>
+   641→  <div class="tab" onclick="tab('status',this)">⚙️ Status</div>
+   642→</div>
+   643→
+   644→<div class="main">
+   645→
+   646→<!-- ══ SIEG ══════════════════════════════════════════════════════ -->
+   647→<div id="p-sieg" class="pane on">
+   648→  <div class="subtabs">
+   649→    <div class="stab on" onclick="stab('emit',this)">📤 NF-e Emitidas</div>
+   650→    <div class="stab" onclick="stab('rec',this)">📥 NF-e Recebidas</div>
+   651→  </div>
+   652→
+   653→  <!-- Emitidas (sem alteração) -->
+   654→  <div id="sp-emit">
+   655→    <div class="panel">
+   656→      <div class="ph"><h3>NF-e Emitidas pela AJL</h3><button class="btn btn-o" onclick="loadEmit()">↻</button></div>
+   657→      <div class="pb">
+   658→        <div class="filters">
+   659→          <div class="fg"><label>De</label><input type="date" id="e-di"></div>
+   660→          <div class="fg"><label>Até</label><input type="date" id="e-df"></div>
+   661→          <div class="fg"><label>Status</label>
+   662→            <select id="e-st">
+   663→              <option value="todos">Todos</option>
+   664→              <option value="autorizada">Autorizada</option>
+   665→              <option value="cancelada">Cancelada</option>
+   666→              <option value="pendente">Pendente</option>
+   667→              <option value="erro">Erro</option>
+   668→            </select>
+   669→          </div>
+   670→          <div class="fg"><label>Busca</label><input type="text" id="e-bq" placeholder="NFe 000..."></div>
+   671→          <div class="fg"><label>&nbsp;</label>
+   672→            <div class="bgroup">
+   673→              <button class="btn btn-o" onclick="preset('e',0)">Hoje</button>
+   674→              <button class="btn btn-o" onclick="preset('e',7)">7d</button>
+   675→              <button class="btn btn-o" onclick="preset('e',30)">30d</button>
+   676→              <button class="btn btn-o" onclick="preset('e',365)">Ano</button>
+   677→              <button class="btn btn-p" onclick="loadEmit()">Filtrar</button>
+   678→            </div>
+   679→          </div>
+   680→        </div>
+   681→        <div id="e-sum"></div>
+   682→        <div id="e-tbl"><div class="empty">Selecione o período e clique em <b>Filtrar</b>.</div></div>
+   683→      </div>
+   684→    </div>
+   685→  </div>
+   686→
+   687→  <!-- Recebidas — filtros no estilo SIEG -->
+   688→  <div id="sp-rec" style="display:none">
+   689→    <div class="panel">
+   690→      <div class="ph"><h3>Consulta SIEG — NF-e / Documentos Fiscais</h3>
+   691→        <button class="btn btn-o" onclick="loadRec()">↻</button>
+   692→        <button class="btn btn-xl" onclick="exportarExcel()" title="Exportar para Excel/CSV">📊 Exportar Excel</button>
+   693→        <button class="btn btn-o" id="btn-zip" onclick="downloadZip()" title="Baixar ZIP com os XMLs">⬇ ZIP</button>
+   694→      </div>
+   695→      <div class="pb">
+   696→        <div class="filters">
+   697→          <div class="fg"><label>Tipo do Arquivo</label>
+   698→            <select id="r-tipo">
+   699→              <option value="1">NF-e Recebidas (entradas)</option>
+   700→              <option value="2">NF-e Emitidas (cofre SIEG)</option>
+   701→              <option value="3">CT-e</option>
+   702→              <option value="4">NFS-e</option>
+   703→              <option value="6">NFC-e</option>
+   704→            </select>
+   705→          </div>
+   706→          <div class="fg"><label>Data Emissão (Inicial)</label><input type="date" id="r-di"></div>
+   707→          <div class="fg"><label>Data Emissão (Final)</label><input type="date" id="r-df"></div>
+   708→          <div class="fg"><label>CNPJ Dest.</label><input type="text" id="r-cnpj-dest" placeholder="00000000000000" style="min-width:150px"></div>
+   709→          <div class="fg"><label>CNPJ Emit.</label><input type="text" id="r-cnpj" placeholder="00000000000000" style="min-width:150px"></div>
+   710→          <div class="fg" style="align-self:flex-end">
+   711→            <a class="mais-opcoes" id="mais-link" onclick="toggleMaisOpcoes()">Mais Opções ▾</a>
+   712→          </div>
+   713→          <div class="fg"><label>&nbsp;</label>
+   714→            <div class="bgroup">
+   715→              <button class="btn btn-o" onclick="preset('r',0)">Hoje</button>
+   716→              <button class="btn btn-o" onclick="preset('r',7)">7d</button>
+   717→              <button class="btn btn-o" onclick="preset('r',30)">30d</button>
+   718→              <button class="btn btn-o" onclick="preset('r',365)">Ano</button>
+   719→              <button class="btn btn-p" onclick="loadRec()">🔍 Pesquisar</button>
+   720→            </div>
+   721→          </div>
+   722→        </div>
+   723→        <!-- Mais Opções (oculto por padrão) -->
+   724→        <div class="extra-filters" id="extra-filters">
+   725→          <div class="fg"><label>Nome Emitente</label><input type="text" id="r-emit" placeholder="Ex: Maximus, Ferragens..." style="min-width:180px"></div>
+   726→          <div class="fg"><label>Nome Destinatário</label><input type="text" id="r-dest-nome" placeholder="Ex: AJL, Comercio..." style="min-width:180px"></div>
+   727→        </div>
+   728→        <div id="r-info" style="font-size:12px;color:var(--tx2);margin-top:10px">
+   729→          Padrão: últimos 3 dias. Use os filtros ou botões para ampliar o período.
+   730→        </div>
+   731→        <div id="r-sum"></div>
+   732→        <div id="r-tbl"><div class="empty">Selecione o período e clique em <b>Pesquisar</b>.</div></div>
+   733→      </div>
+   734→    </div>
+   735→  </div>
+   736→</div>
+   737→
+   738→<!-- ══ STATUS ════════════════════════════════════════════════════ -->
+   739→<div id="p-status" class="pane">
+   740→  <div class="panel">
+   741→    <div class="ph"><h3>⚙️ Status do Servidor</h3><button class="btn btn-o" onclick="loadStatus()">↻</button></div>
+   742→    <div class="pb"><div id="st-body"><div class="loading"><span class="spin"></span>Carregando...</div></div></div>
+   743→  </div>
+   744→</div>
+   745→
+   746→</div><!-- /main -->
+   747→
+   748→<!-- ── DANFE Modal ──────────────────────────────────────────────── -->
+   749→<div class="danfe-overlay" id="danfe-overlay" onclick="if(event.target===this)closeDanfe()">
+   750→  <div class="danfe-modal">
+   751→    <div class="danfe-header">
+   752→      <h2 id="danfe-title">DANFE</h2>
+   753→      <button class="danfe-close" onclick="closeDanfe()">&times;</button>
+   754→    </div>
+   755→    <div class="danfe-body" id="danfe-body">
+   756→      <div class="danfe-loading"><span class="spin"></span>Carregando DANFE...</div>
+   757→    </div>
+   758→  </div>
+   759→</div>
+   760→
+   761→<script>
+   762→function today(){ return new Date().toISOString().slice(0,10); }
+   763→function daysAgo(n){ var d=new Date(); d.setDate(d.getDate()-n); return d.toISOString().slice(0,10); }
+   764→function fmtDate(s){ if(!s) return '—'; return new Date(s+'T12:00:00').toLocaleDateString('pt-BR'); }
+   765→function fmtVal(v){ if(v===null||v===undefined||v==='') return '—'; return 'R$ '+parseFloat(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+   766→function fmtChave(c){ if(!c||c.length<12) return c||'—'; return c.slice(0,6)+'…'+c.slice(-6); }
+   767→
+   768→function badge(s){
+   769→  var map={autorizada:'ok',autorizado:'ok',cancelada:'can',cancelado:'can',cancelando:'warn',pendente:'warn',processando:'warn',erro:'err',error:'err'};
+   770→  var cls=map[(s||'').toLowerCase()]||'gray';
+   771→  return '<span class="b b-'+cls+'">'+(s||'—')+'</span>';
+   772→}
+   773→
+   774→async function get(url){
+   775→  try{
+   776→    var ctrl=new AbortController();
+   777→    var t=setTimeout(()=>ctrl.abort(),28000);
+   778→    var r=await fetch(url,{credentials:'include',signal:ctrl.signal});
+   779→    clearTimeout(t);
+   780→    return await r.json();
+   781→  }catch(e){
+   782→    return {erro: e.name==='AbortError'?'Timeout — servidor demorou demais':e.message};
+   783→  }
+   784→}
+   785→
+   786→function preset(pfx, days){
+   787→  var di=document.getElementById(pfx+'-di'), df=document.getElementById(pfx+'-df');
+   788→  df.value=today();
+   789→  di.value=days===0?today():daysAgo(days);
+   790→}
+   791→
+   792→var loaded={};
+   793→function tab(name, el){
+   794→  document.querySelectorAll('.pane').forEach(p=>p.classList.remove('on'));
+   795→  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+   796→  document.getElementById('p-'+name).classList.add('on');
+   797→  el.classList.add('on');
+   798→  if(!loaded[name]){
+   799→    loaded[name]=true;
+   800→    if(name==='status') loadStatus();
+   801→  }
+   802→}
+   803→
+   804→function stab(name, el){
+   805→  document.querySelectorAll('.stab').forEach(t=>t.classList.remove('on'));
+   806→  el.classList.add('on');
+   807→  document.getElementById('sp-emit').style.display = name==='emit'?'':'none';
+   808→  document.getElementById('sp-rec').style.display  = name==='rec' ?'':'none';
+   809→  // loadRec() só sob demanda (botão Pesquisar)
+   810→}
+   811→
+   812→async function loadStatus(){
+   813→  var d=await get('/admin/api/status');
+   814→  document.getElementById('env-tag').textContent=d.ambiente||'?';
+   815→  document.getElementById('env-tag').className='tag '+(d.ambiente==='Produção'?'tag-prod':'tag-hom');
+   816→  var h=Math.floor((d.uptime_s||0)/3600), m=Math.floor(((d.uptime_s||0)%3600)/60);
+   817→  document.getElementById('up').textContent='Uptime '+h+'h '+m+'m';
+   818→  if(d.erro){document.getElementById('st-body').innerHTML='<div class="err-box">'+d.erro+'</div>';return;}
+   819→  document.getElementById('st-body').innerHTML=
+   820→    '<table><tr><th>Chave</th><th>Valor</th></tr>'+
+   821→    '<tr><td>Ambiente</td><td>'+badge(d.ambiente)+'</td></tr>'+
+   822→    '<tr><td>Uptime</td><td>'+h+'h '+m+'m</td></tr>'+
+   823→    '<tr><td>Timestamp</td><td>'+new Date(d.timestamp).toLocaleString('pt-BR')+'</td></tr>'+
+   824→    '</table>';
+   825→}
+   826→
+   827→async function loadEmit(){
+   828→  document.getElementById('e-tbl').innerHTML='<div class="loading"><span class="spin"></span>Buscando no Odoo...</div>';
+   829→  document.getElementById('e-sum').innerHTML='';
+   830→  var di=document.getElementById('e-di').value;
+   831→  var df=document.getElementById('e-df').value;
+   832→  var st=document.getElementById('e-st').value;
+   833→  var bq=document.getElementById('e-bq').value;
+   834→  var url='/admin/api/sieg/emitidas?status='+encodeURIComponent(st||'todos');
+   835→  if(di) url+='&dataInicio='+di;
+   836→  if(df) url+='&dataFim='+df;
+   837→  if(bq) url+='&busca='+encodeURIComponent(bq);
+   838→  var d=await get(url);
+   839→  if(d.erro){ document.getElementById('e-tbl').innerHTML='<div class="err-box">❌ '+d.erro+'</div>'; return; }
+   840→  var reg=d.registros||[];
+   841→  if(!reg.length){ document.getElementById('e-tbl').innerHTML='<div class="empty">Nenhuma NF-e encontrada.</div>'; return; }
+   842→  var tot=reg.reduce((a,r)=>a+(parseFloat(r.valor)||0),0);
+   843→  document.getElementById('e-sum').innerHTML='<div class="sum">'+reg.length+' nota(s) &nbsp;·&nbsp; Total: <b>'+fmtVal(tot)+'</b></div>';
+   844→  var html='<div class="tw"><table><thead><tr><th>#</th><th>Fatura</th><th>Cliente</th><th>Data</th><th>Valor</th><th>Status</th><th>Protocolo</th><th>Chave</th></tr></thead><tbody>';
+   845→  reg.forEach((r,i)=>{
+   846→    html+='<tr>';
+   847→    html+='<td style="color:var(--tx2);font-size:12px">'+(i+1)+'</td>';
+   848→    html+='<td style="font-family:monospace;font-size:12px">'+r.numero+'</td>';
+   849→    html+='<td>'+r.cliente+'</td>';
+   850→    html+='<td>'+fmtDate(r.data)+'</td>';
+   851→    html+='<td>'+fmtVal(r.valor)+'</td>';
+   852→    html+='<td>'+badge(r.status)+'</td>';
+   853→    html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)">'+(r.protocolo||'—')+'</td>';
+   854→    html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)" title="'+r.chave+'">'+fmtChave(r.chave)+'</td>';
+   855→    html+='</tr>';
+   856→  });
+   857→  html+='</tbody></table></div>';
+   858→  document.getElementById('e-tbl').innerHTML=html;
+   859→}
+   860→
+   861→function downloadZip(){
+   862→  var di=document.getElementById('r-di').value;
+   863→  var df=document.getElementById('r-df').value;
+   864→  var tipo=document.getElementById('r-tipo').value;
+   865→  var url='/admin/api/sieg/download-zip?tipoXml='+tipo;
+   866→  if(di) url+='&dataInicio='+di;
+   867→  if(df) url+='&dataFim='+df;
+   868→  var a=document.createElement('a');
+   869→  a.href=url; a.download=''; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+   870→}
+   871→
+   872→async function loadRec(){
+   873→  document.getElementById('r-tbl').innerHTML='<div class="loading"><span class="spin"></span>Consultando SIEG...</div>';
+   874→  document.getElementById('r-sum').innerHTML='';
+   875→  var di=document.getElementById('r-di').value;
+   876→  var df=document.getElementById('r-df').value;
+   877→  var tipo=document.getElementById('r-tipo').value;
+   878→  var cnpj=(document.getElementById('r-cnpj')||{}).value||'';
+   879→  var cnpjDest=(document.getElementById('r-cnpj-dest')||{}).value||'';
+   880→  var emitNome=(document.getElementById('r-emit')||{}).value||'';
+   881→  var destNome=(document.getElementById('r-dest-nome')||{}).value||'';
+   882→  var url='/admin/api/sieg/recebidas?tipoXml='+tipo;
+   883→  if(di) url+='&dataInicio='+di;
+   884→  if(df) url+='&dataFim='+df;
+   885→  if(cnpj.replace(/\D/g,'')) url+='&cnpjEmitente='+encodeURIComponent(cnpj.replace(/\D/g,''));
+   886→  if(cnpjDest.replace(/\D/g,'')) url+='&cnpjDestinatario='+encodeURIComponent(cnpjDest.replace(/\D/g,''));
+   887→  if(emitNome.trim()) url+='&nomeEmitente='+encodeURIComponent(emitNome.trim());
+   888→  if(destNome.trim()) url+='&nomeDestinatario='+encodeURIComponent(destNome.trim());
+   889→
+   890→  var d=await get(url);
+   891→  if(d.erro){ document.getElementById('r-tbl').innerHTML='<div class="err-box">⚠️ '+d.erro+'</div>'; return; }
+   892→  var reg=d.registros||[];
+   893→  if(!reg.length){ document.getElementById('r-tbl').innerHTML='<div class="empty">Nenhuma NF-e encontrada.</div>'; return; }
+   894→
+   895→  var tot=reg.reduce((a,r)=>a+(parseFloat(r.valor)||0),0);
+   896→  document.getElementById('r-sum').innerHTML='<div class="sum">'+reg.length+' nota(s) &nbsp;·&nbsp; Total: <b>'+fmtVal(tot)+'</b></div>';
+   897→
+   898→  var tipoAtual=tipo;
+   899→  var dtDl=new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+   900→
+   901→  var html='<div class="sel-bar" id="sel-bar">'
+   902→    +'<span id="sel-count">0 selecionado(s)</span>'
+   903→    +'<button class="btn btn-o" style="font-size:12px" onclick="dlSelecionados()">⬇ XML Selecionados</button>'
+   904→    +'<button class="btn btn-o" style="font-size:12px" onclick="dlSelecionadosPdf()">⬇ PDF Selecionados</button>'
+   905→    +'<button class="btn btn-o" style="font-size:12px" onclick="deselectAll()">✕ Limpar</button>'
+   906→    +'</div>';
+   907→
+   908→  html+='<div class="tw"><table id="r-table"><thead><tr>'
+   909→    +'<th class="chk"><input type="checkbox" id="chk-all" onclick="toggleAll(this)" title="Selecionar todos"></th>'
+   910→    +'<th>Tipo</th><th>Nº</th><th>Rz. Emit.</th><th>CNPJ Emit.</th>'
+   911→    +'<th>Data de Emi.</th><th>CNPJ Dest.</th><th>Destinatário</th>'
+   912→    +'<th>Valor</th><th>Dt. do Download</th><th>Chave</th><th>+Detalhes</th>'
+   913→    +'</tr></thead><tbody>';
+   914→
+   915→  reg.forEach(function(r){
+   916→    var xmlUrl='/admin/api/sieg/xml/'+(r.chave||'')+'?tipoXml='+tipoAtual;
+   917→    var pdfUrl='/admin/api/sieg/pdf/'+(r.chave||'')+'?tipoXml='+tipoAtual;
+   918→    var ce=(r.chave||'').replace(/"/g,'');
+   919→    html+='<tr>';
+   920→    html+='<td class="chk"><input type="checkbox" class="row-chk" data-chave="'+ce+'" data-tipo="'+tipoAtual+'" onchange="updateSelBar()"></td>';
+   921→    html+='<td><span class="b b-ok" style="font-size:10px">'+(r.tipo||'NF-e')+'</span></td>';
+   922→    html+='<td style="font-family:monospace;font-weight:600">'+(r.numero||'—')+'</td>';
+   923→    html+='<td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.emitente||'')+'">'+(r.emitente||'—')+'</td>';
+   924→    html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjEmitente||'—')+'</td>';
+   925→    html+='<td>'+fmtDate(r.dataEmissao)+'</td>';
+   926→    html+='<td style="font-family:monospace;font-size:12px">'+(r.cnpjDestinatario||'—')+'</td>';
+   927→    html+='<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+(r.destinatario||'')+'">'+(r.destinatario||'—')+'</td>';
+   928→    html+='<td style="font-weight:600">'+fmtVal(r.valor)+'</td>';
+   929→    html+='<td class="dt-dl">'+dtDl+'</td>';
+   930→    html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)" title="'+(r.chave||'')+'">'+fmtChave(r.chave)+'</td>';
+   931→    html+='<td>';
+   932→    if(r.chave){
+   933→      html+='<div class="row-menu">'
+   934→        +'<button class="btn btn-o" style="padding:4px 10px;font-size:12px" onclick="toggleMenu(this)">⋯</button>'
+   935→        +'<div class="row-dropdown">'
+   936→        +'<a href="#" class="dl-link" data-url="'+xmlUrl+'" data-file="NFe_'+ce+'.xml">⬇ Baixar XML</a>'
+   937→        +'<a href="#" class="dl-link" data-url="'+pdfUrl+'" data-file="NFe_'+ce+'.pdf">⬇ Baixar PDF</a>'
+   938→        +'<a href="#" class="ver-danfe-link" data-chave="'+ce+'" data-tipo="'+tipoAtual+'">📋 Ver DANFE</a>'
+   939→        +'</div></div>';
+   940→    } else { html+='—'; }
+   941→    html+='</td></tr>';
+   942→  });
+   943→  html+='</tbody></table></div>';
+   944→  document.getElementById('r-tbl').innerHTML=html;
+   945→  updateSelBar();
+   946→}
+   947→
+   948→// ── Download via fetch ────────────────────────────────────────────
+   949→async function downloadFile(url, filename){
+   950→  try {
+   951→    var r = await fetch(url, { credentials: 'include' });
+   952→    if(!r.ok){ var e=await r.json().catch(()=>({erro:'Erro '+r.status})); alert('Erro: '+(e.erro||r.status)); return; }
+   953→    var blob = await r.blob();
+   954→    var a = document.createElement('a');
+   955→    a.href = URL.createObjectURL(blob);
+   956→    a.download = filename;
+   957→    document.body.appendChild(a); a.click();
+   958→    setTimeout(function(){ URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 1000);
+   959→  } catch(e){ alert('Erro ao baixar: '+e.message); }
+   960→}
+   961→
+   962→// ── Mais Opções ───────────────────────────────────────────────────
+   963→function toggleMaisOpcoes(){
+   964→  var ef=document.getElementById('extra-filters');
+   965→  var ml=document.getElementById('mais-link');
+   966→  if(!ef) return;
+   967→  var open=ef.classList.toggle('open');
+   968→  if(ml) ml.textContent=open?'Menos Opções ▴':'Mais Opções ▾';
+   969→}
+   970→
+   971→// ── Seleção de linhas ─────────────────────────────────────────────
+   972→function updateSelBar(){
+   973→  var chks=document.querySelectorAll('.row-chk:checked');
+   974→  var bar=document.getElementById('sel-bar');
+   975→  var cnt=document.getElementById('sel-count');
+   976→  if(cnt) cnt.textContent=chks.length+' selecionado(s)';
+   977→  if(bar) bar.classList.toggle('on', chks.length>0);
+   978→}
+   979→function toggleAll(chkAll){
+   980→  document.querySelectorAll('.row-chk').forEach(function(c){c.checked=chkAll.checked;});
+   981→  updateSelBar();
+   982→}
+   983→function deselectAll(){
+   984→  document.querySelectorAll('.row-chk').forEach(function(c){c.checked=false;});
+   985→  var a=document.getElementById('chk-all'); if(a) a.checked=false;
+   986→  updateSelBar();
+   987→}
+   988→async function dlSelecionados(){
+   989→  var chks=Array.from(document.querySelectorAll('.row-chk:checked'));
+   990→  if(!chks.length){alert('Nenhuma nota selecionada.');return;}
+   991→  for(var c of chks){
+   992→    var chave=c.dataset.chave, tipo=c.dataset.tipo||'1';
+   993→    await downloadFile('/admin/api/sieg/xml/'+chave+'?tipoXml='+tipo,'NFe_'+chave+'.xml');
+   994→    await new Promise(function(r){setTimeout(r,400);});
+   995→  }
+   996→}
+   997→
+   998→async function dlSelecionadosPdf(){
+   999→  var chks=Array.from(document.querySelectorAll('.row-chk:checked'));
+  1000→  if(!chks.length){alert('Nenhuma nota selecionada.');return;}
+  1001→  var cnt=document.getElementById('sel-count');
+  1002→  var orig=cnt?cnt.textContent:'';
+  1003→  if(cnt) cnt.textContent='Gerando ZIP com '+chks.length+' PDF(s)...';
+  1004→  var chaves=chks.map(function(c){return c.dataset.chave;}).filter(Boolean);
+  1005→  var tipo=(chks[0]&&chks[0].dataset.tipo)||'1';
+  1006→  try{
+  1007→    var resp=await fetch('/admin/api/sieg/pdf-zip',{
+  1008→      method:'POST',
+  1009→      credentials:'include',
+  1010→      headers:{'Content-Type':'application/json'},
+  1011→      body:JSON.stringify({chaves:chaves,tipoXml:parseInt(tipo)})
+  1012→    });
+  1013→    if(!resp.ok){
+  1014→      var err=await resp.json().catch(function(){return {erro:'Erro '+resp.status};});
+  1015→      alert('Erro ao gerar ZIP: '+(err.erro||resp.status));
+  1016→    } else {
+  1017→      var blob=await resp.blob();
+  1018→      var a=document.createElement('a');
+  1019→      a.href=URL.createObjectURL(blob);
+  1020→      a.download='danfe-'+new Date().toISOString().slice(0,10)+'.zip';
+  1021→      document.body.appendChild(a);a.click();
+  1022→      setTimeout(function(){URL.revokeObjectURL(a.href);document.body.removeChild(a);},1000);
+  1023→    }
+  1024→  }catch(e){alert('Erro: '+e.message);}
+  1025→  if(cnt) cnt.textContent=orig;
+  1026→  updateSelBar();
+  1027→}
+  1028→
+  1029→// ── Exportar Excel (CSV UTF-8) ────────────────────────────────────
+  1030→function exportarExcel(){
+  1031→  var tbl=document.getElementById('r-table');
+  1032→  if(!tbl){alert('Faça uma consulta primeiro.');return;}
+  1033→  var rows=tbl.querySelectorAll('tr'), csv=[];
+  1034→  rows.forEach(function(row){
+  1035→    var cells=row.querySelectorAll('th,td'), line=[];
+  1036→    cells.forEach(function(cell,idx){
+  1037→      if(idx===0||idx===cells.length-1) return;
+  1038→      line.push('"'+cell.innerText.replace(/"/g,'""').replace(/\\n/g,' ')+'"');
+  1039→    });
+  1040→    if(line.length) csv.push(line.join(';'));
+  1041→  });
+  1042→  var blob=new Blob(['\\uFEFF'+csv.join('\\n')],{type:'text/csv;charset=utf-8;'});
+  1043→  var a=document.createElement('a');
+  1044→  a.href=URL.createObjectURL(blob);
+  1045→  a.download='sieg-nfe-'+new Date().toISOString().slice(0,10)+'.csv';
+  1046→  document.body.appendChild(a);a.click();
+  1047→  setTimeout(function(){URL.revokeObjectURL(a.href);document.body.removeChild(a);},1000);
+  1048→}
+  1049→
+  1050→// ── Menu dropdown por linha ───────────────────────────────────────
+  1051→function toggleMenu(btn){
+  1052→  var dd=btn.nextElementSibling;
+  1053→  var isOpen=dd.classList.contains('open');
+  1054→  document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
+  1055→  if(!isOpen) dd.classList.add('open');
+  1056→}
+  1057→document.addEventListener('click',function(e){
+  1058→  var dlLink = e.target.closest('.dl-link');
+  1059→  if(dlLink){
+  1060→    e.preventDefault();
+  1061→    downloadFile(dlLink.dataset.url, dlLink.dataset.file);
+  1062→    document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
+  1063→    return;
+  1064→  }
+  1065→  var danfeLink = e.target.closest('.ver-danfe-link');
+  1066→  if(danfeLink){
+  1067→    e.preventDefault();
+  1068→    verDanfe(danfeLink.dataset.chave, danfeLink.dataset.tipo);
+  1069→    document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
+  1070→    return;
+  1071→  }
+  1072→  if(!e.target.closest('.row-menu')) document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
+  1073→});
+  1074→
+  1075→async function setupOdooActions(){
+  1076→  var pass=document.getElementById('odoo-pass').value.trim();
+  1077→  if(!pass){alert('Informe a senha do Odoo.');return;}
+  1078→  var btn=document.getElementById('btn-setup-odoo');
+  1079→  var res=document.getElementById('setup-result');
+  1080→  btn.disabled=true; btn.textContent='Criando...'; res.innerHTML='';
+  1081→  try{
+  1082→    var r=await fetch('/admin/api/setup-odoo-actions',{
+  1083→      method:'POST', credentials:'include',
+  1084→      headers:{'Content-Type':'application/json'},
+  1085→      body:JSON.stringify({odoo_password:pass})
+  1086→    });
+  1087→    var d=await r.json();
+  1088→    if(d.sucesso){
+  1089→      res.innerHTML='<div style="background:#0a3d1f;color:#4ade80;padding:12px;border-radius:6px">'
+  1090→        +'<b>OK!</b> '+d.msg+'<br><br>'
+  1091→        +(d.acoes.cancelar_boleto?'Cancelar Boleto: '+d.acoes.cancelar_boleto+'<br>':'')
+  1092→        +(d.acoes.cron_extrato?'Cron Extrato: '+d.acoes.cron_extrato+'<br>':'')
+  1093→        +'<br><span style="color:#fbbf24;font-size:11px">Render: '+d.lembrete_render+'</span>'
+  1094→        +'</div>';
+  1095→    }else{
+  1096→      res.innerHTML='<div style="background:#3d0a0a;color:#f87171;padding:12px;border-radius:6px"><b>Erro:</b> '+d.erro+'</div>';
+  1097→    }
+  1098→  }catch(e){
+  1099→    res.innerHTML='<div style="background:#3d0a0a;color:#f87171;padding:12px;border-radius:6px"><b>Erro:</b> '+e.message+'</div>';
+  1100→  }
+  1101→  btn.disabled=false; btn.textContent='Criar Ações no Odoo';
+  1102→}
+  1103→
+  1104→// ── DANFE Modal ──────────────────────────────────────────────────
+  1105→function closeDanfe(){
+  1106→  document.getElementById('danfe-overlay').classList.remove('on');
+  1107→}
+  1108→
+  1109→function danfeField(label, val, mono){
+  1110→  return '<div class="danfe-field"><label>'+label+'</label><span'+(mono?' class="mono"':'')+'>'+(val||'—')+'</span></div>';
+  1111→}
+  1112→
+  1113→function danfeFmtCnpj(v){
+  1114→  if(!v) return '—';
+  1115→  v=v.replace(/\D/g,'');
+  1116→  if(v.length===14) return v.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,'$1.$2.$3/$4-$5');
+  1117→  if(v.length===11) return v.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/,'$1.$2.$3-$4');
+  1118→  return v;
+  1119→}
+  1120→
+  1121→function danfeFmtVal(v){
+  1122→  if(v===null||v===undefined||v==='') return '—';
+  1123→  return 'R$ '+parseFloat(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  1124→}
+  1125→
+  1126→async function verDanfe(chave, tipo){
+  1127→  var overlay=document.getElementById('danfe-overlay');
+  1128→  var body=document.getElementById('danfe-body');
+  1129→  var title=document.getElementById('danfe-title');
+  1130→  title.textContent='DANFE — '+chave;
+  1131→  body.innerHTML='<div class="danfe-loading"><span class="spin"></span>Carregando DANFE...</div>';
+  1132→  overlay.classList.add('on');
+  1133→
+  1134→  try{
+  1135→    var xmlUrl='/admin/api/sieg/xml/'+chave+'?tipoXml='+tipo;
+  1136→    var resp=await fetch(xmlUrl,{credentials:'include'});
+  1137→    if(!resp.ok){ body.innerHTML='<div class="err-box">⚠️ Erro ao buscar XML (HTTP '+resp.status+')</div>'; return; }
+  1138→    var xmlText=await resp.text();
+  1139→
+  1140→    var parser=new DOMParser();
+  1141→    var doc=parser.parseFromString(xmlText,'text/xml');
+  1142→
+  1143→    var nfe=doc.querySelector('nfe\\:infNFe, infNFe')||doc.getElementsByTagName('infNFe')[0];
+  1144→    if(!nfe){
+  1145→      var nfeProc=doc.querySelector('nfeProc');
+  1146→      if(nfeProc) nfe=nfeProc.querySelector('nfe\\:infNFe, infNFe')||nfeProc.getElementsByTagName('infNFe')[0];
+  1147→    }
+  1148→    if(!nfe){ body.innerHTML='<div class="err-box">⚠️ XML não contém infNFe</div>'; return; }
+  1149→
+  1150→    function q(tag){
+  1151→      var m=nfe.querySelector('nfe\\:'+tag);
+  1152→      if(m) return m;
+  1153→      var els=nfe.getElementsByTagName(tag);
+  1154→      return els.length?els[0]:null;
+  1155→    }
+  1156→    function qt(tag){ var e=q(tag); return e?e.textContent:''; }
+  1157→
+  1158→    // Ide
+  1159→    var nNF=qt('nNF'), serie=qt('serie'), dhEmi=qt('dhEmi'), natOp=qt('natOp'), mod=qt('mod'), tpNF=qt('tpNF');
+  1160→    var cUF=qt('cUF'), cNF=qt('cNF');
+  1161→
+  1162→    // Emitente
+  1163→    var emitRz=qt('xNomeEmit')||qt('xNome');
+  1164→    var emitCnpj=q('CNPJEmit')?q('CNPJEmit').textContent:(q('CPFEmit')?q('CPFEmit').textContent:'');
+  1165→    var emitIE=qt('IEemit')||'';
+  1166→    var emitLgr=qt('xLgrEmit')||qt('xLgr')||'', emitNro=qt('nroEmit')||qt('nro')||'', emitCpl=qt('xCplEmit')||qt('xCpl')||'', emitBairro=qt('xBairroEmit')||qt('xBairro')||'', emitCMun=qt('cMunEmit')||qt('cMun')||'', emitXMun=qt('xMunEmit')||qt('xMun')||'', emitUF=qt('UFEmit')||qt('UF')||'', emitCEP=qt('CEPEmit')||qt('CEP')||'';
+  1167→    var emitEnd=emitLgr+(emitNro?', '+emitNro:'')+(emitCpl?' - '+emitCpl:'')+', '+emitBairro+', '+emitXMun+'/'+emitUF+(emitCEP?' — CEP '+emitCEP:'');
+  1168→
+  1169→    // Destinatário
+  1170→    var destRz=qt('xNomeDest')||'';
+  1171→    var destCnpjEl=q('CNPJDest'); if(!destCnpjEl) destCnpjEl=q('CPFDest');
+  1172→    var destCnpj=destCnpjEl?destCnpjEl.textContent:'';
+  1173→    var destIE=qt('IEDest')||'';
+  1174→    var destLgr=qt('xLgrDest')||'', destNro=qt('nroDest')||'', destCpl=qt('xCplDest')||'', destBairro=qt('xBairroDest')||'', destXMun=qt('xMunDest')||'', destUF=qt('UFDest')||'', destCEP=qt('CEPDest')||'';
+  1175→    var destEnd=destLgr+(destNro?', '+destNro:'')+(destCpl?' - '+destCpl:'')+', '+destBairro+', '+destXMun+'/'+destUF+(destCEP?' — CEP '+destCEP:'');
+  1176→
+  1177→    // Produtos
+  1178→    var dets=nfe.querySelectorAll('nfe\\:det, det');
+  1179→    if(!dets.length){
+  1180→      var detsColl=nfe.getElementsByTagName('det');
+  1181→      dets=detsColl;
+  1182→    }
+  1183→    var prodsHtml='';
+  1184→    for(var i=0;i<dets.length;i++){
+  1185→      var det=dets[i];
+  1186→      var prodEl=det.querySelector('nfe\\:prod, prod');
+  1187→      if(!prodEl) prodEl=det.getElementsByTagName('prod')[0];
+  1188→      if(!prodEl) continue;
+  1189→      function pq(tag){ var e=prodEl.querySelector('nfe\\:'+tag); if(!e) e=prodEl.getElementsByTagName(tag)[0]; return e?e.textContent:''; }
+  1190→
+  1191→      var impostoEl=det.querySelector('nfe\\:imposto, imposto');
+  1192→      if(!impostoEl) impostoEl=det.getElementsByTagName('imposto')[0];
+  1193→      function iq(tag){ if(!impostoEl) return ''; var e=impostoEl.querySelector('nfe\\:'+tag); if(!e) e=impostoEl.getElementsByTagName(tag)[0]; return e?e.textContent:''; }
+  1194→
+  1195→      var icmsBase=iq('vBC')||'';
+  1196→      var icmsVal=iq('vICMS')||'';
+  1197→      var icmsAliq=iq('pICMS')||'';
+  1198→      var ipiVal=iq('vIPI')||iq('vIPIST')||'';
+  1199→
+  1200→      prodsHtml+='<tr>'
+  1201→        +'<td>'+pq('cProd')+'</td>'
+  1202→        +'<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+pq('xProd')+'">'+pq('xProd')+'</td>'
+  1203→        +'<td class="r">'+pq('NCM')+'</td>'
+  1204→        +'<td class="r">'+pq('CFOP')+'</td>'
+  1205→        +'<td>'+pq('uCom')+'</td>'
+  1206→        +'<td class="r">'+pq('qCom')+'</td>'
+  1207→        +'<td class="r">'+danfeFmtVal(pq('vUnCom'))+'</td>'
+  1208→        +'<td class="r" style="font-weight:600">'+danfeFmtVal(pq('vProd'))+'</td>'
+  1209→        +'<td class="r">'+danfeFmtVal(icmsBase)+'</td>'
+  1210→        +'<td class="r">'+danfeFmtVal(icmsVal)+'</td>'
+  1211→        +'<td class="r">'+danfeFmtVal(ipiVal)+'</td>'
+  1212→        +'<td class="r">'+icmsAliq+'%</td>'
+  1213→        +'</tr>';
+  1214→    }
+  1215→
+  1216→    // Totais
+  1217→    var icmsTot=q('ICMSTot');
+  1218→    function tq(tag){ if(!icmsTot) return ''; var e=icmsTot.querySelector('nfe\\:'+tag); if(!e) e=icmsTot.getElementsByTagName(tag)[0]; return e?e.textContent:''; }
+  1219→    var vBC=tq('vBC'), vICMS=tq('vICMS'), vProd=tq('vProd'), vIPI=tq('vIPI'), vNF=tq('vNF'), vST=tq('vST'), vPIS=tq('vPIS'), vCOFINS=tq('vCOFINS'), vDesc=tq('vDesc'), vFrete=tq('vFrete'), vSeg=tq('vSeg'), vOutro=tq('vOutro');
+  1220→
+  1221→    // Transportadora
+  1222→    var transpRz=qt('xNomeTrans')||'';
+  1223→    var transpCnpj=q('CNPJTrans')?q('CNPJTrans').textContent:(q('CPFTrans')?q('CPFTrans').textContent:'');
+  1224→    var transpIE=qt('IETrans')||'';
+  1225→    var transpEnd=qt('xEnderTrans')||'';
+  1226→    var transpUF=qt('UFTrans')||'';
+  1227→    var transpMun=qt('xMunTrans')||'';
+  1228→    var modFrete=qt('modFrete')||'';
+  1229→
+  1230→    // Volumes
+  1231→    var volEls=nfe.querySelectorAll('nfe\\:vol, vol');
+  1232→    if(!volEls.length) volEls=nfe.getElementsByTagName('vol');
+  1233→    var volHtml='';
+  1234→    for(var vi=0;vi<volEls.length;vi++){
+  1235→      var vol=volEls[vi];
+  1236→      function vq(tag){ var e=vol.querySelector('nfe\\:'+tag); if(!e) e=vol.getElementsByTagName(tag)[0]; return e?e.textContent:''; }
+  1237→      volHtml+='<div class="danfe-grid3">'
+  1238→        +danfeField('Quantidade',vq('qVol'))
+  1239→        +danfeField('Espécie',vq('esp'))
+  1240→        +danfeField('Marca',vq('marca'))
+  1241→        +'</div><div class="danfe-grid3">'
+  1242→        +danfeField('Peso Bruto',vq('pesoB')?vq('pesoB')+' kg':'')
+  1243→        +danfeField('Peso Líquido',vq('pesoL')?vq('pesoL')+' kg':'')
+  1244→        +danfeField('Numeração',vq('nVol'))
+  1245→        +'</div>';
+  1246→    }
+  1247→
+  1248→    // Fatura / Duplicatas
+  1249→    var fatEl=nfe.querySelector('nfe\\:fat, fat');
+  1250→    if(!fatEl) fatEl=nfe.getElementsByTagName('fat')[0];
+  1251→    var fatNum='',fatVOrig='',fatVDesc='',fatVLiq='';
+  1252→    if(fatEl){
+  1253→      function fq(tag){ var e=fatEl.querySelector('nfe\\:'+tag); if(!e) e=fatEl.getElementsByTagName(tag)[0]; return e?e.textContent:''; }
+  1254→      fatNum=fq('nFat'); fatVOrig=fq('vOrig'); fatVDesc=fq('vDesc'); fatVLiq=fq('vLiq');
+  1255→    }
+  1256→    var dupEls=nfe.querySelectorAll('nfe\\:dup, dup');
+  1257→    if(!dupEls.length) dupEls=nfe.getElementsByTagName('dup');
+  1258→    var dupHtml='';
+  1259→    for(var di2=0;di2<dupEls.length;di2++){
+  1260→      var dup=dupEls[di2];
+  1261→      function dq2(tag){ var e=dup.querySelector('nfe\\:'+tag); if(!e) e=dup.getElementsByTagName(tag)[0]; return e?e.textContent:''; }
+  1262→      dupHtml+='<tr><td>'+dq2('nDup')+'</td><td>'+(dq2('dVenc')?new Date(dq2('dVenc')+'T12:00:00').toLocaleDateString('pt-BR'):'—')+'</td><td class="r" style="font-weight:600">'+danfeFmtVal(dq2('vDup'))+'</td></tr>';
+  1263→    }
+  1264→
+  1265→    // Info Complementares
+  1266→    var infCpl=qt('infCpl')||'';
+  1267→
+  1268→    // Protocolo
+  1269→    var protoEl=doc.querySelector('nfe\\:protNFe, protNFe');
+  1270→    if(!protoEl) protoEl=doc.getElementsByTagName('protNFe')[0];
+  1271→    var nProt='',dhRecbto='';
+  1272→    if(protoEl){
+  1273→      var infProt=protoEl.querySelector('nfe\\:infProt, infProt')||protoEl.getElementsByTagName('infProt')[0];
+  1274→      if(infProt){
+  1275→        var npEl=infProt.querySelector('nfe\\:nProt, nProt')||infProt.getElementsByTagName('nProt')[0];
+  1276→        var dhEl=infProt.querySelector('nfe\\:dhRecbto, dhRecbto')||infProt.getElementsByTagName('dhRecbto')[0];
+  1277→        if(npEl) nProt=npEl.textContent;
+  1278→        if(dhEl) dhRecbto=dhEl.textContent;
+  1279→      }
+  1280→    }
+  1281→
+  1282→    // Build HTML
+  1283→    var h='';
+  1284→    // Header section
+  1285→    h+='<div class="danfe-section"><h3>Identificação da NF-e</h3>'
+  1286→      +'<div class="danfe-grid">'
+  1287→      +danfeField('Número',nNF,true)
+  1288→      +danfeField('Série',serie)
+  1289→      +danfeField('Chave de Acesso',chave,true)
+  1290→      +danfeField('Protocolo',nProt,true)
+  1291→      +danfeField('Data Emissão',dhEmi?new Date(dhEmi).toLocaleString('pt-BR'):'—')
+  1292→      +danfeField('Natureza Operação',natOp)
+  1293→      +danfeField('Modelo',mod)
+  1294→      +danfeField('Tipo',tpNF==='0'?'Entrada':tpNF==='1'?'Saída':tpNF)
+  1295→      +'</div></div>';
+  1296→
+  1297→    // Emitente
+  1298→    h+='<div class="danfe-section"><h3>Emitente</h3>'
+  1299→      +'<div class="danfe-grid">'
+  1300→      +danfeField('Razão Social',emitRz)
+  1301→      +danfeField('CNPJ/CPF',danfeFmtCnpj(emitCnpj),true)
+  1302→      +danfeField('IE',emitIE,true)
+  1303→      +danfeField('Endereço',emitEnd)
+  1304→      +'</div></div>';
+  1305→
+  1306→    // Destinatário
+  1307→    h+='<div class="danfe-section"><h3>Destinatário</h3>'
+  1308→      +'<div class="danfe-grid">'
+  1309→      +danfeField('Razão Social',destRz)
+  1310→      +danfeField('CNPJ/CPF',danfeFmtCnpj(destCnpj),true)
+  1311→      +danfeField('IE',destIE,true)
+  1312→      +danfeField('Endereço',destEnd)
+  1313→      +'</div></div>';
+  1314→
+  1315→    // Produtos
+  1316→    if(prodsHtml){
+  1317→      h+='<div class="danfe-section"><h3>Produtos / Serviços</h3>'
+  1318→        +'<div style="overflow-x:auto"><table class="danfe-table"><thead><tr>'
+  1319→        +'<th>Código</th><th>Descrição</th><th>NCM</th><th>CFOP</th><th>Un</th><th>Qtd</th><th>V.Unit</th><th>V.Total</th><th>BC ICMS</th><th>V.ICMS</th><th>V.IPI</th><th>Alíq</th>'
+  1320→        +'</tr></thead><tbody>'+prodsHtml+'</tbody></table></div></div>';
+  1321→    }
+  1322→
+  1323→    // Totais
+  1324→    h+='<div class="danfe-section"><h3>Totais</h3>'
+  1325→      +'<div class="danfe-totals">'
+  1326→      +'<div class="tf"><label>Base ICMS</label><span>'+danfeFmtVal(vBC)+'</span></div>'
+  1327→      +'<div class="tf"><label>Valor ICMS</label><span>'+danfeFmtVal(vICMS)+'</span></div>'
+  1328→      +'<div class="tf"><label>Valor Produtos</label><span>'+danfeFmtVal(vProd)+'</span></div>'
+  1329→      +'<div class="tf"><label>Valor IPI</label><span>'+danfeFmtVal(vIPI)+'</span></div>'
+  1330→      +'<div class="tf"><label>Valor ST</label><span>'+danfeFmtVal(vST)+'</span></div>'
+  1331→      +'<div class="tf"><label>Desconto</label><span>'+danfeFmtVal(vDesc)+'</span></div>'
+  1332→      +'<div class="tf"><label>Frete</label><span>'+danfeFmtVal(vFrete)+'</span></div>'
+  1333→      +'<div class="tf"><label>Seguro</label><span>'+danfeFmtVal(vSeg)+'</span></div>'
+  1334→      +'<div class="tf"><label>Outras Despesas</label><span>'+danfeFmtVal(vOutro)+'</span></div>'
+  1335→      +'<div class="tf" style="grid-column:span 2"><label>VALOR TOTAL DA NOTA</label><span style="color:#3fb950;font-size:16px">'+danfeFmtVal(vNF)+'</span></div>'
+  1336→      +'</div></div>';
+  1337→
+  1338→    // Transportadora
+  1339→    var modFreteMap={'0':'Por conta do emitente (CIF)','1':'Por conta do destinatário (FOB)','2':'Por conta de terceiros','9':'Sem frete'};
+  1340→    h+='<div class="danfe-section"><h3>Transportadora / Frete</h3>'
+  1341→      +'<div class="danfe-grid">'
+  1342→      +danfeField('Razão Social',transpRz)
+  1343→      +danfeField('CNPJ/CPF',danfeFmtCnpj(transpCnpj),true)
+  1344→      +danfeField('IE',transpIE,true)
+  1345→      +danfeField('Modalidade Frete',modFreteMap[modFrete]||modFrete)
+  1346→      +danfeField('Endereço',transpEnd+(transpMun?' — '+transpMun:'')+(transpUF?'/'+transpUF:''))
+  1347→      +'</div>';
+  1348→    if(volHtml) h+=volHtml;
+  1349→    h+='</div>';
+  1350→
+  1351→    // Fatura / Duplicatas
+  1352→    if(fatNum||dupHtml){
+  1353→      h+='<div class="danfe-section"><h3>Fatura / Duplicatas</h3>';
+  1354→      if(fatNum){
+  1355→        h+='<div class="danfe-grid3">'
+  1356→          +danfeField('Número Fatura',fatNum)
+  1357→          +danfeField('Valor Original',danfeFmtVal(fatVOrig))
+  1358→          +danfeField('Valor Desconto',danfeFmtVal(fatVDesc))
+  1359→          +'</div><div class="danfe-grid3">'
+  1360→          +danfeField('Valor Líquido',danfeFmtVal(fatVLiq))
+  1361→          +'</div>';
+  1362→      }
+  1363→      if(dupHtml){
+  1364→        h+='<table class="danfe-table" style="margin-top:10px"><thead><tr><th>Nº Duplicata</th><th>Vencimento</th><th>Valor</th></tr></thead><tbody>'+dupHtml+'</tbody></table>';
+  1365→      }
+  1366→      h+='</div>';
+  1367→    }
+  1368→
+  1369→    // Info Complementares
+  1370→    if(infCpl){
+  1371→      h+='<div class="danfe-section"><h3>Informações Complementares</h3>'
+  1372→        +'<div class="danfe-info">'+infCpl.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div></div>';
+  1373→    }
+  1374→
+  1375→    body.innerHTML=h;
+  1376→
+  1377→  }catch(err){
+  1378→    body.innerHTML='<div class="err-box">⚠️ Erro ao processar XML: '+err.message+'</div>';
+  1379→  }
+  1380→}
+  1381→
+  1382→// ── Init ──────────────────────────────────────────────────────────
+  1383→preset('e',30);
+  1384→preset('r',3);
+  1385→loadStatus();
+  1386→</script>
+  1387→</body></html>`;
+  1388→}
+  1389→
+  1390→// ════════════════════════════════════════════════════
+  1391→// API — Setup Odoo Actions (Cancelar Boleto + Cron Extrato)
+  1392→// ════════════════════════════════════════════════════
+  1393→
+  1394→router.post('/api/setup-odoo-actions', auth, async (req, res) => {
+  1395→  try {
+  1396→    var odooPass = (req.body.odoo_password || '').trim();
+  1397→    if (!odooPass) return res.json({ sucesso: false, erro: 'Informe a senha do Odoo.' });
+  1398→
+  1399→    var cfg = config.odoo;
+  1400→    if (!cfg.url) return res.json({ sucesso: false, erro: 'ODOO_URL nao configurada na middleware.' });
+  1401→
+  1402→    var c   = odooClient(cfg.url);
+  1403→    var uid = await odooAuth(c, cfg.db, cfg.user, odooPass);
+  1404→    var ekw = (m, mt, a, k) => odooKw(c, cfg.db, uid, cfg.password, m, mt, a, k);
+  1405→
+  1406→    var modelIds = await ekw('ir.model', 'search', [[['model', '=', 'account.move']]]);
+  1407→    if (!modelIds.length) return res.json({ sucesso: false, erro: 'Modelo account.move nao encontrado.' });
+  1408→    var modelId = modelIds[0];
+  1409→
+  1410→    // ── Codigo do Cancelar Boleto ──
+  1411→    var codigoCancelarBoleto = [
+  1412→      "import urllib.request, json",
+  1413→      "from odoo.exceptions import UserError",
+  1414→      "",
+  1415→      "nosso_numero = record.x_studio_nosso_numero or ''",
+  1416→      "",
+  1417→      "if not nosso_numero:",
+  1418→      "    raise UserError('Fatura nao possui Nosso Numero. Nao ha boleto para cancelar.')",
+  1419→      "",
+  1420→      "url     = 'https://odoo-middleware-unified.onrender.com/api/v1/itau/cancelar'",
+  1421→      "payload = json.dumps({'nosso_numero': nosso_numero}).encode('utf-8')",
+  1422→      "req     = urllib.request.Request(url, data=payload, headers={",
+  1423→      "    'Content-Type': 'application/json',",
+  1424→      "    'X-Api-Key': 'cnpja-odoo-secret-2024',",
+  1425→      "}, method='POST')",
+  1426→      "",
+  1427→      "try:",
+  1428→      "    with urllib.request.urlopen(req, timeout=30) as resp:",
+  1429→      "        resultado = json.loads(resp.read().decode('utf-8'))",
+  1430→      "    if resultado.get('success'):",
+  1431→      "        record.x_studio_boleto_cancelado = True",
+  1432→      "        raise UserError('Boleto %s cancelado com sucesso no Itau!' % nosso_numero)",
+  1433→      "    else:",
+  1434→      "        raise UserError('Erro ao cancelar: ' + str(resultado.get('message', 'Erro desconhecido')))",
+  1435→      "except urllib.error.HTTPError as e:",
+  1436→      "    body = e.read().decode('utf-8') if e.fp else ''",
+  1437→      "    raise UserError('Erro HTTP %d ao cancelar boleto: %s' % (e.code, body[:200]))",
+  1438→      "except UserError:",
+  1439→      "    raise",
+  1440→      "except Exception as e:",
+  1441→      "    raise UserError('Erro ao cancelar boleto: %s' % str(e))",
+  1442→    ].join('\n');
+  1443→
+  1444→    // Criar/atualizar Cancelar Boleto
+  1445→    var existingCancelar = await ekw('ir.actions.server', 'search', [[['name', '=', 'Cancelar Boleto']]]);
+  1446→    var valsCancelar = {
+  1447→      name: 'Cancelar Boleto',
+  1448→      model_id: modelId,
+  1449→      binding_model_id: modelId,
+  1450→      binding_view_types: 'form',
+  1451→      state: 'code',
+  1452→      code: codigoCancelarBoleto,
+  1453→    };
+  1454→    if (existingCancelar.length) {
+  1455→      await ekw('ir.actions.server', 'write', [existingCancelar, valsCancelar]);
+  1456→      console.log('[SETUP] Cancelar Boleto atualizada ID=' + existingCancelar[0]);
+  1457→    } else {
+  1458→      var idCancelar = await ekw('ir.actions.server', 'create', [valsCancelar]);
+  1459→      console.log('[SETUP] Cancelar Boleto criada ID=' + idCancelar);
+  1460→    }
+  1461→
+  1462→    // ── Codigo do Cron Extrato ──
+  1463→    var CRON_SECRET = 'extrato-itau-cron-ajl-2024';
+  1464→    var codigoCronExtrato = [
+  1465→      "import urllib.request, json",
+  1466→      "from odoo.exceptions import UserError",
+  1467→      "",
+  1468→      "url = 'https://odoo-middleware-unified.onrender.com/api/v1/itau/extrato/cron?secret=" + CRON_SECRET + "'",
+  1469→      "req = urllib.request.Request(url, method='GET')",
+  1470→      "req.add_header('Content-Type', 'application/json')",
+  1471→      "",
+  1472→      "try:",
+  1473→      "    with urllib.request.urlopen(req, timeout=120) as resp:",
+  1474→      "        resultado = json.loads(resp.read().decode('utf-8'))",
+  1475→      "    if resultado.get('success'):",
+  1476→      "        n = resultado.get('transacoes', 0)",
+  1477→      "        sid = resultado.get('statement_id', '')",
+  1478→      "        if n > 0:",
+  1479→      "            _logger.info('Extrato Itau: %d transacoes (Statement %s)', n, sid)",
+  1480→      "        else:",
+  1481→      "            _logger.info('Extrato Itau: sem transacoes para ontem')",
+  1482→      "    else:",
+  1483→      "        _logger.warning('Extrato Itau falhou: %s', resultado.get('message', ''))",
+  1484→      "except urllib.error.HTTPError as e:",
+  1485→      "    _logger.error('Extrato Itau HTTP %d', e.code)",
+  1486→      "except Exception as e:",
+  1487→      "    _logger.error('Extrato Itau: %s', str(e))",
+  1488→    ].join('\n');
+  1489→
+  1490→    // Criar/atualizar Cron
+  1491→    var cronName = 'Importar Extrato Itau (Diario)';
+  1492→    var existingCron = await ekw('ir.cron', 'search', [[['name', '=', cronName]]]);
+  1493→    var modelCronIds = await ekw('ir.model', 'search', [[['model', '=', 'ir.cron']]]);
+  1494→
+  1495→    var valsCron = {
+  1496→      name: cronName,
+  1497→      active: true,
+  1498→      model_id: modelCronIds[0] || 1,
+  1499→      state: 'code',
+  1500→      code: codigoCronExtrato,
+  1501→      interval_number: 1,
+  1502→      interval_type: 'days',
+  1503→      numbercall: -1,
+  1504→      nextcall: new Date(Date.now() + 24*3600000).toISOString().replace('T',' ').substring(0,19),
+  1505→      priority: 10,
+  1506→    };
+  1507→    if (existingCron.length) {
+  1508→      await ekw('ir.cron', 'write', [existingCron, valsCron]);
+  1509→      console.log('[SETUP] Cron Extrato atualizada ID=' + existingCron[0]);
+  1510→    } else {
+  1511→      var idCron = await ekw('ir.cron', 'create', [valsCron]);
+  1512→      console.log('[SETUP] Cron Extrato criada ID=' + idCron);
+  1513→    }
+  1514→
+  1515→    res.json({
+  1516→      sucesso: true,
+  1517→      msg: 'Acoes criadas com sucesso!',
+  1518→      acoes: {
+  1519→        cancelar_boleto: 'OK - ' + (existingCancelar.length ? 'atualizada' : 'criada'),
+  1520→        cron_extrato: 'OK - ' + (existingCron.length ? 'atualizada' : 'criada') + ' (as 06:00 diario)',
+  1521→      },
+  1522→      lembrete_render: 'Adicione ODOO_BANK_STATEMENT_IMPORT_CRON_SECRET=' + CRON_SECRET + ' no Render',
+  1523→    });
+  1524→
+  1525→  } catch(e) {
+  1526→    console.error('[SETUP] Erro:', e.message);
+  1527→    res.json({ sucesso: false, erro: e.message });
+  1528→  }
+  1529→});
+  1530→
+  1531→module.exports = router;
+  1532→

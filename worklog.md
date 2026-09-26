@@ -21,3 +21,27 @@ Stage Summary:
 - O XML de referencia aceito usa CST 01 + pPIS=1.65 + pCOFINS=7.60 + vBC=0.00 para Simples Nacional
 - Todas as 5 diferencas foram corrigidas
 - Commit pronto para deploy no servidor do cliente
+---
+Task ID: 1
+Agent: main
+Task: Fix Cancelar Boleto + Add IPI/Pedido/Boleto to NF-e PDF
+
+Work Log:
+- Investigated cancelar boleto flow: server action + /cancelar/web route + Itaú API
+- Found server action uses old middleware URL (odoo-middleware-unified.onrender.com → should be api-odoo-rhzf.onrender.com)
+- Found server action only handles single x_studio_nosso_numero, not multiple boletos from JSON
+- Updated danfe-pdf.js v2.0: added IPI columns (CST IPI, V.IPI, PIPI%) in items table, IPI + IPI Devolvido in totals, FATURA/DUPLICATAS section, BOLETO section with Nosso Numero + Linha Digitavel + Codigo de Barras
+- Updated sieg-nfe-xml.js: IPI now emitted for any CRT (not just CRT=3) when cst_ipi is defined; vIPI total calculated from item sum; sale_order_number and boleto_info included in infAdic/infCpl
+- Updated sieg-odoo-emit.js: reads invoice_origin/sale_order_ids for sale order number; reads x_studio_itau_resposta_json for boleto data; reads x_studio_cst_ipi/x_studio_aliquota_ipi from products; passes sale_order_number and boletoData to DANFE
+- Updated sieg-api.js: gerarDanfe() now accepts opts parameter with saleOrderNumber and boletoData
+- Updated routes/sieg.js: /danfe endpoint accepts sale_order_number and boleto_data in request body
+- Updated routes/admin.js: fixed middleware URL references from odoo-middleware-unified.onrender.com to api-odoo-rhzf.onrender.com
+- Created fix-cancelar-boleto.py script to update Odoo server action with: correct URL, multiple boleto support, fallback logic, boleto_cancelado flag
+- Committed and pushed all changes (deploy triggered on Render)
+- Odoo API key expired - user needs to provide new one to run fix-cancelar-boleto.py
+
+Stage Summary:
+- DANFE PDF now shows IPI, Pedido, and Boleto data
+- NF-e XML includes IPI for any CRT, sale order number, and boleto info in infAdic
+- Middleware URL fixed across codebase
+- Cancelar Boleto server action script ready but needs new API key to execute

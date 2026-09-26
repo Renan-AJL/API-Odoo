@@ -1,0 +1,564 @@
+     1→#!/usr/bin/env python3
+     2→"""
+     3→Gera PDF de documentacao completa da parte de emissao de NF-e do sistema AJL.
+     4→"""
+     5→import os, sys
+     6→from reportlab.lib.pagesizes import A4
+     7→from reportlab.lib.units import cm, mm
+     8→from reportlab.lib.colors import HexColor, black, white
+     9→from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    10→from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
+    11→from reportlab.platypus import (
+    12→    SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle,
+    13→    Preformatted, KeepTogether, HRFlowable
+    14→)
+    15→from reportlab.pdfbase import pdfmetrics
+    16→from reportlab.pdfbase.ttfonts import TTFont
+    17→from reportlab.platypus.tableofcontents import TableOfContents
+    18→
+    19→# ── Fonts ──
+    20→FONT_DIR = '/usr/share/fonts'
+    21→pdfmetrics.registerFont(TTFont('DejaVu', f'{FONT_DIR}/truetype/dejavu/DejaVuSans.ttf'))
+    22→pdfmetrics.registerFont(TTFont('DejaVuBd', f'{FONT_DIR}/truetype/dejavu/DejaVuSans-Bold.ttf'))
+    23→pdfmetrics.registerFont(TTFont('DejaVuMono', f'{FONT_DIR}/truetype/dejavu/DejaVuSansMono.ttf'))
+    24→
+    25→# ── Colors ──
+    26→C_PRIMARY = HexColor('#1a3a5c')
+    27→C_ACCENT = HexColor('#2d7d9a')
+    28→C_LIGHT  = HexColor('#f0f4f8')
+    29→C_CODE_BG = HexColor('#f5f7fa')
+    30→C_BORDER  = HexColor('#d0d7de')
+    31→C_TEXT   = HexColor('#1c2430')
+    32→C_MUTED  = HexColor('#5b6875')
+    33→
+    34→# ── Styles ──
+    35→styles = getSampleStyleSheet()
+    36→
+    37→s_title = ParagraphStyle('DocTitle', parent=styles['Title'],
+    38→    fontName='DejaVuBd', fontSize=28, leading=34, textColor=C_PRIMARY,
+    39→    spaceAfter=6, alignment=TA_CENTER)
+    40→
+    41→s_subtitle = ParagraphStyle('DocSubtitle', parent=styles['Normal'],
+    42→    fontName='DejaVu', fontSize=14, leading=18, textColor=C_ACCENT,
+    43→    spaceAfter=4, alignment=TA_CENTER)
+    44→
+    45→s_h1 = ParagraphStyle('H1', fontName='DejaVuBd', fontSize=18, leading=24,
+    46→    textColor=C_PRIMARY, spaceBefore=24, spaceAfter=8)
+    47→
+    48→s_h2 = ParagraphStyle('H2', fontName='DejaVuBd', fontSize=14, leading=18,
+    49→    textColor=C_ACCENT, spaceBefore=16, spaceAfter=6)
+    50→
+    51→s_h3 = ParagraphStyle('H3', fontName='DejaVuBd', fontSize=11, leading=15,
+    52→    textColor=C_PRIMARY, spaceBefore=10, spaceAfter=4)
+    53→
+    54→s_body = ParagraphStyle('Body', fontName='DejaVu', fontSize=9, leading=13,
+    55→    textColor=C_TEXT, spaceAfter=6, alignment=TA_JUSTIFY)
+    56→
+    57→s_code = ParagraphStyle('Code', fontName='DejaVuMono', fontSize=6.5, leading=8.5,
+    58→    textColor=HexColor('#1e293b'), backColor=C_CODE_BG, leftIndent=6, rightIndent=6,
+    59→    spaceBefore=2, spaceAfter=2, borderPadding=4)
+    60→
+    61→s_bullet = ParagraphStyle('Bullet', parent=s_body, leftIndent=18, bulletIndent=6,
+    62→    spaceBefore=1, spaceAfter=1)
+    63→
+    64→s_toc_h1 = ParagraphStyle('TOCH1', fontName='DejaVuBd', fontSize=11, leading=18, leftIndent=0)
+    65→s_toc_h2 = ParagraphStyle('TOCH2', fontName='DejaVu', fontSize=9, leading=14, leftIndent=14)
+    66→
+    67→s_meta = ParagraphStyle('Meta', fontName='DejaVu', fontSize=8, leading=11,
+    68→    textColor=C_MUTED, alignment=TA_CENTER)
+    69→
+    70→# ── Helpers ──
+    71→def hr():
+    72→    return HRFlowable(width='100%', thickness=0.5, color=C_BORDER, spaceBefore=4, spaceAfter=4)
+    73→
+    74→def code_block(filepath):
+    75→    """Read file and return list of Preformatted paragraphs."""
+    76→    elements = []
+    77→    try:
+    78→        with open(filepath, 'r', encoding='utf-8') as f:
+    79→            content = f.read()
+    80→    except Exception as e:
+    81→        content = f'// Arquivo nao encontrado: {e}'
+    82→    
+    83→    # Escape HTML entities for Paragraph
+    84→    content_escaped = (content
+    85→        .replace('&', '&amp;')
+    86→        .replace('<', '&lt;')
+    87→        .replace('>', '&gt;')
+    88→        .replace('"', '&quot;'))
+    89→    
+    90→    # Split into lines and create paragraphs in chunks for better pagination
+    91→    lines = content_escaped.split('\n')
+    92→    chunk_size = 80
+    93→    for i in range(0, len(lines), chunk_size):
+    94→        chunk = '\n'.join(lines[i:i+chunk_size])
+    95→        elements.append(Paragraph(chunk, s_code))
+    96→        if i + chunk_size < len(lines):
+    97→            elements.append(Spacer(1, 2))
+    98→    return elements
+    99→
+   100→def file_section(title, filepath, description):
+   101→    """Create a section for one source file."""
+   102→    elems = []
+   103→    elems.append(Paragraph(title, s_h2))
+   104→    elems.append(Paragraph(description, s_body))
+   105→    elems.append(Spacer(1, 4))
+   106→    # Code header
+   107→    short = filepath.split('/')[-1]
+   108→    elems.append(Paragraph(
+   109→        f'<font color="{C_ACCENT.hexval()}"><b>{short}</b></font> '
+   110→        f'<font color="{C_MUTED.hexval()}">({filepath})</font>',
+   111→        ParagraphStyle('CodeHeader', fontName='DejaVuMono', fontSize=7, leading=10,
+   112→            textColor=C_TEXT, spaceBefore=4, spaceAfter=2, backColor=HexColor('#e8edf2'),
+   113→            borderPadding=4, leftIndent=4, rightIndent=4)))
+   114→    elems.extend(code_block(filepath))
+   115→    elems.append(Spacer(1, 10))
+   116→    return elems
+   117→
+   118→# ── Base path ──
+   119→BASE = '/home/z/my-project/API-Odoo'
+   120→
+   121→def build_doc():
+   122→    output = '/home/z/my-project/download/AJL-Doc-Emissao-NFe.pdf'
+   123→    doc = SimpleDocTemplate(output, pagesize=A4,
+   124→        leftMargin=2*cm, rightMargin=2*cm, topMargin=2.2*cm, bottomMargin=2.2*cm,
+   125→        title='AJL - Documentacao Emissao de NF-e',
+   126→        author='AJL Ferro e Aco', subject='Modulo de emissao propria de NF-e com certificado A1')
+   127→    
+   128→    story = []
+   129→    
+   130→    # ════════════════════════════════════════════════════════
+   131→    # COVER
+   132→    # ════════════════════════════════════════════════════════
+   133→    story.append(Spacer(1, 5*cm))
+   134→    story.append(Paragraph('AJL Ferro e Aco LTDA', s_meta))
+   135→    story.append(Spacer(1, 1*cm))
+   136→    story.append(Paragraph('Documentacao Tecnica', s_title))
+   137→    story.append(Paragraph('Modulo de Emissao Propria de NF-e', ParagraphStyle(
+   138→        'SubBig', fontName='DejaVuBd', fontSize=16, leading=20, textColor=C_ACCENT,
+   139→        alignment=TA_CENTER, spaceAfter=8)))
+   140→    story.append(Spacer(1, 0.5*cm))
+   141→    story.append(hr())
+   142→    story.append(Spacer(1, 0.5*cm))
+   143→    story.append(Paragraph('Certificado A1 | SEFAZ-PR | NF-e 4.00 | DANFE PDF', s_meta))
+   144→    story.append(Spacer(1, 1.5*cm))
+   145→    
+   146→    # Info table
+   147→    info_data = [
+   148→        ['Middleware', 'api-odoo-rhzf.onrender.com'],
+   149→        ['Odoo', 'ajlferroeaco.odoo.com (SaaS 19.2)'],
+   150→        ['Ambiente', 'Homologacao (tpAmb=2)'],
+   151→        ['UF Emitente', 'PR (cUF=41)'],
+   152→    ]
+   153→    info_table = Table(info_data, colWidths=[4*cm, 10*cm])
+   154→    info_table.setStyle(TableStyle([
+   155→        ('FONT', (0, 0), (0, -1), 'DejaVuBd', 8),
+   156→        ('FONT', (1, 0), (1, -1), 'DejaVu', 8),
+   157→        ('TEXTCOLOR', (0, 0), (-1, -1), C_TEXT),
+   158→        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+   159→        ('TOPPADDING', (0, 0), (-1, -1), 4),
+   160→        ('LINEBELOW', (0, 0), (-1, -2), 0.3, C_BORDER),
+   161→    ]))
+   162→    story.append(info_table)
+   163→    
+   164→    story.append(Spacer(1, 3*cm))
+   165→    story.append(Paragraph('Documento gerado automaticamente a partir do repositorio GitHub.', s_meta))
+   166→    story.append(Paragraph('Contem codigo-fonte atualizado de todos os arquivos do modulo de NF-e.', s_meta))
+   167→    story.append(PageBreak())
+   168→    
+   169→    # ════════════════════════════════════════════════════════
+   170→    # TOC
+   171→    # ════════════════════════════════════════════════════════
+   172→    story.append(Paragraph('Sumario', s_h1))
+   173→    story.append(Spacer(1, 8))
+   174→    
+   175→    toc_entries = [
+   176→        (1, '1. Visao Geral do Modulo NF-e'),
+   177→        (2, '1.1 Fluxo de Emissao'),
+   178→        (2, '1.2 Arquitetura dos Arquivos'),
+   179→        (2, '1.3 Variaveis de Ambiente'),
+   180→        (2, '1.4 Endpoints da API'),
+   181→        (1, '2. Certificado Digital A1 (nfe-cert.js + pfx-openssl.js)'),
+   182→        (2, '2.1 services/nfe-cert.js'),
+   183→        (2, '2.2 services/pfx-openssl.js'),
+   184→        (1, '3. Gerador de XML NF-e 4.00 (sieg-nfe-xml.js)'),
+   185→        (1, '4. Assinatura Digital XMLDSig (nfe-signer.js)'),
+   186→        (1, '5. Comunicacao com a SEFAZ (sefaz-client.js)'),
+   187→        (1, '6. Orquestracao da Emissao (sieg-api.js)'),
+   188→        (1, '7. Processamento de Faturas Pendentes (sieg-odoo-emit.js)'),
+   189→        (1, '8. Cancelamento de NF-e'),
+   190→        (2, '8.1 services/nfe-cancelamento.js'),
+   191→        (2, '8.2 services/nfe-cancelar-odoo.js'),
+   192→        (1, '9. DANFE - PDF (danfe-pdf.js)'),
+   193→        (1, '10. Rotas da API (routes/)'),
+   194→        (2, '10.1 routes/nfe-cert.js'),
+   195→        (2, '10.2 routes/sieg.js'),
+   196→        (1, '11. Script Odoo - Botao Cancelar NF-e'),
+   197→        (1, '12. Documentacao de Referencia'),
+   198→    ]
+   199→    
+   200→    for level, title in toc_entries:
+   201→        style = s_toc_h1 if level == 1 else s_toc_h2
+   202→        prefix = '<b>' if level == 1 else ''
+   203→        suffix = '</b>' if level == 1 else ''
+   204→        story.append(Paragraph(f'{prefix}{title}{suffix}', style))
+   205→    
+   206→    story.append(PageBreak())
+   207→    
+   208→    # ════════════════════════════════════════════════════════
+   209→    # 1. VISAO GERAL
+   210→    # ════════════════════════════════════════════════════════
+   211→    story.append(Paragraph('1. Visao Geral do Modulo NF-e', s_h1))
+   212→    
+   213→    story.append(Paragraph(
+   214→        'O modulo de emissao propria de NF-e do sistema AJL permite a emissao direta de Notas Fiscais ' +
+   215→        'Eletronicas (NF-e modelo 55, versao 4.00) com certificado digital A1, sem dependencia da SIEG ' +
+   216→        'para a emissao propriamente dita. O XML e gerado no middleware, assinado com o certificado A1 ' +
+   217→        'da empresa e enviado diretamente a SEFAZ do Parana via SOAP 1.2 com mTLS. Apos a autorizacao ' +
+   218→        '(cStat 100), o DANFE em PDF e gerado localmente usando PDFKit + bwip-js e anexado a fatura no Odoo ' +
+   219→        'junto com o XML do nfeProc.', s_body))
+   220→    
+   221→    story.append(Paragraph(
+   222→        'O fluxo e acionado automaticamente: quando uma fatura no Odoo recebe o status ' +
+   223→        '"pendente" no campo x_studio_nfe_status, o sistema de polling do middleware detecta a ' +
+   224→        'fatura, extrai todos os dados necessarios via XML-RPC (empresa, parceiro, linhas, impostos), ' +
+   225→        'monta o XML da NF-e, assina, envia a SEFAZ e atualiza o Odoo com o resultado. Tudo ' +
+   226→        'acontece de forma assincrona e o usuario final ve o resultado no chatter da fatura.', s_body))
+   227→    
+   228→    # 1.1 Fluxo
+   229→    story.append(Paragraph('1.1 Fluxo de Emissao', s_h2))
+   230→    story.append(Paragraph(
+   231→        'O fluxo completo de emissao de uma NF-e no sistema AJL segue as etapas abaixo, ' +
+   232→        'desde a marcacao da fatura no Odoo ate a disponibilizacao do DANFE e XML no chatter:', s_body))
+   233→    
+   234→    fluxo_steps = [
+   235→        'Odoo: Fatura (account.move) e marcada com x_studio_nfe_status = "pendente"',
+   236→        'sieg-odoo-emit.js: Polling detecta faturas pendentes via XML-RPC search',
+   237→        'sieg-odoo-emit.js: Leitura completa da fatura, empresa, parceiro, linhas e produtos',
+   238→        'sieg-nfe-xml.js: Geracao do XML NF-e 4.00 (NFe + infNFe + det + impostos + pag)',
+   239→        'nfe-signer.js: Assinatura digital XMLDSig RSA-SHA1 do grupo infNFe',
+   240→        'sefaz-client.js: Envia lote via SOAP 1.2 + mTLS para NFeAutorizacao4',
+   241→        'sefaz-client.js: Se cStat 103/105, faz polling via NFeRetAutorizacao4',
+   242→        'sefaz-client.js: cStat 100 = autorizada; monta o nfeProc (NF-e + protNFe)',
+   243→        'danfe-pdf.js: Gera o DANFE em PDF (A4 retrato, code128, layout padrao)',
+   244→        'sieg-odoo-emit.js: Atualiza fatura no Odoo (chave, protocolo, status)',
+   245→        'sieg-odoo-emit.js: Anexa XML + PDF no chatter da fatura',
+   246→    ]
+   247→    for step in fluxo_steps:
+   248→        story.append(Paragraph(f'  {step}', s_bullet, bulletText='-'))
+   249→    
+   250→    # 1.2 Arquitetura
+   251→    story.append(Paragraph('1.2 Arquitetura dos Arquivos', s_h2))
+   252→    story.append(Paragraph(
+   253→        'O modulo de NF-e e composto por 11 arquivos de codigo fonte organizados em tres camadas: ' +
+   254→        'servicos (logica de negocio), rotas (API REST) e scripts Odoo (automacao). A tabela abaixo ' +
+   255→        'resume cada arquivo e sua responsabilidade dentro do sistema:', s_body))
+   256→    
+   257→    arch_data = [
+   258→        ['Arquivo', 'Camada', 'Responsabilidade'],
+   259→        ['sieg-nfe-xml.js', 'Servico', 'Gerador de XML NF-e 4.00 completo'],
+   260→        ['nfe-signer.js', 'Servico', 'Assinatura digital XMLDSig RSA-SHA1'],
+   261→        ['nfe-cert.js', 'Servico', 'Cofre do certificado A1 (.pfx/.p12)'],
+   262→        ['pfx-openssl.js', 'Servico', 'Fallback de leitura PFX via OpenSSL CLI'],
+   263→        ['sefaz-client.js', 'Servico', 'Comunicacao mTLS + SOAP com a SEFAZ'],
+   264→        ['nfe-cancelamento.js', 'Servico', 'Evento de cancelamento (evCancNFe)'],
+   265→        ['nfe-cancelar-odoo.js', 'Servico', 'Integracao cancelamento + Odoo'],
+   266→        ['danfe-pdf.js', 'Servico', 'Geracao do DANFE em PDF (PDFKit + bwip-js)'],
+   267→        ['sieg-api.js', 'Servico', 'Orquestracao: modo proprio vs SIEG'],
+   268→        ['sieg-odoo-emit.js', 'Servico', 'Polling de faturas pendentes + Odoo integration'],
+   269→        ['routes/nfe-cert.js', 'Rota', 'Endpoints de certificado + DANFE'],
+   270→        ['routes/sieg.js', 'Rota', 'Endpoints de emissao + cancelamento'],
+   271→        ['criar-botao-cancelar-nfe.py', 'Script', 'Cria botao "Cancelar NF-e" no Odoo'],
+   272→    ]
+   273→    arch_table = Table(arch_data, colWidths=[4.5*cm, 2*cm, 9.5*cm])
+   274→    arch_table.setStyle(TableStyle([
+   275→        ('FONT', (0, 0), (-1, 0), 'DejaVuBd', 7),
+   276→        ('FONT', (0, 1), (-1, -1), 'DejaVu', 7),
+   277→        ('BACKGROUND', (0, 0), (-1, 0), C_LIGHT),
+   278→        ('GRID', (0, 0), (-1, -1), 0.3, C_BORDER),
+   279→        ('TOPPADDING', (0, 0), (-1, -1), 3),
+   280→        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+   281→        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+   282→        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+   283→    ]))
+   284→    story.append(Spacer(1, 4))
+   285→    story.append(arch_table)
+   286→    
+   287→    # 1.3 Variaveis de Ambiente
+   288→    story.append(Paragraph('1.3 Variaveis de Ambiente', s_h2))
+   289→    story.append(Paragraph(
+   290→        'O comportamento do modulo de NF-e e controlado por variaveis de ambiente configuradas ' +
+   291→        'no servidor (Render). As variaveis principais determinam o modo de emissao, a UF do emitente, ' +
+   292→        'o ambiente (producao/homologacao) e as credenciais do certificado digital:', s_body))
+   293→    
+   294→    env_data = [
+   295→        ['Variavel', 'Default', 'Descricao'],
+   296→        ['NFE_EMISSAO_MODO', 'proprio', 'proprio = assina e autoriza na SEFAZ direto; sieg = importa XML autorizado'],
+   297→        ['NFE_UF', 'PR', 'UF do emitente; define qual webservice da SEFAZ usar'],
+   298→        ['SIEG_TP_AMB', '2', '1 = producao, 2 = homologacao'],
+   299→        ['NFE_CERT_PFX_BASE64', '-', 'Conteudo do .pfx em base64 (sobrevive deploys)'],
+   300→        ['NFE_CERT_SENHA', '-', 'Senha do certificado A1'],
+   301→        ['NFE_CERT_DIR', '/var/data', 'Diretorio do certificado em disco'],
+   302→        ['NFE_CERT_KEK', '-', 'Chave para cifrar a senha em disco (AES-256-GCM)'],
+   303→        ['NFE_DANFE_PROVIDER', 'local', 'local = PDFKit; sieg = via API SIEG'],
+   304→        ['SIEG_IMPORT_XML', '0', '1 = importa XML autorizado no cofre SIEG apos emissao'],
+   305→        ['NFE_TLS_INSECURE', '0', '1 = desativa validacao TLS (debug apenas)'],
+   306→    ]
+   307→    env_table = Table(env_data, colWidths=[4*cm, 2*cm, 10*cm])
+   308→    env_table.setStyle(TableStyle([
+   309→        ('FONT', (0, 0), (-1, 0), 'DejaVuBd', 7),
+   310→        ('FONT', (0, 1), (-1, -1), 'DejaVuMono', 6.5),
+   311→        ('BACKGROUND', (0, 0), (-1, 0), C_LIGHT),
+   312→        ('GRID', (0, 0), (-1, -1), 0.3, C_BORDER),
+   313→        ('TOPPADDING', (0, 0), (-1, -1), 2),
+   314→        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+   315→        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+   316→        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+   317→    ]))
+   318→    story.append(Spacer(1, 4))
+   319→    story.append(env_table)
+   320→    
+   321→    # 1.4 Endpoints
+   322→    story.append(Paragraph('1.4 Endpoints da API', s_h2))
+   323→    story.append(Paragraph(
+   324→        'Os endpoints relacionados a NF-e estao divididos em dois grupos: os endpoints de certificado ' +
+   325→        '(montados em routes/nfe-cert.js) e os endpoints de emissao/cancelamento (montados em routes/sieg.js). ' +
+   326→        'Todos exigem o header x-api-key para autenticacao:', s_body))
+   327→    
+   328→    ep_data = [
+   329→        ['Metodo', 'Rota', 'Funcao'],
+   330→        ['POST', '/api/v1/nfe/certificado', 'Upload do .pfx (base64 + senha)'],
+   331→        ['GET', '/api/v1/nfe/certificado', 'Status/validade do certificado carregado'],
+   332→        ['DELETE', '/api/v1/nfe/certificado', 'Remove o certificado do servidor'],
+   333→        ['GET', '/api/v1/nfe/sefaz/status', 'Status do servico da SEFAZ (testa mTLS)'],
+   334→        ['POST', '/api/v1/nfe/danfe', 'Gera DANFE PDF a partir de XML autorizado'],
+   335→        ['POST', '/api/v1/sieg/emitir', 'Emitir NF (auto-detect NF-e ou NFS-e)'],
+   336→        ['POST', '/api/v1/sieg/emitir-nfe', 'Emitir NF-e (forcar produto)'],
+   337→        ['POST', '/api/v1/sieg/process-pending', 'Processar emissoes pendentes (polling)'],
+   338→        ['POST', '/api/v1/sieg/cancelar', 'Cancelar NF-e (chave + protocolo)'],
+   339→    ]
+   340→    ep_table = Table(ep_data, colWidths=[2*cm, 6.5*cm, 7.5*cm])
+   341→    ep_table.setStyle(TableStyle([
+   342→        ('FONT', (0, 0), (-1, 0), 'DejaVuBd', 7),
+   343→        ('FONT', (0, 1), (-1, -1), 'DejaVu', 7),
+   344→        ('BACKGROUND', (0, 0), (-1, 0), C_LIGHT),
+   345→        ('GRID', (0, 0), (-1, -1), 0.3, C_BORDER),
+   346→        ('TOPPADDING', (0, 0), (-1, -1), 2),
+   347→        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+   348→        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+   349→    ]))
+   350→    story.append(Spacer(1, 4))
+   351→    story.append(ep_table)
+   352→    
+   353→    story.append(PageBreak())
+   354→    
+   355→    # ════════════════════════════════════════════════════════
+   356→    # 2-11: FILE SECTIONS
+   357→    # ════════════════════════════════════════════════════════
+   358→    
+   359→    # 2. Certificado Digital
+   360→    story.append(Paragraph('2. Certificado Digital A1', s_h1))
+   361→    story.append(Paragraph(
+   362→        'O certificado digital A1 e o componente central da emissao propria de NF-e. Ele e utilizado ' +
+   363→        'para assinar o XML da nota (XMLDSig RSA-SHA1) e estabelecer a conexao mTLS com os webservices ' +
+   364→        'da SEFAZ. O sistema suporta tres fontes de carregamento: variaveis de ambiente (prioridade, ' +
+   365→        'sobrevive deploys), disco persistente (fallback), e upload via endpoint REST. A senha do ' +
+   366→        'certificado e cifrada em disco usando AES-256-GCM com uma chave derivada do ambiente.', s_body))
+   367→    story.append(Paragraph(
+   368→        'A abertura do arquivo PFX tenta primeiro o node-forge (compativel com algoritmos classicos 3DES/RC2). ' +
+   369→        'Se falhar com "Unsupported PKCS12 PFX data" (comum em certificados ICP-Brasil recentes que usam ' +
+   370→        'PBES2/AES-256), o sistema faz fallback para o OpenSSL do sistema operacional via CLI, tentando ' +
+   371→        'o modo moderno e, se necessario, o modo -legacy para algoritmos antigos. A senha nunca e ' +
+   372→        'escrita em logs ou retornada nas respostas da API.', s_body))
+   373→    
+   374→    story.extend(file_section(
+   375→        '2.1 services/nfe-cert.js',
+   376→        f'{BASE}/services/nfe-cert.js',
+   377→        'Cofre do certificado digital A1 (.pfx/.p12). Gerencia carregamento, cache, persistencia ' +
+   378→        'em disco (com senha cifrada), extracao de chave privada/chain em PEM, e validacao ' +
+   379→        'de validade. Tenta node-forge primeiro, depois OpenSSL como fallback.'))
+   380→    
+   381→    story.extend(file_section(
+   382→        '2.2 services/pfx-openssl.js',
+   383→        f'{BASE}/services/pfx-openssl.js',
+   384→        'Fallback de leitura de PKCS#12 via OpenSSL CLI. Necessario quando o node-forge nao suporta ' +
+   385→        'o algoritmo do PFX (PBES2/AES-256 dos certificados ICP-Brasil recentes). Usa env:VAR para a senha ' +
+   386→        '(nunca na linha de comando), apaga o .pfx temporario apos o uso, e tenta modo -legacy se o moderno falhar.'))
+   387→    
+   388→    # 3. Gerador de XML
+   389→    story.append(Paragraph('3. Gerador de XML NF-e 4.00', s_h1))
+   390→    story.append(Paragraph(
+   391→        'O arquivo sieg-nfe-xml.js e o coracao da geracao do XML da NF-e. Ele recebe os dados extraidos ' +
+   392→        'do Odoo (empresa, parceiro, linhas de fatura, impostos, pagamentos) e monta o XML completo no ' +
+   393→        'formato NF-e 4.00, incluindo os grupos ide (identificacao), emit (emitente), dest (destinatario), ' +
+   394→        'det (itens com prod + impostos), total (ICMSTot), transp (transporte), pag (pagamentos - PIX) e ' +
+   395→        'infAdic (informacoes complementares). O XML gerado segue o padrao exigido pela SEFAZ e inclui ' +
+   396→        'tratamentos especificos como CSOSN 103 (simples nacional sem ICMS), CFOP 6102 (venda fora do estado) ' +
+   397→        'e formatacao de enderecos do Odoo (que frequentemente inclui o numero no campo street).', s_body))
+   398→    
+   399→    story.extend(file_section(
+   400→        'services/sieg-nfe-xml.js',
+   401→        f'{BASE}/services/sieg-nfe-xml.js',
+   402→        'Gerador de XML NF-e v4.00 a partir de dados Odoo. Monta <NFe><infNFe> com todos os grupos ' +
+   403→        'obrigatorios (ide, emit, dest, det, total, transp, pag, infAdic). Inclui CSOSN 103, CFOP 6102, ' +
+   404→        'ICMS-ST com MVA, e pagamentos via PIX (tPag=15).'))
+   405→    
+   406→    # 4. Assinatura Digital
+   407→    story.append(Paragraph('4. Assinatura Digital XMLDSig', s_h1))
+   408→    story.append(Paragraph(
+   409→        'A assinatura digital da NF-e segue o padrao XMLDSig definido no Manual de Orientacao do Contribuinte ' +
+   410→        'da SEFAZ. O grupo infNFe e assinado com RSA-SHA1, utilizando canonicalizacao C14N ' +
+   411→        '(REC-xml-c14n-20010315) e transformacoes enveloped-signature + C14N. A referencia (Reference URI) ' +
+   412→        'aponta para o atributo Id="NFe<chave de 44 digitos>" do infNFe. O elemento Signature e inserido ' +
+   413→        'imediatamente apos o fechamento de infNFe, dentro de NFe, conforme exigido pela SEFAZ.', s_body))
+   414→    
+   415→    story.extend(file_section(
+   416→        'services/nfe-signer.js',
+   417→        f'{BASE}/services/nfe-signer.js',
+   418→        'Assinatura digital XMLDSig da NF-e (A1). Usa xml-crypto para assinar o grupo infNFe com ' +
+   419→        'RSA-SHA1 + C14N. Valida a presenca de X509Certificate no resultado (rejeicao 297 da SEFAZ).'))
+   420→    
+   421→    # 5. SEFAZ Client
+   422→    story.append(Paragraph('5. Comunicacao com a SEFAZ', s_h1))
+   423→    story.append(Paragraph(
+   424→        'O sefaz-client.js implementa toda a comunicacao direta com os webservices da SEFAZ para NF-e 4.00. ' +
+   425→        'Ele cria um agente HTTPS com mTLS (mutual TLS) usando o certificado A1, monta envelopes SOAP 1.2, ' +
+   426→        'envia lotes via NFeAutorizacao4 com indSinc=1 (sincrono), e trata os cenarios de processamento ' +
+   427→        'assincrono (cStat 103/105) com polling via NFeRetAutorizacao4. Suporta os autorizadores PR, SP e SVRS ' +
+   428→        '(fallback para UFs nao mapeadas). O bundle de CAs da ICP-Brasil esta embutido no codigo para ' +
+   429→        'resolver "self-signed certificate in certificate chain" em containers Linux sem o bundle instalado.', s_body))
+   430→    
+   431→    story.extend(file_section(
+   432→        'services/sefaz-client.js',
+   433→        f'{BASE}/services/sefaz-client.js',
+   434→        'Comunicacao direta com a SEFAZ (NF-e 4.00) via mTLS + SOAP 1.2. Inclui: criacao do agente mTLS ' +
+   435→        'com PEM, envelope SOAP, NFeAutorizacao4, NFeRetAutorizacao4 (polling), NFeConsultaProtocolo4, ' +
+   436→        'NFeStatusServico4, e montagem do nfeProc. Webservices mapeados: PR, SP, SVRS (fallback).'))
+   437→    
+   438→    # 6. SIEG API
+   439→    story.append(Paragraph('6. Orquestracao da Emissao (sieg-api.js)', s_h1))
+   440→    story.append(Paragraph(
+   441→        'O sieg-api.js e o orquestrador que decide como emitir a NF-e. Ele suporta dois modos: modo proprio ' +
+   442→        '(default) onde o XML e assinado com o certificado A1 e enviado direto a SEFAZ, e modo SIEG onde o ' +
+   443→        'XML ja assinado e autorizado e importado no cofre da SIEG. Apos a autorizacao, o DANFE e gerado ' +
+   444→        'localmente (PDFKit) ou via SIEG, conforme a configuracao. O sistema tambem suporta emissao de ' +
+   445→        'NFS-e via SIEG (DPS) e importacao opcional do XML autorizado no cofre SIEG.', s_body))
+   446→    
+   447→    story.extend(file_section(
+   448→        'services/sieg-api.js',
+   449→        f'{BASE}/services/sieg-api.js',
+   450→        'Orquestracao da emissao fiscal. decide entre emissao propria (SEFAZ direta) ou via SIEG. ' +
+   451→        'Gera DANFE local ou via SIEG. Suporta NF-e e NFS-e. Importa XML no cofre SIEG se configurado.'))
+   452→    
+   453→    # 7. SIEG Odoo Emit
+   454→    story.append(Paragraph('7. Processamento de Faturas Pendentes', s_h1))
+   455→    story.append(Paragraph(
+   456→        'O sieg-odoo-emit.js e o motor de integracao com o Odoo. Ele faz polling periodico das faturas ' +
+   457→        'com status "pendente" no campo x_studio_nfe_status (NF-e) ou x_studio_nfse_status (NFS-e), ' +
+   458→        'extrai todos os dados necessarios via XML-RPC (empresa com campos l10n_br opcionais, parceiro com ' +
+   459→        'fallback de codigo IBGE, linhas com NCM/CST/CFOP/impostos, produtos com campos x_studio_), ' +
+   460→        'monta o payload de emissao, chama a API e atualiza o Odoo com o resultado. O sistema e tolerante ' +
+   461→        'a campos ausentes no Odoo SaaS (l10n_br) e faz fallback para lookup de cidades por nome/UF.', s_body))
+   462→    
+   463→    story.extend(file_section(
+   464→        'services/sieg-odoo-emit.js',
+   465→        f'{BASE}/services/sieg-odoo-emit.js',
+   466→        'Processamento de emissoes pendentes via polling Odoo XML-RPC. Le faturas, empresa, parceiro, ' +
+   467→        'linhas, produtos. Monta payload, chama sieg-api.js, atualiza Odoo, anexa XML+PDF no chatter. ' +
+   468→        'Tolerante a campos ausentes no Odoo 19 SaaS.'))
+   469→    
+   470→    # 8. Cancelamento
+   471→    story.append(Paragraph('8. Cancelamento de NF-e', s_h1))
+   472→    story.append(Paragraph(
+   473→        'O cancelamento de NF-e implementa o evento de cancelamento conforme a NT2011.002 da SEFAZ. ' +
+   474→        'O fluxo monta o XML do evento evCancNFe (tpEvento 110111) com a justificativa, assina com o ' +
+   475→        'certificado A1, envia via SOAP para NFeRecepcaoEvento4 e verifica o cStat 135 (evento registrado) ' +
+   476→        'ou 155 (cancelamento homologado). Apos o cancelamento na SEFAZ, o sistema reverte a fatura para ' +
+   477→        'rascunho no Odoo (button_draft + button_cancel) e posta o resultado no chatter.', s_body))
+   478→    
+   479→    story.extend(file_section(
+   480→        '8.1 services/nfe-cancelamento.js',
+   481→        f'{BASE}/services/nfe-cancelamento.js',
+   482→        'Cancelamento de NF-e na SEFAZ (NT2011.002). Monta evCancNFe, assina com A1, envia via SOAP ' +
+   483→        'para NFeRecepcaoEvento4. Verifica cStat 135/155.'))
+   484→    
+   485→    story.extend(file_section(
+   486→        '8.2 services/nfe-cancelar-odoo.js',
+   487→        f'{BASE}/services/nfe-cancelar-odoo.js',
+   488→        'Cancelamento de NF-e integrado ao Odoo. Le fatura (chave + protocolo), envia cancelamento ' +
+   489→        'a SEFAZ, atualiza status, reverte fatura para rascunho e posta no chatter.'))
+   490→    
+   491→    # 9. DANFE
+   492→    story.append(Paragraph('9. DANFE - PDF', s_h1))
+   493→    story.append(Paragraph(
+   494→        'O DANFE (Documento Auxiliar da Nota Fiscal Eletronica) e gerado localmente usando PDFKit e bwip-js ' +
+   495→        '(codigo de barras Code128C da chave de acesso). O layout segue o padrao simplificado em A4 retrato: ' +
+   496→        'canhoto, cabecalho com emitente e chave de acesso com barcode, dados do destinatario, calculo de ' +
+   497→        'impostos, dados do transportador, tabela de itens e dados adicionais. Em ambiente de homologacao, ' +
+   498→        'inclui marca dagua "SEM VALOR FISCAL".', s_body))
+   499→    
+   500→    story.extend(file_section(
+   501→        'services/danfe-pdf.js',
+   502→        f'{BASE}/services/danfe-pdf.js',
+   503→        'Geracao local do DANFE em PDF (PDFKit + bwip-js). Layout A4 retrato com canhoto, emitente, ' +
+   504→        'destinatario, impostos, transportador, itens e dados adicionais. Barcode Code128C da chave.'))
+   505→    
+   506→    # 10. Rotas
+   507→    story.append(Paragraph('10. Rotas da API', s_h1))
+   508→    story.append(Paragraph(
+   509→        'As rotas da API de NF-e estao organizadas em dois arquivos de rota Express. O routes/nfe-cert.js ' +
+   510→        'concentra os endpoints de gerenciamento do certificado digital e geracao de DANFE, incluindo um ' +
+   511→        'painel HTML para upload do certificado via navegador. O routes/sieg.js concentra os endpoints de ' +
+   512→        'emissao (auto-detect NF-e/NFS-e, emissao forcada, processamento de pendentes, cancelamento) e o ' +
+   513→        'callback OAuth da SIEG.', s_body))
+   514→    
+   515→    story.extend(file_section(
+   516→        '10.1 routes/nfe-cert.js',
+   517→        f'{BASE}/routes/nfe-cert.js',
+   518→        'Rotas: POST/GET/DELETE /api/v1/nfe/certificado, GET /api/v1/nfe/sefaz/status, ' +
+   519→        'POST /api/v1/nfe/danfe, GET /api/v1/nfe/painel (HTML de upload de certificado).'))
+   520→    
+   521→    story.extend(file_section(
+   522→        '10.2 routes/sieg.js',
+   523→        f'{BASE}/routes/sieg.js',
+   524→        'Rotas: GET /api/v1/sieg/status, GET /api/v1/sieg/oauth-url, POST /api/v1/sieg/emitir, ' +
+   525→        'POST /api/v1/sieg/emitir-nfe, POST /api/v1/sieg/emitir-nfse, POST /api/v1/sieg/danfe, ' +
+   526→        'POST /api/v1/sieg/process-pending, POST /api/v1/sieg/cancelar, GET /callback/sieg.'))
+   527→    
+   528→    # 11. Script Odoo
+   529→    story.append(Paragraph('11. Script Odoo - Botao Cancelar NF-e', s_h1))
+   530→    story.append(Paragraph(
+   531→        'O script criar-botao-cancelar-nfe.py e um utilitario que cria via XML-RPC um Server Action no Odoo, ' +
+   532→        'visivel como botao no menu Acao (engrenagem) do formulario de faturas (account.move). O botao ' +
+   533→        'verifica se a NF-e esta com status "autorizada" antes de chamar o middleware para o cancelamento, ' +
+   534→        'e exibe o resultado (protocolo ou erro) via UserError para o usuario.', s_body))
+   535→    
+   536→    story.extend(file_section(
+   537→        'criar-botao-cancelar-nfe.py',
+   538→        f'{BASE}/odoo-scripts/criar-botao-cancelar-nfe.py',
+   539→        'Script Python que cria o botao "Cancelar NF-e" no Odoo via XML-RPC. O botao chama ' +
+   540→        'POST /api/v1/sieg/cancelar no middleware e exibe resultado ao usuario.'))
+   541→    
+   542→    # 12. Documentacao de referencia
+   543→    story.append(Paragraph('12. Documentacao de Referencia', s_h1))
+   544→    story.append(Paragraph(
+   545→        'O repositorio inclui tambem o arquivo docs-emissao-propria-nfe.md com documentacao adicional ' +
+   546→        'sobre a configuracao do disco persistente no Render, instrucoes para envio do certificado, teste ' +
+   547→        'da conexao com a SEFAZ e procedimentos de emissao. Este arquivo serve como guia rapido de ' +
+   548→        'referencia para a operacao do modulo de NF-e em producao.', s_body))
+   549→    
+   550→    story.extend(file_section(
+   551→        'docs-emissao-propria-nfe.md',
+   552→        f'{BASE}/docs-emissao-propria-nfe.md',
+   553→        'Documentacao de referencia: fluxo, variaveis de ambiente, envio de certificado, teste SEFAZ e endpoints.'))
+   554→    
+   555→    # Build
+   556→    print('Gerando PDF...')
+   557→    doc.build(story)
+   558→    print(f'PDF gerado: {output}')
+   559→    size = os.path.getsize(output)
+   560→    print(f'Tamanho: {size/1024:.0f} KB')
+   561→
+   562→if __name__ == '__main__':
+   563→    build_doc()
+   564→
