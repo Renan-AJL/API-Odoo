@@ -1,82 +1,2313 @@
 {
-  "modules": "access_denied",
   "crm": {
     "leads_count": 0,
-    "opps_count": 0,
-    "stages": [],
-    "teams": [],
-    "studio_fields": [],
-    "lost_reasons": []
+    "opps_count": 654,
+    "stages": [
+      {
+        "id": 1,
+        "name": "Novos Leads",
+        "sequence": 0
+      },
+      {
+        "id": 5,
+        "name": "Em Cotação",
+        "sequence": 1
+      },
+      {
+        "id": 13,
+        "name": "Revisão de preços",
+        "sequence": 2
+      },
+      {
+        "id": 11,
+        "name": "Em Produção",
+        "sequence": 3
+      },
+      {
+        "id": 18,
+        "name": "Produção Finalizado",
+        "sequence": 4
+      },
+      {
+        "id": 4,
+        "name": "Entregue",
+        "sequence": 5
+      },
+      {
+        "id": 10,
+        "name": "Aguardando Analise da Crédito",
+        "sequence": 6
+      },
+      {
+        "id": 3,
+        "name": "Em Negociação",
+        "sequence": 7
+      },
+      {
+        "id": 17,
+        "name": "PERDIDO",
+        "sequence": 8
+      },
+      {
+        "id": 14,
+        "name": "Pedido Fechado",
+        "sequence": 8
+      }
+    ],
+    "teams": [
+      {
+        "id": 1,
+        "name": "Sales"
+      },
+      {
+        "id": 2,
+        "name": "Website"
+      }
+    ],
+    "studio_fields": [
+      {
+        "id": 22252,
+        "name": "x_studio_anexo_1",
+        "field_description": "Anexo 1",
+        "ttype": "binary"
+      },
+      {
+        "id": 27609,
+        "name": "x_studio_anexo_10",
+        "field_description": "Anexo 10",
+        "ttype": "binary"
+      },
+      {
+        "id": 22254,
+        "name": "x_studio_anexo_1_filename",
+        "field_description": "Filename for x_studio_binary_field_78c_1jmbmjd8u",
+        "ttype": "char"
+      },
+      {
+        "id": 22256,
+        "name": "x_studio_anexo_2",
+        "field_description": "Anexo 2",
+        "ttype": "binary"
+      },
+      {
+        "id": 22258,
+        "name": "x_studio_anexo_2_filename",
+        "field_description": "Filename for x_studio_binary_field_57m_1jmbmkqr5",
+        "ttype": "char"
+      },
+      {
+        "id": 27595,
+        "name": "x_studio_anexo_3",
+        "field_description": "Anexo 3",
+        "ttype": "binary"
+      },
+      {
+        "id": 27597,
+        "name": "x_studio_anexo_4",
+        "field_description": "Anexo 4",
+        "ttype": "binary"
+      },
+      {
+        "id": 27599,
+        "name": "x_studio_anexo_5",
+        "field_description": "Anexo 5",
+        "ttype": "binary"
+      },
+      {
+        "id": 27601,
+        "name": "x_studio_anexo_6",
+        "field_description": "Anexo 6",
+        "ttype": "binary"
+      },
+      {
+        "id": 27603,
+        "name": "x_studio_anexo_7",
+        "field_description": "Anexo 7",
+        "ttype": "binary"
+      },
+      {
+        "id": 27605,
+        "name": "x_studio_anexo_8",
+        "field_description": "Anexo 8",
+        "ttype": "binary"
+      },
+      {
+        "id": 27607,
+        "name": "x_studio_anexo_9",
+        "field_description": "Anexo 9",
+        "ttype": "binary"
+      },
+      {
+        "id": 27818,
+        "name": "x_studio_anexo_oc",
+        "field_description": "Anexo OC:",
+        "ttype": "binary"
+      },
+      {
+        "id": 27820,
+        "name": "x_studio_anexo_oc_filename",
+        "field_description": "Filename for x_studio_binary_field_80v_1k2ivqpgr",
+        "ttype": "char"
+      },
+      {
+        "id": 28901,
+        "name": "x_studio_cartao_cnpj",
+        "field_description": "Cartão CNPJ",
+        "ttype": "binary"
+      },
+      {
+        "id": 28903,
+        "name": "x_studio_cartao_cnpj_filename",
+        "field_description": "Filename for x_studio_binary_field_711_1k32doibd",
+        "ttype": "char"
+      },
+      {
+        "id": 28905,
+        "name": "x_studio_contrato_social",
+        "field_description": "Contrato Social",
+        "ttype": "binary"
+      },
+      {
+        "id": 28907,
+        "name": "x_studio_contrato_social_filename",
+        "field_description": "Filename for x_studio_binary_field_3ik_1k32dq33m",
+        "ttype": "char"
+      },
+      {
+        "id": 22260,
+        "name": "x_studio_cotacao_inicial",
+        "field_description": "Cotação Inicial",
+        "ttype": "many2one"
+      },
+      {
+        "id": 28911,
+        "name": "x_studio_informar_pedido_de_venda_consultar_abaixo",
+        "field_description": "Informar Pedido de Venda: (Consultar Abaixo)",
+        "ttype": "char"
+      },
+      {
+        "id": 26829,
+        "name": "x_studio_many2many_field_68e_1jpvd8bu4",
+        "field_description": "New Many2Many",
+        "ttype": "many2many"
+      },
+      {
+        "id": 26827,
+        "name": "x_studio_many2many_field_8fm_1jpvd6qb5",
+        "field_description": "New Many2Many",
+        "ttype": "many2many"
+      },
+      {
+        "id": 22264,
+        "name": "x_studio_medidas_tecnicas",
+        "field_description": "Medidas Técnicas",
+        "ttype": "html"
+      },
+      {
+        "id": 27181,
+        "name": "x_studio_numero_oc",
+        "field_description": "Número OC:",
+        "ttype": "char"
+      },
+      {
+        "id": 27177,
+        "name": "x_studio_one2many_field_4sl_1jsu4efa8",
+        "field_description": "Novas linhas",
+        "ttype": "one2many"
+      },
+      {
+        "id": 27179,
+        "name": "x_studio_origem_1",
+        "field_description": "Origem:",
+        "ttype": "selection"
+      },
+      {
+        "id": 28909,
+        "name": "x_studio_pedido_de_venda",
+        "field_description": "Pedido de Venda",
+        "ttype": "one2many"
+      },
+      {
+        "id": 22272,
+        "name": "x_studio_preencher_dados",
+        "field_description": "Preencher dados",
+        "ttype": "boolean"
+      },
+      {
+        "id": 22266,
+        "name": "x_studio_produto_possui_cadastro",
+        "field_description": "Produto Possui Cadastro?",
+        "ttype": "selection"
+      },
+      {
+        "id": 26823,
+        "name": "x_studio_produtos",
+        "field_description": "Produtos",
+        "ttype": "many2many"
+      },
+      {
+        "id": 26835,
+        "name": "x_studio_produtos_cotacao",
+        "field_description": "Produtos Cotação",
+        "ttype": "many2one"
+      },
+      {
+        "id": 28913,
+        "name": "x_studio_related_field_1i2_1k32due1e",
+        "field_description": "Endereço completo",
+        "ttype": "char"
+      },
+      {
+        "id": 26821,
+        "name": "x_studio_related_field_4cu_1jotjisq0",
+        "field_description": "Estado",
+        "ttype": "many2one"
+      },
+      {
+        "id": 26782,
+        "name": "x_studio_related_field_5gs_1jnv5u8hu",
+        "field_description": "CPF/CNPJ",
+        "ttype": "char"
+      },
+      {
+        "id": 22270,
+        "name": "x_studio_related_field_5qt_1jmbng996",
+        "field_description": "Quantidade (Metros)",
+        "ttype": "float"
+      },
+      {
+        "id": 22262,
+        "name": "x_studio_related_field_5se_1jmbn02g7",
+        "field_description": "Produto",
+        "ttype": "many2one"
+      },
+      {
+        "id": 28915,
+        "name": "x_studio_resposta_financeiro",
+        "field_description": "Resposta (Financeiro)",
+        "ttype": "html"
+      },
+      {
+        "id": 26476,
+        "name": "x_studio_solicitacao_cliente",
+        "field_description": "Solicitação Cliente: ",
+        "ttype": "char"
+      },
+      {
+        "id": 22268,
+        "name": "x_studio_tipo_de_produtovenda",
+        "field_description": "Tipo de Produto/Venda",
+        "ttype": "selection"
+      }
+    ],
+    "lost_reasons": [
+      {
+        "id": 1,
+        "name": "Too expensive"
+      },
+      {
+        "id": 2,
+        "name": "We don't have people/skills"
+      },
+      {
+        "id": 3,
+        "name": "Not enough stock"
+      }
+    ]
   },
   "sales": {
-    "so_count": 0,
+    "so_count": 99919,
     "so_states": {
-      "draft": 0,
-      "sent": 0,
-      "sale": 0,
+      "draft": 99586,
+      "sent": 5,
+      "sale": 316,
       "done": 0,
-      "cancel": 0
+      "cancel": 12
     },
-    "studio_fields_so": [],
-    "studio_fields_sol": [],
-    "pricelists": [],
-    "quotation_templates": []
+    "studio_fields_so": [
+      {
+        "id": 26796,
+        "name": "x_studio_aliquota_destino",
+        "field_description": "aliquota_destino",
+        "ttype": "float"
+      },
+      {
+        "id": 26798,
+        "name": "x_studio_aliquota_interestadual",
+        "field_description": "aliquota_interestadual",
+        "ttype": "float"
+      },
+      {
+        "id": 28996,
+        "name": "x_studio_anexo_oc_venda",
+        "field_description": "Anexo OC",
+        "ttype": "binary"
+      },
+      {
+        "id": 28998,
+        "name": "x_studio_anexo_oc_venda_fn",
+        "field_description": "Nome do Arquivo da OC",
+        "ttype": "char"
+      },
+      {
+        "id": 29000,
+        "name": "x_studio_arquivo_assinado",
+        "field_description": "Arquivo Assinado (Fabricação)",
+        "ttype": "binary"
+      },
+      {
+        "id": 29002,
+        "name": "x_studio_arquivo_assinado_filename",
+        "field_description": "Nome do Arquivo Assinado",
+        "ttype": "char"
+      },
+      {
+        "id": 29118,
+        "name": "x_studio_cartao_cnpj",
+        "field_description": "New Texto",
+        "ttype": "char"
+      },
+      {
+        "id": 29120,
+        "name": "x_studio_cartao_cnpj_1",
+        "field_description": "Cartão CNPJ",
+        "ttype": "binary"
+      },
+      {
+        "id": 29124,
+        "name": "x_studio_contrato_social",
+        "field_description": "Contrato Social",
+        "ttype": "binary"
+      },
+      {
+        "id": 28899,
+        "name": "x_studio_detector_altprecos",
+        "field_description": "Detector alt/preços",
+        "ttype": "boolean"
+      },
+      {
+        "id": 29122,
+        "name": "x_studio_endereco_completo",
+        "field_description": "Endereço Completo",
+        "ttype": "char"
+      },
+      {
+        "id": 28931,
+        "name": "x_studio_existe_solicitacao_em_aberto",
+        "field_description": "Existe Solicitação em Aberto?",
+        "ttype": "boolean"
+      },
+      {
+        "id": 26486,
+        "name": "x_studio_forma_de_pagamento",
+        "field_description": "Forma de Pagamento",
+        "ttype": "selection"
+      },
+      {
+        "id": 27587,
+        "name": "x_studio_historico_bi",
+        "field_description": "Histórico bi",
+        "ttype": "text"
+      },
+      {
+        "id": 27591,
+        "name": "x_studio_identificacao_1",
+        "field_description": "Identificação 1",
+        "ttype": "selection"
+      },
+      {
+        "id": 27593,
+        "name": "x_studio_identificacao_2",
+        "field_description": "Identificação 2",
+        "ttype": "selection"
+      },
+      {
+        "id": 27627,
+        "name": "x_studio_identificacao_3",
+        "field_description": "Identificação 3",
+        "ttype": "selection"
+      },
+      {
+        "id": 27629,
+        "name": "x_studio_identificacao_4",
+        "field_description": "Identificação 4",
+        "ttype": "selection"
+      },
+      {
+        "id": 26806,
+        "name": "x_studio_impostos_aplicados",
+        "field_description": "Imposto(s) Aplicado(s):",
+        "ttype": "html"
+      },
+      {
+        "id": 29004,
+        "name": "x_studio_libera_cancel_base44",
+        "field_description": "Liberação de Cancelamento (Base44)",
+        "ttype": "boolean"
+      },
+      {
+        "id": 26819,
+        "name": "x_studio_link_assinatura",
+        "field_description": "Link para Assinatura:",
+        "ttype": "char"
+      },
+      {
+        "id": 27579,
+        "name": "x_studio_mini_bi",
+        "field_description": "Mini bi",
+        "ttype": "html"
+      },
+      {
+        "id": 27280,
+        "name": "x_studio_motorista",
+        "field_description": "Motorista",
+        "ttype": "selection"
+      },
+      {
+        "id": 29006,
+        "name": "x_studio_numero_oc_venda",
+        "field_description": "Número OC",
+        "ttype": "char"
+      },
+      {
+        "id": 26825,
+        "name": "x_studio_opcoes_de_entrega",
+        "field_description": "Opções de Entrega",
+        "ttype": "selection"
+      },
+      {
+        "id": 29126,
+        "name": "x_studio_pedido_de_venda",
+        "field_description": "Pedido de Venda",
+        "ttype": "char"
+      },
+      {
+        "id": 27157,
+        "name": "x_studio_peso_total",
+        "field_description": "Peso Total",
+        "ttype": "float"
+      },
+      {
+        "id": 26817,
+        "name": "x_studio_preco_base_sem_difal",
+        "field_description": "preco_base_sem_difal",
+        "ttype": "monetary"
+      },
+      {
+        "id": 22714,
+        "name": "x_studio_related_field_18q_1jmtsti34",
+        "field_description": "Medidas Técnicas",
+        "ttype": "html"
+      },
+      {
+        "id": 22710,
+        "name": "x_studio_related_field_1jm_1jmtss8su",
+        "field_description": "Produto",
+        "ttype": "many2one"
+      },
+      {
+        "id": 28919,
+        "name": "x_studio_related_field_1ul_1k32icjt7_filename",
+        "field_description": "x_studio_related_field_1ul_1k32icjt7 Filename",
+        "ttype": "char"
+      },
+      {
+        "id": 27617,
+        "name": "x_studio_related_field_311_1k264f31d",
+        "field_description": "Anexo 6",
+        "ttype": "binary"
+      },
+      {
+        "id": 27611,
+        "name": "x_studio_related_field_3v2_1k264bd31",
+        "field_description": "Anexo 3",
+        "ttype": "binary"
+      },
+      {
+        "id": 27296,
+        "name": "x_studio_related_field_4lu_1jub9afh9",
+        "field_description": "Status de Entrega TE",
+        "ttype": "html"
+      },
+      {
+        "id": 22708,
+        "name": "x_studio_related_field_4om_1jmtsrghf",
+        "field_description": "Tipo de Produto/Venda",
+        "ttype": "selection"
+      },
+      {
+        "id": 27625,
+        "name": "x_studio_related_field_4qt_1k264il8m",
+        "field_description": "Anexo 10",
+        "ttype": "binary"
+      },
+      {
+        "id": 27621,
+        "name": "x_studio_related_field_51j_1k264gu06",
+        "field_description": "Anexo 8",
+        "ttype": "binary"
+      },
+      {
+        "id": 28925,
+        "name": "x_studio_related_field_5fe_1k32ikg1s_filename",
+        "field_description": "x_studio_related_field_5fe_1k32ikg1s Filename",
+        "ttype": "char"
+      },
+      {
+        "id": 22720,
+        "name": "x_studio_related_field_5u8_1jmtt10ln",
+        "field_description": "Anexo 2",
+        "ttype": "binary"
+      },
+      {
+        "id": 22722,
+        "name": "x_studio_related_field_5u8_1jmtt10ln_filename",
+        "field_description": "x_studio_related_field_5u8_1jmtt10ln Filename",
+        "ttype": "char"
+      },
+      {
+        "id": 22716,
+        "name": "x_studio_related_field_64q_1jmtsvm3o",
+        "field_description": "Anexo 1",
+        "ttype": "binary"
+      },
+      {
+        "id": 22718,
+        "name": "x_studio_related_field_64q_1jmtsvm3o_filename",
+        "field_description": "x_studio_related_field_64q_1jmtsvm3o Filename",
+        "ttype": "char"
+      },
+      {
+        "id": 27619,
+        "name": "x_studio_related_field_68a_1k264g3u0",
+        "field_description": "Anexo 7",
+        "ttype": "binary"
+      },
+      {
+        "id": 27623,
+        "name": "x_studio_related_field_6fs_1k264hsn1",
+        "field_description": "Anexo 9",
+        "ttype": "binary"
+      },
+      {
+        "id": 27613,
+        "name": "x_studio_related_field_6ip_1k264cf01",
+        "field_description": "Anexo 4",
+        "ttype": "binary"
+      },
+      {
+        "id": 28954,
+        "name": "x_studio_related_field_7qo_1k37utkte",
+        "field_description": "Anexo OC:",
+        "ttype": "binary"
+      },
+      {
+        "id": 28956,
+        "name": "x_studio_related_field_7qo_1k37utkte_filename",
+        "field_description": "x_studio_related_field_7qo_1k37utkte Filename",
+        "ttype": "char"
+      },
+      {
+        "id": 22712,
+        "name": "x_studio_related_field_841_1jmtst07u",
+        "field_description": "Quantidade (Metros)",
+        "ttype": "float"
+      },
+      {
+        "id": 22706,
+        "name": "x_studio_related_field_8ga_1jmtsqifc",
+        "field_description": "Produto Possui Cadastro?",
+        "ttype": "selection"
+      },
+      {
+        "id": 28950,
+        "name": "x_studio_related_field_9cg_1k37unq6t",
+        "field_description": "Anexo OC:",
+        "ttype": "binary"
+      }
+    ],
+    "studio_fields_sol": [
+      {
+        "id": 27637,
+        "name": "x_studio_fabricar",
+        "field_description": "Fabricar",
+        "ttype": "boolean"
+      },
+      {
+        "id": 28937,
+        "name": "x_studio_fabricavel_produto",
+        "field_description": "Fabricável? Sim/não (do produto)",
+        "ttype": "selection"
+      },
+      {
+        "id": 27631,
+        "name": "x_studio_foto",
+        "field_description": "Foto",
+        "ttype": "binary"
+      },
+      {
+        "id": 28897,
+        "name": "x_studio_local_armazenagem",
+        "field_description": "Local Armazenagem",
+        "ttype": "char"
+      },
+      {
+        "id": 28895,
+        "name": "x_studio_margem_",
+        "field_description": "Margem %",
+        "ttype": "float"
+      },
+      {
+        "id": 27163,
+        "name": "x_studio_peso_total_1",
+        "field_description": "Peso Total",
+        "ttype": "float"
+      },
+      {
+        "id": 26804,
+        "name": "x_studio_preco_base_sem_difal",
+        "field_description": "preco_base_sem_difal",
+        "ttype": "monetary"
+      },
+      {
+        "id": 29130,
+        "name": "x_studio_preco_total",
+        "field_description": "Preço Total",
+        "ttype": "float"
+      },
+      {
+        "id": 27155,
+        "name": "x_studio_related_field_5se_1jshsqjt6",
+        "field_description": "Peso",
+        "ttype": "float"
+      },
+      {
+        "id": 27812,
+        "name": "x_studio_related_field_8s3_1k2gdpaj7",
+        "field_description": "Estoque Qtde",
+        "ttype": "float"
+      }
+    ],
+    "pricelists": [
+      {
+        "id": 2,
+        "name": "Padrão"
+      },
+      {
+        "id": 3,
+        "name": "Padrão"
+      },
+      {
+        "id": 4,
+        "name": "Padrão"
+      }
+    ],
+    "quot_templates": []
   },
   "finance": {
-    "inv_count": 0,
+    "inv_out": 10,
+    "inv_in": 1,
     "inv_states": {
-      "draft": 0,
-      "posted": 0,
-      "cancel": 0
+      "draft": 1,
+      "posted": 1,
+      "cancel": 8
     },
-    "pay_terms": [],
-    "journals": [],
-    "studio_fields": [],
-    "nfe_pendente": 0,
-    "nfe_autorizada": 0,
-    "nfe_erro": 0,
-    "nfe_cancelando": 0,
+    "pay_terms": [
+      {
+        "id": 1,
+        "name": "Immediate Payment"
+      },
+      {
+        "id": 2,
+        "name": "15 Days"
+      },
+      {
+        "id": 3,
+        "name": "21 Days"
+      },
+      {
+        "id": 4,
+        "name": "30 Days"
+      },
+      {
+        "id": 5,
+        "name": "45 Days"
+      },
+      {
+        "id": 6,
+        "name": "End of Following Month"
+      },
+      {
+        "id": 7,
+        "name": "10 Days after End of Next Month"
+      },
+      {
+        "id": 8,
+        "name": "30% Now, Balance 60 Days"
+      },
+      {
+        "id": 9,
+        "name": "2/7 Net 30"
+      },
+      {
+        "id": 10,
+        "name": "90 days, on the 10th"
+      }
+    ],
+    "journals": [
+      {
+        "id": 16,
+        "name": "Sales",
+        "type": "sale"
+      },
+      {
+        "id": 17,
+        "name": "Compras e Despesas",
+        "type": "purchase"
+      },
+      {
+        "id": 21,
+        "name": "Banco Itaú",
+        "type": "bank"
+      }
+    ],
+    "studio_fields": [
+      {
+        "id": 29132,
+        "name": "x_studio_boleto_cancelado",
+        "field_description": "Boleto Cancelado",
+        "ttype": "boolean"
+      },
+      {
+        "id": 26491,
+        "name": "x_studio_forma_de_pagamento",
+        "field_description": "Forma de Pagamento",
+        "ttype": "selection"
+      },
+      {
+        "id": 26495,
+        "name": "x_studio_itau_boleto_id",
+        "field_description": "ID Boleto:",
+        "ttype": "char"
+      },
+      {
+        "id": 26959,
+        "name": "x_studio_itau_boletos_html",
+        "field_description": "Boletos e QRCode",
+        "ttype": "html"
+      },
+      {
+        "id": 26528,
+        "name": "x_studio_itau_codigo_barras",
+        "field_description": "Cód Barras Boleto 1:",
+        "ttype": "char"
+      },
+      {
+        "id": 26524,
+        "name": "x_studio_itau_linha_digitavel",
+        "field_description": "Linha Digit. Boleto 1:",
+        "ttype": "char"
+      },
+      {
+        "id": 26532,
+        "name": "x_studio_itau_link_id",
+        "field_description": "ID Link:",
+        "ttype": "char"
+      },
+      {
+        "id": 26540,
+        "name": "x_studio_itau_link_status",
+        "field_description": "Link Status:",
+        "ttype": "selection"
+      },
+      {
+        "id": 26536,
+        "name": "x_studio_itau_link_url",
+        "field_description": "URL Boleto 1:",
+        "ttype": "char"
+      },
+      {
+        "id": 26552,
+        "name": "x_studio_itau_links_email_html",
+        "field_description": "Resposta Itaú:",
+        "ttype": "html"
+      },
+      {
+        "id": 26966,
+        "name": "x_studio_itau_nosso_numero",
+        "field_description": "itau_nosso_numero",
+        "ttype": "char"
+      },
+      {
+        "id": 26512,
+        "name": "x_studio_itau_nsu",
+        "field_description": "itau_nsu",
+        "ttype": "char"
+      },
+      {
+        "id": 26499,
+        "name": "x_studio_itau_pix_copia_cola",
+        "field_description": "Cód PIX Copia e Cola:",
+        "ttype": "char"
+      },
+      {
+        "id": 26544,
+        "name": "x_studio_itau_resposta_json",
+        "field_description": "itau_resposta_json",
+        "ttype": "text"
+      },
+      {
+        "id": 26516,
+        "name": "x_studio_itau_situacao",
+        "field_description": "Situação:",
+        "ttype": "selection"
+      },
+      {
+        "id": 26507,
+        "name": "x_studio_itau_tid",
+        "field_description": "itau_tid",
+        "ttype": "char"
+      },
+      {
+        "id": 26520,
+        "name": "x_studio_itau_tipo_pagamento",
+        "field_description": "Tipo Pagamento:",
+        "ttype": "selection"
+      },
+      {
+        "id": 26503,
+        "name": "x_studio_itau_txid_1",
+        "field_description": "itau_txid",
+        "ttype": "char"
+      },
+      {
+        "id": 27298,
+        "name": "x_studio_motorista",
+        "field_description": "Motorista",
+        "ttype": "char"
+      },
+      {
+        "id": 27302,
+        "name": "x_studio_nfe_chave",
+        "field_description": "nfe_chave",
+        "ttype": "char"
+      },
+      {
+        "id": 27312,
+        "name": "x_studio_nfe_protocolo",
+        "field_description": "nfe_protocolo",
+        "ttype": "char"
+      },
+      {
+        "id": 27308,
+        "name": "x_studio_nfe_status",
+        "field_description": "nfe_status",
+        "ttype": "char"
+      },
+      {
+        "id": 27316,
+        "name": "x_studio_nfse_numero",
+        "field_description": "nfse_numero",
+        "ttype": "char"
+      },
+      {
+        "id": 27320,
+        "name": "x_studio_nfse_status",
+        "field_description": "nfse_status",
+        "ttype": "char"
+      },
+      {
+        "id": 26488,
+        "name": "x_studio_selection_field_3lc_1jnulcs2k",
+        "field_description": "New Seleção",
+        "ttype": "selection"
+      },
+      {
+        "id": 27292,
+        "name": "x_studio_status_de_entrega_te",
+        "field_description": "Status de Entrega TE",
+        "ttype": "html"
+      },
+      {
+        "id": 27151,
+        "name": "x_studio_studio_itau_link_cartao",
+        "field_description": "Link Cartão:",
+        "ttype": "html"
+      },
+      {
+        "id": 26548,
+        "name": "x_studio_studio_itau_resumo",
+        "field_description": "Resumo:",
+        "ttype": "char"
+      },
+      {
+        "id": 27244,
+        "name": "x_studio_te_order_id",
+        "field_description": "te_order_id",
+        "ttype": "char"
+      },
+      {
+        "id": 27252,
+        "name": "x_studio_te_situation",
+        "field_description": "te_situation",
+        "ttype": "char"
+      },
+      {
+        "id": 27256,
+        "name": "x_studio_te_sync",
+        "field_description": "te_sync",
+        "ttype": "boolean"
+      },
+      {
+        "id": 27248,
+        "name": "x_studio_te_tracking_cod",
+        "field_description": "te_tracking_cod",
+        "ttype": "char"
+      }
+    ],
+    "nfe_pend": 0,
+    "nfe_auth": 0,
+    "nfe_err": 1,
+    "nfe_canc": 0,
     "has_boleto": 0,
     "has_pix": 0,
-    "in_inv_count": 0
+    "credit_notes": 0,
+    "payments": 1
   },
   "purchase": {
-    "po_count": 0,
+    "po_count": 1,
     "po_states": {
-      "draft": 0,
+      "draft": 1,
       "sent": 0,
       "purchase": 0,
       "done": 0,
       "cancel": 0
     },
-    "vendors": 0,
-    "receptions": 0
+    "vendors": 2,
+    "receptions": 7,
+    "studio_fields": [
+      {
+        "id": 27242,
+        "name": "x_studio_te_last_sync",
+        "field_description": "te_last_sync",
+        "ttype": "date"
+      },
+      {
+        "id": 27236,
+        "name": "x_studio_te_order_id",
+        "field_description": "te_order_id",
+        "ttype": "char"
+      },
+      {
+        "id": 27240,
+        "name": "x_studio_te_situation",
+        "field_description": "te_situation",
+        "ttype": "selection"
+      },
+      {
+        "id": 27234,
+        "name": "x_studio_te_sync",
+        "field_description": "te_sync",
+        "ttype": "boolean"
+      },
+      {
+        "id": 27238,
+        "name": "x_studio_te_tracking_code",
+        "field_description": "te_tracking_code",
+        "ttype": "char"
+      }
+    ]
   },
-  "mrp": "not_available",
+  "mrp": {
+    "mo_count": 645,
+    "mo_states": {
+      "draft": 115,
+      "confirmed": 280,
+      "progress": 0,
+      "done": 5,
+      "cancel": 245
+    },
+    "bom_count": 1157,
+    "workcenters": []
+  },
   "stock": {
-    "products": 0,
-    "products_tmpl": 0,
-    "locations": [],
-    "warehouses": [],
-    "picking_count": 0,
-    "quants": 0,
-    "categories": [],
+    "products": 2154,
+    "products_tmpl": 2154,
+    "locations": [
+      {
+        "id": 52,
+        "name": "Estoque",
+        "complete_name": "IVP/Estoque"
+      },
+      {
+        "id": 44,
+        "name": "Estoque",
+        "complete_name": "PG/Estoque"
+      },
+      {
+        "id": 36,
+        "name": "Estoque",
+        "complete_name": "PIN/Estoque"
+      },
+      {
+        "id": 5,
+        "name": "Estoque",
+        "complete_name": "WH/Estoque"
+      },
+      {
+        "id": 59,
+        "name": "Lote 1",
+        "complete_name": "WH/Estoque/Lote 1"
+      },
+      {
+        "id": 60,
+        "name": "Lote 2",
+        "complete_name": "WH/Estoque/Lote 2"
+      },
+      {
+        "id": 61,
+        "name": "Lote 3",
+        "complete_name": "WH/Estoque/Lote 3"
+      },
+      {
+        "id": 62,
+        "name": "Lote 4",
+        "complete_name": "WH/Estoque/Lote 4"
+      }
+    ],
+    "warehouses": [
+      {
+        "id": 1,
+        "name": "ajlferroeaco"
+      },
+      {
+        "id": 3,
+        "name": "AJL - Pinhais"
+      },
+      {
+        "id": 4,
+        "name": "AJL - Ponta Grossa"
+      },
+      {
+        "id": 5,
+        "name": "AJL - Ivaiporã"
+      }
+    ],
+    "pickings": 587,
+    "quants": 2,
+    "categories": [
+      {
+        "id": 4,
+        "name": "Deliveries"
+      },
+      {
+        "id": 2,
+        "name": "Expenses"
+      },
+      {
+        "id": 52,
+        "name": "Goods"
+      },
+      {
+        "id": 48,
+        "name": "Grupo Acessórios"
+      },
+      {
+        "id": 17,
+        "name": "Grupo Acessórios / Diversos"
+      },
+      {
+        "id": 51,
+        "name": "Grupo Bobinas"
+      },
+      {
+        "id": 18,
+        "name": "Grupo Bobinas / Bobinas"
+      },
+      {
+        "id": 50,
+        "name": "Grupo Chapas"
+      },
+      {
+        "id": 16,
+        "name": "Grupo Chapas / Chapas"
+      },
+      {
+        "id": 41,
+        "name": "Grupo Laminados"
+      },
+      {
+        "id": 42,
+        "name": "Grupo Perfis"
+      },
+      {
+        "id": 49,
+        "name": "Grupo Telhas"
+      },
+      {
+        "id": 19,
+        "name": "Grupo Telhas / Telhas Telhas"
+      },
+      {
+        "id": 43,
+        "name": "Grupo Tubos"
+      },
+      {
+        "id": 3,
+        "name": "Services"
+      }
+    ],
     "type_counts": {
-      "consu": 0,
-      "service": 0,
+      "consu": 2141,
+      "service": 13,
       "product": 0
     },
-    "tracking_products": 0
+    "tracking": 137,
+    "stock_moves": 6725,
+    "inv_adj": 0,
+    "studio_fields": [
+      {
+        "id": 29137,
+        "name": "x_studio_aliquota_ipi",
+        "field_description": "Aliquota IPI (%)",
+        "ttype": "float"
+      },
+      {
+        "id": 27344,
+        "name": "x_studio_aliquota_iss",
+        "field_description": "aliquota_iss",
+        "ttype": "float"
+      },
+      {
+        "id": 27340,
+        "name": "x_studio_c_nbs",
+        "field_description": "c_nbs",
+        "ttype": "char"
+      },
+      {
+        "id": 27336,
+        "name": "x_studio_c_trib_nac",
+        "field_description": "c_trib_nac",
+        "ttype": "char"
+      },
+      {
+        "id": 29135,
+        "name": "x_studio_cst_ipi",
+        "field_description": "CST IPI",
+        "ttype": "char"
+      },
+      {
+        "id": 28936,
+        "name": "x_studio_fabricavel",
+        "field_description": "Fabricável? Sim/não",
+        "ttype": "selection"
+      },
+      {
+        "id": 27348,
+        "name": "x_studio_ibge_code",
+        "field_description": "ibge_code",
+        "ttype": "char"
+      },
+      {
+        "id": 26815,
+        "name": "x_studio_medidas",
+        "field_description": "Medidas",
+        "ttype": "char"
+      },
+      {
+        "id": 26811,
+        "name": "x_studio_natureza_de_uso",
+        "field_description": "Natureza de uso:",
+        "ttype": "selection"
+      },
+      {
+        "id": 29250,
+        "name": "x_studio_pesquisa_avancada",
+        "field_description": "Pesquisa Avançada",
+        "ttype": "char"
+      },
+      {
+        "id": 27830,
+        "name": "x_studio_preco_solicitado",
+        "field_description": "Solicitar Novo preço",
+        "ttype": "monetary"
+      },
+      {
+        "id": 29226,
+        "name": "x_studio_preco_total_imposto_aplicado",
+        "field_description": "Preço Total (Imposto aplicado)",
+        "ttype": "monetary"
+      },
+      {
+        "id": 26834,
+        "name": "x_studio_quantidade",
+        "field_description": "Quantidade (Cotação)",
+        "ttype": "char"
+      }
+    ]
   },
   "integrations": {
-    "server_actions": [],
-    "crons": []
+    "server_actions": [
+      {
+        "id": 948,
+        "name": "Merge RFQs",
+        "state": "code",
+        "model_id": [
+          981,
+          "Purchase Order"
+        ]
+      },
+      {
+        "id": 1359,
+        "name": "Print Payment Receipt",
+        "state": "code",
+        "model_id": [
+          486,
+          "Payment"
+        ]
+      },
+      {
+        "id": 438,
+        "name": "Send an email",
+        "state": "code",
+        "model_id": [
+          617,
+          "Sales Order"
+        ]
+      },
+      {
+        "id": 218,
+        "name": "",
+        "state": "code",
+        "model_id": [
+          454,
+          "Payment Provider"
+        ]
+      },
+      {
+        "id": 269,
+        "name": "(Un)Block Payment",
+        "state": "code",
+        "model_id": [
+          462,
+          "Journal Entry"
+        ]
+      },
+      {
+        "id": 324,
+        "name": "(Un)Group lines by tax",
+        "state": "code",
+        "model_id": [
+          462,
+          "Journal Entry"
+        ]
+      },
+      {
+        "id": 399,
+        "name": "AI Agent Sources: Process Sources",
+        "state": "code",
+        "model_id": [
+          602,
+          "AI Agent Source"
+        ]
+      },
+      {
+        "id": 893,
+        "name": "AI Documents: Sort documents with AI",
+        "state": "code",
+        "model_id": [
+          939,
+          "Document"
+        ]
+      },
+      {
+        "id": 398,
+        "name": "AI Embedding: Generate Embeddings",
+        "state": "code",
+        "model_id": [
+          603,
+          "Attachment Chunks Embedding"
+        ]
+      },
+      {
+        "id": 400,
+        "name": "AI Fields: Compute AI fields",
+        "state": "code",
+        "model_id": [
+          4,
+          "Field"
+        ]
+      },
+      {
+        "id": 892,
+        "name": "AI: Add Tags",
+        "state": "code",
+        "model_id": [
+          939,
+          "Document"
+        ]
+      },
+      {
+        "id": 393,
+        "name": "AI: Adjust Search",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 1376,
+        "name": "AI: Apply HTML to Page",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 396,
+        "name": "AI: Compute Date",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 392,
+        "name": "AI: Compute Report Measures",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 1354,
+        "name": "AI: Create Records",
+        "state": "code",
+        "model_id": [
+          2725,
+          "AI Session"
+        ]
+      },
+      {
+        "id": 1355,
+        "name": "AI: Generate an Image",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 387,
+        "name": "AI: Get Fields",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 386,
+        "name": "AI: Get Menu Details",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 1373,
+        "name": "AI: Get Snippets",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 1375,
+        "name": "AI: Get user image URLs",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 1352,
+        "name": "AI: Load Topics",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 891,
+        "name": "AI: Move To Folder",
+        "state": "code",
+        "model_id": [
+          939,
+          "Document"
+        ]
+      },
+      {
+        "id": 391,
+        "name": "AI: Open Menu Graph",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 389,
+        "name": "AI: Open Menu Kanban",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 388,
+        "name": "AI: Open Menu List",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 390,
+        "name": "AI: Open Menu Pivot",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 1377,
+        "name": "AI: Read Custom CSS",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 395,
+        "name": "AI: Read group",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 1351,
+        "name": "AI: Run view action",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 394,
+        "name": "AI: Search",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 1374,
+        "name": "AI: Search Images",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 1353,
+        "name": "AI: Update Records",
+        "state": "code",
+        "model_id": [
+          2725,
+          "AI Session"
+        ]
+      },
+      {
+        "id": 1356,
+        "name": "AI: Web Search",
+        "state": "code",
+        "model_id": [
+          2725,
+          "AI Session"
+        ]
+      },
+      {
+        "id": 1378,
+        "name": "AI: Write Custom CSS",
+        "state": "code",
+        "model_id": [
+          601,
+          "AI Agent"
+        ]
+      },
+      {
+        "id": 1410,
+        "name": "AJL - Apaga OF rascunho órfã ao excluir linha (Cotação)",
+        "state": "code",
+        "model_id": [
+          618,
+          "Sales Order Line"
+        ]
+      },
+      {
+        "id": 1412,
+        "name": "AJL - Aprovação: grava Senha de Liberação no pedido",
+        "state": "code",
+        "model_id": [
+          1124,
+          "Approver"
+        ]
+      },
+      {
+        "id": 1426,
+        "name": "AJL - Assinatura portal (ação)",
+        "state": "code",
+        "model_id": [
+          30,
+          "Attachment"
+        ]
+      },
+      {
+        "id": 1414,
+        "name": "AJL - Auto-envio Solicitação de Senha (nunca A enviar)",
+        "state": "code",
+        "model_id": [
+          1128,
+          "Approval Request"
+        ]
+      },
+      {
+        "id": 1439,
+        "name": "AJL - Auto-marca Fabricar em item fabricável (ação)",
+        "state": "code",
+        "model_id": [
+          618,
+          "Sales Order Line"
+        ]
+      },
+      {
+        "id": 1407,
+        "name": "AJL - Base44: libera cancelamento do pedido",
+        "state": "code",
+        "model_id": [
+          617,
+          "Sales Order"
+        ]
+      },
+      {
+        "id": 1406,
+        "name": "AJL - Bloqueio cancelamento c/ OF em andamento (Pedido)",
+        "state": "code",
+        "model_id": [
+          617,
+          "Sales Order"
+        ]
+      },
+      {
+        "id": 1417,
+        "name": "AJL - Detector OC upload (ação)",
+        "state": "code",
+        "model_id": [
+          851,
+          "Lead"
+        ]
+      },
+      {
+        "id": 1416,
+        "name": "AJL - Detector assinatura upload (ação)",
+        "state": "code",
+        "model_id": [
+          617,
+          "Sales Order"
+        ]
+      },
+      {
+        "id": 1440,
+        "name": "AJL - Guarda Fabricar: fabricável sem estoque não desmarca (ação)",
+        "state": "code",
+        "model_id": [
+          618,
+          "Sales Order Line"
+        ]
+      },
+      {
+        "id": 1404,
+        "name": "AJL - Guarda assinatura (ação)",
+        "state": "code",
+        "model_id": [
+          617,
+          "Sales Order"
+        ]
+      },
+      {
+        "id": 1413,
+        "name": "AJL - Guarda senha de liberação (só aprovador/admin)",
+        "state": "code",
+        "model_id": [
+          617,
+          "Sales Order"
+        ]
+      },
+      {
+        "id": 1403,
+        "name": "AJL - Liberação da confirmação: OC/assinatura + senha Fabricar (Pedido)",
+        "state": "code",
+        "model_id": [
+          617,
+          "Sales Order"
+        ]
+      },
+      {
+        "id": 1408,
+        "name": "AJL - Recria OFs rascunho ao voltar p/ cotação (Pedido)",
+        "state": "code",
+        "model_id": [
+          617,
+          "Sales Order"
+        ]
+      },
+      {
+        "id": 1415,
+        "name": "AJL - Recusa senha: avisa vendedor (ação)",
+        "state": "code",
+        "model_id": [
+          1124,
+          "Approver"
+        ]
+      }
+    ],
+    "crons": [
+      {
+        "id": 32,
+        "name": "AI Agent Sources: Process Sources",
+        "active": true,
+        "interval_number": 9999,
+        "interval_type": "months",
+        "model_id": [
+          602,
+          "AI Agent Source"
+        ]
+      },
+      {
+        "id": 69,
+        "name": "AI Documents: Sort documents with AI",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          939,
+          "Document"
+        ]
+      },
+      {
+        "id": 31,
+        "name": "AI Embedding: Generate Embeddings",
+        "active": true,
+        "interval_number": 9999,
+        "interval_type": "months",
+        "model_id": [
+          603,
+          "Attachment Chunks Embedding"
+        ]
+      },
+      {
+        "id": 33,
+        "name": "AI Fields: Compute AI fields",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          4,
+          "Field"
+        ]
+      },
+      {
+        "id": 22,
+        "name": "Account: Journal online sync",
+        "active": true,
+        "interval_number": 12,
+        "interval_type": "hours",
+        "model_id": [
+          472,
+          "Journal"
+        ]
+      },
+      {
+        "id": 25,
+        "name": "Account: Journal online sync cleanup unused connections",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          542,
+          "Bank Connection"
+        ]
+      },
+      {
+        "id": 24,
+        "name": "Account: Journal online sync reminder",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          472,
+          "Journal"
+        ]
+      },
+      {
+        "id": 18,
+        "name": "Account: Post draft entries with auto_post enabled and accounting date up to today",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          462,
+          "Journal Entry"
+        ]
+      },
+      {
+        "id": 43,
+        "name": "Account: Update payment status",
+        "active": true,
+        "interval_number": 6,
+        "interval_type": "hours",
+        "model_id": [
+          542,
+          "Bank Connection"
+        ]
+      },
+      {
+        "id": 62,
+        "name": "Automation Rules: check and execute",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "minutes",
+        "model_id": [
+          849,
+          "Automation Rule"
+        ]
+      },
+      {
+        "id": 37,
+        "name": "Base VAT: Sync updates from IAP VIES",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          90,
+          "Contact"
+        ]
+      },
+      {
+        "id": 1,
+        "name": "Base: Auto-vacuum internal data",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          41,
+          "Automatic Vacuum"
+        ]
+      },
+      {
+        "id": 2,
+        "name": "Base: Portal Users Deletion",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          111,
+          "Users Deletion Request"
+        ]
+      },
+      {
+        "id": 65,
+        "name": "CRM: enrich leads (IAP)",
+        "active": true,
+        "interval_number": 24,
+        "interval_type": "hours",
+        "model_id": [
+          851,
+          "Lead"
+        ]
+      },
+      {
+        "id": 44,
+        "name": "Calendar: Event Reminder",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          668,
+          "Event Alarm Manager"
+        ]
+      },
+      {
+        "id": 82,
+        "name": "Create snapshots of accounting reports",
+        "active": true,
+        "interval_number": 9999,
+        "interval_type": "months",
+        "model_id": [
+          6917,
+          "Accounting Report Snapshot"
+        ]
+      },
+      {
+        "id": 21,
+        "name": "Currency: rate update",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          98,
+          "Company"
+        ]
+      },
+      {
+        "id": 75,
+        "name": "Data Cleaning: Clean Records",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          1107,
+          "Cleaning Model"
+        ]
+      },
+      {
+        "id": 77,
+        "name": "Data Merge: Cleanup Records",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          1112,
+          "Deduplication Group"
+        ]
+      },
+      {
+        "id": 76,
+        "name": "Data Merge: Find Duplicate Records",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          1110,
+          "Deduplication Model"
+        ]
+      },
+      {
+        "id": 74,
+        "name": "Data Recycle: Clean Records",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          1105,
+          "Recycling Model"
+        ]
+      },
+      {
+        "id": 16,
+        "name": "Digest Emails",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          450,
+          "Digest"
+        ]
+      },
+      {
+        "id": 54,
+        "name": "Disable unused snippets assets",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "weeks",
+        "model_id": [
+          783,
+          "Website"
+        ]
+      },
+      {
+        "id": 11,
+        "name": "Discuss: channel member unmute",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          227,
+          "Channel Member"
+        ]
+      },
+      {
+        "id": 68,
+        "name": "Documents: Access Tracking",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "months",
+        "model_id": [
+          938,
+          "Document Access Tracking"
+        ]
+      },
+      {
+        "id": 78,
+        "name": "Expense OCR: Update All Status",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          1116,
+          "Expense"
+        ]
+      },
+      {
+        "id": 79,
+        "name": "Expense OCR: Validate Expenses",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          1116,
+          "Expense"
+        ]
+      },
+      {
+        "id": 45,
+        "name": "Gamification: Goal Challenge Check",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "days",
+        "model_id": [
+          675,
+          "Gamification Challenge"
+        ]
+      },
+      {
+        "id": 46,
+        "name": "Gamification: Karma tracking consolidation",
+        "active": true,
+        "interval_number": 1,
+        "interval_type": "months",
+        "model_id": [
+          680,
+          "Track Karma Changes"
+        ]
+      },
+      {
+        "id": 83,
+        "name": "Garbage-collect snapshots of accounting reports",
+        "active": true,
+        "interval_number": 9999,
+        "interval_type": "months",
+        "model_id": [
+          6917,
+          "Accounting Report Snapshot"
+        ]
+      }
+    ]
   },
   "delivery": {
-    "carriers": [],
-    "te_fields": [],
-    "deliveries": 0
+    "carriers": [
+      {
+        "id": 1,
+        "name": "Standard delivery",
+        "delivery_type": "fixed"
+      }
+    ],
+    "te_fields": [
+      {
+        "id": 27244,
+        "name": "x_studio_te_order_id",
+        "field_description": "te_order_id",
+        "ttype": "char"
+      },
+      {
+        "id": 27252,
+        "name": "x_studio_te_situation",
+        "field_description": "te_situation",
+        "ttype": "char"
+      },
+      {
+        "id": 27256,
+        "name": "x_studio_te_sync",
+        "field_description": "te_sync",
+        "ttype": "boolean"
+      },
+      {
+        "id": 27248,
+        "name": "x_studio_te_tracking_cod",
+        "field_description": "te_tracking_cod",
+        "ttype": "char"
+      }
+    ],
+    "deliveries": 580
   },
-  "users": [],
-  "company": []
+  "users": [
+    {
+      "id": 2,
+      "name": "Admin Nytro",
+      "login": "marcus@nytro.com.br",
+      "share": false
+    },
+    {
+      "id": 721,
+      "name": "Adriana",
+      "login": "adriana.maria@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 720,
+      "name": "Adriano",
+      "login": "adriano.klabunde@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 695,
+      "name": "Andreia",
+      "login": "andreia@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 724,
+      "name": "André",
+      "login": "andre@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 693,
+      "name": "Angela",
+      "login": "angela@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 703,
+      "name": "Carlos",
+      "login": "carlos@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 697,
+      "name": "Claudio",
+      "login": "claudio@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 699,
+      "name": "Compras",
+      "login": "compras@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 694,
+      "name": "Débora",
+      "login": "debora@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 6,
+      "name": "Edson",
+      "login": "edson@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 709,
+      "name": "Eliton",
+      "login": "eliton@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 706,
+      "name": "Eron",
+      "login": "eron@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 698,
+      "name": "Franciele",
+      "login": "franciele.lodi@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 711,
+      "name": "Giuliano Gabriel",
+      "login": "giulianogabriel@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 8,
+      "name": "Haianê",
+      "login": "haiane@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 716,
+      "name": "Haime",
+      "login": "haime@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 718,
+      "name": "Hudson",
+      "login": "corte.dobra@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 714,
+      "name": "Jeam",
+      "login": "jean@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 712,
+      "name": "Joice",
+      "login": "joice@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 700,
+      "name": "José",
+      "login": "jose@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 696,
+      "name": "Khamila",
+      "login": "khamila@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 715,
+      "name": "Lara",
+      "login": "lara@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 7,
+      "name": "Leonardo",
+      "login": "leonardo@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 9,
+      "name": "Luana",
+      "login": "luana@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 722,
+      "name": "Lucas Bento",
+      "login": "lucas@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 717,
+      "name": "Marco Viana",
+      "login": "marco.viana@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 710,
+      "name": "Marinho",
+      "login": "marinho@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 708,
+      "name": "Mario",
+      "login": "mario@ajlferroeaco.com.br",
+      "share": false
+    },
+    {
+      "id": 725,
+      "name": "Neto",
+      "login": "geraldo.oliveira@ajlferroeaco.com.br",
+      "share": false
+    }
+  ],
+  "company": [
+    {
+      "id": 1,
+      "name": "AJL COMERCIO ATACADISTA DE FERRAGENS E FERRAMENTAS LTDA",
+      "vat": "22603750000190",
+      "street": "Avenida Juscelino Kubitschek de Oliveira, 7525",
+      "city": "Curitiba",
+      "state_id": [
+        86,
+        "Paraná (BR)"
+      ],
+      "phone": "+55 41 3373-0076",
+      "email": "ajlfer@hotmail.com"
+    },
+    {
+      "id": 4,
+      "name": "AJL - Ivaiporã",
+      "vat": "36524335000156",
+      "street": "AV NATALINO FAUST , 302",
+      "city": false,
+      "state_id": [
+        86,
+        "Paraná (BR)"
+      ],
+      "phone": false,
+      "email": false
+    },
+    {
+      "id": 2,
+      "name": "AJL - Ponta Grossa",
+      "vat": "22603750000352",
+      "street": "RUA TIJUCAS DO SUL 355 - PONTA GROSSA",
+      "city": "Ponta Grossa",
+      "state_id": [
+        86,
+        "Paraná (BR)"
+      ],
+      "phone": "(42) 3226-5590",
+      "email": false
+    },
+    {
+      "id": 3,
+      "name": "AJL - Pinhais",
+      "vat": "02391982000115",
+      "street": "RUA EUCLIDES BANDEIRA 96 - PINHAIS",
+      "city": "Pinhais",
+      "state_id": [
+        86,
+        "Paraná (BR)"
+      ],
+      "phone": "(41) 3142-3478",
+      "email": false
+    }
+  ],
+  "partners": {
+    "total": 16331,
+    "customers": 55,
+    "vendors": 2,
+    "both": 1
+  }
 }
