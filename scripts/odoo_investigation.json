@@ -1,0 +1,82 @@
+{
+  "modules": "access_denied",
+  "crm": {
+    "leads_count": 0,
+    "opps_count": 0,
+    "stages": [],
+    "teams": [],
+    "studio_fields": [],
+    "lost_reasons": []
+  },
+  "sales": {
+    "so_count": 0,
+    "so_states": {
+      "draft": 0,
+      "sent": 0,
+      "sale": 0,
+      "done": 0,
+      "cancel": 0
+    },
+    "studio_fields_so": [],
+    "studio_fields_sol": [],
+    "pricelists": [],
+    "quotation_templates": []
+  },
+  "finance": {
+    "inv_count": 0,
+    "inv_states": {
+      "draft": 0,
+      "posted": 0,
+      "cancel": 0
+    },
+    "pay_terms": [],
+    "journals": [],
+    "studio_fields": [],
+    "nfe_pendente": 0,
+    "nfe_autorizada": 0,
+    "nfe_erro": 0,
+    "nfe_cancelando": 0,
+    "has_boleto": 0,
+    "has_pix": 0,
+    "in_inv_count": 0
+  },
+  "purchase": {
+    "po_count": 0,
+    "po_states": {
+      "draft": 0,
+      "sent": 0,
+      "purchase": 0,
+      "done": 0,
+      "cancel": 0
+    },
+    "vendors": 0,
+    "receptions": 0
+  },
+  "mrp": "not_available",
+  "stock": {
+    "products": 0,
+    "products_tmpl": 0,
+    "locations": [],
+    "warehouses": [],
+    "picking_count": 0,
+    "quants": 0,
+    "categories": [],
+    "type_counts": {
+      "consu": 0,
+      "service": 0,
+      "product": 0
+    },
+    "tracking_products": 0
+  },
+  "integrations": {
+    "server_actions": [],
+    "crons": []
+  },
+  "delivery": {
+    "carriers": [],
+    "te_fields": [],
+    "deliveries": 0
+  },
+  "users": [],
+  "company": []
+}
