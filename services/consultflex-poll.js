@@ -58,34 +58,22 @@ async function processPendingConsultations() {
     return { processed: 0 };
   }
 
-  // Search sale.orders with cf_status = 'pendente'
-  var orderIds;
+  // Search sale.orders with cf_status = 'pendente' using search_read
+  var orders;
   try {
-    orderIds = await odooExec(conn, 'sale.order', 'search', [
+    orders = await odooExec(conn, 'sale.order', 'search_read', [
       [['x_studio_cf_status', '=', 'pendente']],
-    ], { limit: MAX_PER_POLL });
+    ], { limit: MAX_PER_POLL, fields: ['x_studio_cf_cpfcnpj', 'x_studio_cf_tipo_pessoa', 'partner_id'] });
   } catch (e) {
     console.error('[CF-POLL] Error searching pending:', e.message);
     return { processed: 0, error: e.message };
   }
 
-  if (!orderIds || orderIds.length === 0) {
+  if (!orders || orders.length === 0) {
     return { processed: 0 };
   }
 
-  console.log('[CF-POLL] Found %d pending consultation(s): %s', orderIds.length, JSON.stringify(orderIds));
-
-  // Read the orders
-  var orders;
-  try {
-    orders = await odooExec(conn, 'sale.order', 'read', [
-      [orderIds],
-      ['x_studio_cf_cpfcnpj', 'x_studio_cf_tipo_pessoa', 'partner_id']
-    ]);
-  } catch (e) {
-    console.error('[CF-POLL] Error reading orders:', e.message);
-    return { processed: 0, error: e.message };
-  }
+  console.log('[CF-POLL] Found %d pending consultation(s)', orders.length);
 
   var processed = 0;
   var sucesso = 0;

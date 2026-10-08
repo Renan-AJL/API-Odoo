@@ -183,7 +183,8 @@ function postJson(url, data) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body)
+        'Content-Length': Buffer.byteLength(body),
+        'User-Agent': 'AJL-Middleware/1.0 (ConsultFlex)',
       }
     };
     var req = https.request(options, function(res) {
