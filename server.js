@@ -77,6 +77,7 @@ const teWebhookRoutes = require('./routes/webhook-te');
 const itauPagamentosRoutes = require('./routes/itau-pagamentos');
 const siegRoutes = require('./routes/sieg');
 const nfeCertRoutes = require('./routes/nfe-cert');
+const consultflexRoutes = require('./routes/consultflex');
 
 app.use('/admin', adminRoutes);
 app.get('/', (req, res) => res.redirect('/admin'));
@@ -91,6 +92,7 @@ app.use('/api/v1/te', teDeliveryRoutes);
 app.use('/api/v1/itau', itauPagamentosRoutes);
 app.use('/api/v1/sieg', siegRoutes);
 app.use('/api/v1/nfe', nfeCertRoutes);
+app.use('/api/v1/consultflex', consultflexRoutes);
 app.use('/callback/sieg', siegRoutes);
 
 // --- Root ---

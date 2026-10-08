@@ -129,6 +129,12 @@ const config = {
   cnpjaApiToken: cnpjaApiToken,
   cnpjaUsingCommercial: !!cnpjaApiToken,
   cnpjaTimeout: parseInt(process.env.CNPJA_TIMEOUT, 10) || 15000,
+
+  // --- ConsultFlex (Analise de Credito) ---
+  consultflex: {
+    apiKey: process.env.CONSULTFLEX_API_KEY || '',
+    apiUrl: process.env.CONSULTFLEX_API_URL || 'https://api.consultflex.com.br/json/service.aspx',
+  },
 };
 
 // Warnings
