@@ -59,7 +59,7 @@ async function consultarCEP(cepRaw) {
       }
     } catch (err) {
       // Log silencioso — fallback para a proxima fonte
-      console.log(`[CEP] ${fonte.nome} falhou para ${cep}: ${err.message}`);
+      console.log('[CEP] ' + fonte.nome + ' falhou para ' + cep + ': ' + err.message);
     }
   }
 
@@ -82,7 +82,7 @@ async function consultarCEP(cepRaw) {
  * Campos: cep, logradouro, bairro, localidade, uf, ibge
  */
 async function consultarOpenCEP(cep, headers) {
-  const url = `https://opencep.com/v1/${cep}.json`;
+  const url = 'https://opencep.com/v1/' + cep + '.json';
   const resp = await axios.get(url, { timeout: TIMEOUT_MS, headers });
 
   if (resp.status === 200 && resp.data && !resp.data.erro) {
@@ -109,7 +109,7 @@ async function consultarOpenCEP(cep, headers) {
  * Campos: cep, logradouro, bairro, localidade, uf, ibge
  */
 async function consultarCepify(cep, headers) {
-  const url = `https://cepify.com.br/ws/${cep}/json`;
+  const url = 'https://cepify.com.br/ws/' + cep + '/json';
   const resp = await axios.get(url, { timeout: TIMEOUT_MS, headers });
 
   if (resp.status === 200 && resp.data && !resp.data.erro) {
@@ -136,7 +136,7 @@ async function consultarCepify(cep, headers) {
  * Campos: cep, logradouro, bairro, localidade, uf, ibge
  */
 async function consultarViaCEP(cep, headers) {
-  const url = `https://viacep.com.br/ws/${cep}/json/`;
+  const url = 'https://viacep.com.br/ws/' + cep + '/json/';
   const resp = await axios.get(url, { timeout: TIMEOUT_MS, headers });
 
   if (resp.status === 200 && resp.data && !resp.data.erro) {
@@ -163,7 +163,7 @@ async function consultarViaCEP(cep, headers) {
  * Campos: cep, street, neighborhood, city, state, ibge{city, state}
  */
 async function consultarBrasilAPI(cep, headers) {
-  const url = `https://brasilapi.com.br/cep/v1/${cep}`;
+  const url = 'https://brasilapi.com.br/cep/v1/' + cep;
   const resp = await axios.get(url, { timeout: TIMEOUT_MS, headers });
 
   if (resp.status === 200 && resp.data && !resp.data.erro) {
