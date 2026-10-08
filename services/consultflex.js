@@ -11,7 +11,7 @@ var config = require('../config');
 
 var API_URL = 'https://api.consultflex.com.br/json/service.aspx';
 var PRODUTO_PJ = '1761';
-var PRODUTO_PF = '1762';
+var PRODUTO_PF = '1760';
 var VERSAO = '20180521';
 
 /**

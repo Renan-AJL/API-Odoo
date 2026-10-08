@@ -133,6 +133,8 @@ app.get('/', (req, res) => {
       pix_pagar: 'POST /api/v1/itau/pix-pagar',
       pix_pagar_consultar: 'GET /api/v1/itau/pix-pagar/consultar/:id',
       pix_pagar_listar: 'GET /api/v1/itau/pix-pagar/consultar',
+      consultflex_consultar: 'POST /api/v1/consultflex/consultar',
+      consultflex_consultar_odoo: 'POST /api/v1/consultflex/consultar-odoo/:saleOrderId',
     },
     auth: 'Envie header X-API-Key para autenticacao.',
   });
@@ -150,6 +152,35 @@ app.use((err, req, res, next) => {
 // --- Start ---
 const PORT = config.port;
 const logger = require('./utils/logger');
+
+// ============================================================
+// CONSULTFLEX AUTO-POLLING: checa consultas pendentes a cada 15s
+// ============================================================
+var CF_POLL_INTERVAL_MS = parseInt(process.env.CF_POLL_INTERVAL_MS, 10) || 15000;
+var cfPollTimer = null;
+
+function startCfPolling() {
+  if (!config.odoo.enabled || !config.consultflex.apiKey) {
+    console.log('  [CF-POLL] DESATIVADO (Odoo ou ConsultFlex nao configurados)');
+    return;
+  }
+  console.log('  [CF-POLL] ATIVO - intervalo: ' + (CF_POLL_INTERVAL_MS / 1000) + 's');
+  setTimeout(function() {
+    runCfPoll();
+    cfPollTimer = setInterval(runCfPoll, CF_POLL_INTERVAL_MS);
+  }, 12000); // Start after 12s (offset from SIEG polling)
+}
+
+function runCfPoll() {
+  var cfPoll = require('./services/consultflex-poll');
+  cfPoll.processPendingConsultations().then(function(result) {
+    if (result.processed > 0) {
+      console.log('  [CF-POLL] ' + result.processed + ' consulta(s) processada(s), ' + (result.sucesso || 0) + ' concluida(s)');
+    }
+  }).catch(function(err) {
+    console.error('  [CF-POLL] Erro:', err.message);
+  });
+}
 
 // ============================================================
 // SIEG AUTO-POLLING: checa faturas pendentes a cada 30s
@@ -239,9 +270,16 @@ app.listen(PORT, () => {
   console.log('  TP Amb: ' + (config.sieg.tpAmb === '1' ? 'PRODUCAO' : 'HOMOLOGACAO'));
   var siegReady = config.odoo.enabled && config.sieg.clientId && config.sieg.apiKey && config.sieg.oauthToken;
   console.log('  Polling: ' + (siegReady ? 'ATIVO (' + (SIEG_POLL_INTERVAL_MS / 1000) + 's)' : 'DESATIVADO'));
+  console.log('  ---');
+  console.log('  [CONSULTFLEX]');
+  console.log('  API Key: ' + (config.consultflex.apiKey ? '***' + config.consultflex.apiKey.slice(-4) : 'NAO CONFIGURADO'));
+  console.log('  Polling: ' + (config.odoo.enabled && config.consultflex.apiKey ? 'ATIVO (' + (CF_POLL_INTERVAL_MS / 1000) + 's)' : 'DESATIVADO'));
 
   // Iniciar polling SIEG
   startSiegPolling();
+
+  // Iniciar polling ConsultFlex
+  startCfPolling();
 });
 
 module.exports = app;

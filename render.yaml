@@ -74,6 +74,9 @@ services:
         sync: false
       - key: SIEG_TP_AMB
         value: "2"
+      # --- ConsultFlex (Analise de Credito) ---
+      - key: CONSULTFLEX_API_KEY
+        sync: false
       - key: NFE_RESP_TEC_CNPJ
         sync: false
       - key: NFE_RESP_TEC_CONTATO
