@@ -182,69 +182,154 @@ function formatarRespostaHtml(resp) {
 
   // ===== Campos extras do Crédito Total =====
 
-  // Score / Pontuação
-  var score = cred.SCORE || cred.PONTUACAO || {};
-  if (score && (score.VALOR || score.PONTUACAO || score.SCORE)) {
+  // Scores (SCORES with OCORRENCIAS array)
+  var scores = cred.SCORES || cred.SCORE || {};
+  if (scores && (scores.OCORRENCIAS || scores.VALOR || scores.PONTUACAO)) {
     html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#2E75B6;color:white"><th colspan="4" style="padding:6px">Score / Pontuação</th></tr>';
-    html += tr('Score', score.VALOR || score.PONTUACAO || score.SCORE || '-');
-    if (score.DESCRICAO || score.CLASSIFICACAO) html += tr('Classificação', score.DESCRICAO || score.CLASSIFICACAO || '-');
-    if (score.FAIXA) html += tr('Faixa', score.FAIXA || '-');
-    html += '</table>';
-  }
-
-  // Limite de Crédito
-  var limite = cred.LIMITE_CREDITO || {};
-  if (limite && (limite.VALOR || limite.LIMITE || limite.TOTAL)) {
-    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#548235;color:white"><th colspan="4" style="padding:6px">Limite de Crédito</th></tr>';
-    html += tr('Valor', (limite.MOEDA || 'R$') + ' ' + (limite.VALOR || limite.LIMITE || limite.TOTAL || '-'));
-    if (limite.FONTE) html += tr('Fonte', limite.FONTE || '-');
-    if (limite.DATA_CONSULTA) html += tr('Data Consulta', limite.DATA_CONSULTA || '-');
-    html += '</table>';
-  }
-
-  // Ações Judiciais
-  var aj = cred.ACOES_JUDICIAIS || {};
-  if (aj && aj.OCORRENCIAS && aj.OCORRENCIAS.length > 0) {
-    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px">';
-    html += '<tr style="background:#C00000;color:white"><th colspan="4" style="padding:6px">Ações Judiciais (' + (aj.QUANTIDADE_OCORRENCIA || aj.OCORRENCIAS.length) + ')</th></tr>';
-    html += '<tr style="background:#f2f2f2"><th style="padding:4px">Data</th><th style="padding:4px">Comarca</th><th style="padding:4px">Valor</th><th style="padding:4px">Tipo</th></tr>';
-    for (var i = 0; i < aj.OCORRENCIAS.length; i++) {
-      var a = aj.OCORRENCIAS[i];
-      html += '<tr><td style="padding:4px">' + (a.DATA_ACAO || '-') + '</td><td style="padding:4px">' + (a.COMARCA || '-') + '</td><td style="padding:4px">' + (a.VALOR || '-') + '</td><td style="padding:4px">' + (a.TIPO_ACAO || '-') + '</td></tr>';
+    if (scores.OCORRENCIAS && scores.OCORRENCIAS.length > 0) {
+      html += '<tr style="background:#f2f2f2"><th style="padding:4px">Score</th><th style="padding:4px">Faixa</th><th style="padding:4px">Descrição</th><th style="padding:4px">Data</th></tr>';
+      for (var si = 0; si < scores.OCORRENCIAS.length; si++) {
+        var sc = scores.OCORRENCIAS[si];
+        html += '<tr><td style="padding:4px;font-weight:bold">' + (sc.PONTUACAO || sc.VALOR || sc.SCORE || '-') + '</td><td style="padding:4px">' + (sc.FAIXA || sc.CLASSIFICACAO || '-') + '</td><td style="padding:4px">' + (sc.DESCRICAO || '-') + '</td><td style="padding:4px">' + (sc.DATA_CONSULTA || '-') + '</td></tr>';
+      }
+    } else {
+      html += tr('Score', scores.VALOR || scores.PONTUACAO || '-');
     }
     html += '</table>';
   }
 
-  // Participações em outras empresas
-  var part = cred.PARTICIPACOES || {};
-  if (part && part.OCORRENCIAS && part.OCORRENCIAS.length > 0) {
-    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px">';
-    html += '<tr style="background:#2E75B6;color:white"><th colspan="4" style="padding:6px">Participações em Outras Empresas (' + (part.QUANTIDADE_OCORRENCIAS || part.OCORRENCIAS.length) + ')</th></tr>';
-    html += '<tr style="background:#f2f2f2"><th style="padding:4px">Empresa</th><th style="padding:4px">CNPJ</th><th style="padding:4px">Participação</th><th style="padding:4px">Cargo</th></tr>';
-    for (var i = 0; i < part.OCORRENCIAS.length; i++) {
-      var p = part.OCORRENCIAS[i];
-      html += '<tr><td style="padding:4px">' + (p.NOME || p.RAZAO_SOCIAL || '-') + '</td><td style="padding:4px">' + (p.CNPJ || '-') + '</td><td style="padding:4px">' + (p.PERCENTUAL_PARTICIPACAO || '-') + '%</td><td style="padding:4px">' + (p.CARGO || '-') + '</td></tr>';
+  // Relatório SCR (Sistema de Crédito)
+  var scr = cred.RELATORIO_SCR || {};
+  if (scr && scr.STATUS_RETORNO && scr.STATUS_RETORNO.CODIGO === '1') {
+    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#548235;color:white"><th colspan="4" style="padding:6px">Relatório SCR (Bacen)</th></tr>';
+    html += tr('Documento', (scr.TIPO_DOCUMENTO || '') + ' ' + (scr.DOCUMENTO || '-'));
+    html += tr('Nome/Razão Social', scr.NOME_RAZAO_SOCIAL || '-');
+    html += tr('Coobrigação Assumida', scr.COOBRIGACAO_ASSUMIDA || '-');
+    html += tr('Coobrigação Recebida', scr.COOBRIGACAO_RECEBIDA || '-');
+    html += tr('Data Base', scr.DATABASE_CONSULTADA || '-');
+    html += tr('Início Relacionamento', scr.DATA_INICIO_RELACIONAMENTO || '-');
+    html += tr('Valor Repasse', scr.VALOR_REPASSE || '-');
+    html += tr('Valor Trans. Judiciais', scr.VALOR_TRANSACOES_JUDICIAIS || '-');
+    html += tr('Valor Trans. Divergentes', scr.VALOR_TRANSACOES_DIVERGENTES || '-');
+    html += tr('Qtd Instituições', scr.QUANTIDADE_INSTITUICOES || '-');
+    html += '</table>';
+  }
+
+  // Relatório Jurídico Empresarial
+  var rje = cred.RELATORIO_JURIDICO_EMPRESARIAL || {};
+  if (rje && rje.STATUS_RETORNO && rje.STATUS_RETORNO.CODIGO === '1') {
+    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#C00000;color:white"><th colspan="4" style="padding:6px">Relatório Jurídico Empresarial</th></tr>';
+    if (rje.RESUMO) html += tr('Resumo', rje.RESUMO || '-');
+    if (rje.ACOES) html += tr('Ações', rje.ACOES || '-');
+    if (rje.ACOES_ARQUIVADAS) html += tr('Ações Arquivadas', rje.ACOES_ARQUIVADAS || '-');
+    html += '</table>';
+  }
+
+  // Ações Cíveis (ACOES_CIVEIS)
+  var ac = cred.ACOES_CIVEIS || {};
+  if (ac && ac.QUANTIDADE_OCORRENCIA && ac.QUANTIDADE_OCORRENCIA !== '0' && ac.QUANTIDADE_OCORRENCIA !== 0) {
+    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#C00000;color:white"><th colspan="4" style="padding:6px">Ações Cíveis</th></tr>';
+    html += tr('Quantidade', ac.QUANTIDADE_OCORRENCIA || '-');
+    html += tr('Valor Total', ac.VALOR_TOTAL || '-');
+    if (ac.VALOR_PRIMEIRO) html += tr('Primeiro Valor', ac.VALOR_PRIMEIRO || '-');
+    if (ac.VALOR_ULTIMO) html += tr('Último Valor', ac.VALOR_ULTIMO || '-');
+    if (ac.DATA_PRIMEIRO) html += tr('Primeira Data', ac.DATA_PRIMEIRO || '-');
+    if (ac.DATA_ULTIMO) html += tr('Última Data', ac.DATA_ULTIMO || '-');
+    html += '</table>';
+  }
+
+  // Ações Trabalhistas
+  var at = cred.ACOES_TRABALHISTAS || {};
+  if (at && at.STATUS_RETORNO && at.QUANTIDADE_OCORRENCIAS && at.QUANTIDADE_OCORRENCIAS !== '0' && at.QUANTIDADE_OCORRENCIAS !== 0) {
+    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#C00000;color:white"><th colspan="4" style="padding:6px">Ações Trabalhistas</th></tr>';
+    html += tr('Quantidade', at.QUANTIDADE_OCORRENCIAS || '-');
+    html += tr('Valor Total', at.VALOR_TOTAL || '-');
+    html += tr('Emitiu Certidão Negativa', at.EMITIU_CERTIDAO_NEGATIVA || '-');
+    if (at.MENSAGEM) html += tr('Mensagem', at.MENSAGEM || '-');
+    html += '</table>';
+  }
+
+  // Cheques sem fundos Bacen
+  var chBacen = cred.CH_SEM_FUNDOS_BACEN || {};
+  if (chBacen && chBacen.QUANTIDADE_OCORRENCIA && chBacen.QUANTIDADE_OCORRENCIA !== '0' && chBacen.QUANTIDADE_OCORRENCIA !== 0) {
+    html += '<div style="background:#f8d7da;padding:8px;border-radius:4px;margin-bottom:8px"><b>⚠ Cheques sem fundo (Bacen):</b> ' + chBacen.QUANTIDADE_OCORRENCIA + '</div>';
+  }
+
+  // Cheques sem fundos Varejo
+  var chVar = cred.CH_SEM_FUNDOS_VAREJO || {};
+  if (chVar && chVar.QUANTIDADE_OCORRENCIA && chVar.QUANTIDADE_OCORRENCIA !== '0' && chVar.QUANTIDADE_OCORRENCIA !== 0) {
+    html += '<div style="background:#f8d7da;padding:8px;border-radius:4px;margin-bottom:8px"><b>⚠ Cheques sem fundo (Varejo):</b> ' + chVar.QUANTIDADE_OCORRENCIA + '</div>';
+  }
+
+  // Recheque
+  var reqq = cred.RECHEQUE || {};
+  if (reqq && reqq.QUANTIDADE_OCORRENCIAS && reqq.QUANTIDADE_OCORRENCIAS !== '0' && reqq.QUANTIDADE_OCORRENCIAS !== 0) {
+    html += '<div style="background:#fff3cd;padding:8px;border-radius:4px;margin-bottom:8px"><b>⚠ Recheque:</b> ' + reqq.QUANTIDADE_OCORRENCIAS + ' ocorrência(s)</div>';
+  }
+
+  // Participação em Empresas (PARTICIPACAO_EM_EMPRESAS)
+  var partEmp = cred.PARTICIPACAO_EM_EMPRESAS || cred.PARTICIPACOES || {};
+  if (partEmp && partEmp.QUANTIDADE_OCORRENCIAS && partEmp.QUANTIDADE_OCORRENCIAS !== '0' && partEmp.QUANTIDADE_OCORRENCIAS !== 0) {
+    html += '<div style="background:#d4edda;padding:8px;border-radius:4px;margin-bottom:8px"><b>Participação em Empresas:</b> ' + partEmp.QUANTIDADE_OCORRENCIAS + ' empresa(s)</div>';
+    if (partEmp.OCORRENCIAS && partEmp.OCORRENCIAS.length > 0) {
+      html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px">';
+      html += '<tr style="background:#2E75B6;color:white"><th colspan="4" style="padding:6px">Participações (' + partEmp.QUANTIDADE_OCORRENCIAS + ')</th></tr>';
+      for (var pi = 0; pi < partEmp.OCORRENCIAS.length; pi++) {
+        var pe = partEmp.OCORRENCIAS[pi];
+        html += '<tr><td style="padding:4px">' + (pe.NOME || pe.RAZAO_SOCIAL || '-') + '</td><td style="padding:4px">' + (pe.CNPJ || pe.CPF_CNPJ || '-') + '</td><td style="padding:4px">' + (pe.PERCENTUAL_PARTICIPACAO || '-') + '%</td><td style="padding:4px">' + (pe.CARGO || '-') + '</td></tr>';
+      }
+      html += '</table>';
     }
+  }
+
+  // Histórico de Consultas
+  var hist = cred.HIST_CONSULTAS || {};
+  if (hist && hist.QUANTIDADE_OCORRENCIAS && hist.QUANTIDADE_OCORRENCIAS !== '0' && hist.QUANTIDADE_OCORRENCIAS !== 0) {
+    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#2E75B6;color:white"><th colspan="4" style="padding:6px">Histórico de Consultas</th></tr>';
+    html += tr('Quantidade', hist.QUANTIDADE_OCORRENCIAS || '-');
+    if (hist.DATA_INICIAL) html += tr('Período', (hist.DATA_INICIAL || '-') + ' a ' + (hist.DATA_FINAL || '-'));
+    if (hist.QUANTIDADES) html += tr('Quantidades', JSON.stringify(hist.QUANTIDADES));
+    if (hist.SEGMENTOS) html += tr('Segmentos', JSON.stringify(hist.SEGMENTOS));
     html += '</table>';
   }
 
-  // Recomendação / Parecer
-  var rec = cred.RECOMENDACAO || cred.PARECER || {};
-  if (rec && (rec.PARECER || rec.RECOMENDACAO || rec.CLASSIFICACAO)) {
-    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#548235;color:white"><th colspan="4" style="padding:6px">Recomendação / Parecer</th></tr>';
-    html += tr('Parecer', rec.PARECER || rec.RECOMENDACAO || '-');
-    if (rec.CLASSIFICACAO) html += tr('Classificação', rec.CLASSIFICACAO || '-');
-    if (rec.JUSTIFICATIVA) html += tr('Justificativa', rec.JUSTIFICATIVA || '-');
+  // Informações da Empresa (PJ)
+  var infoEmp = cred.INFORMACOES_DA_EMPRESA || {};
+  if (infoEmp && infoEmp.RAZAO_SOCIAL) {
+    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#2E75B6;color:white"><th colspan="4" style="padding:6px">Informações da Empresa</th></tr>';
+    html += tr('Razão Social', infoEmp.RAZAO_SOCIAL || '-');
+    if (infoEmp.NOME_FANTASIA) html += tr('Nome Fantasia', infoEmp.NOME_FANTASIA || '-');
+    html += tr('Situação', infoEmp.SITUACAO || '-');
+    if (infoEmp.DATA_SITUACAO) html += tr('Data Situação', infoEmp.DATA_SITUACAO || '-');
+    if (infoEmp.INSCRICAO_ESTADUAL) html += tr('Inscrição Estadual', infoEmp.INSCRICAO_ESTADUAL || '-');
+    if (infoEmp.SITUACAO_SINTEGRA) html += tr('Situação Sintegra', infoEmp.SITUACAO_SINTEGRA || '-');
     html += '</table>';
   }
 
-  // Risk Rating (classificação de risco)
-  var risk = cred.CLASSIFICACAO_RISCO || cred.RISK_RATING || {};
-  if (risk && (risk.CLASSIFICACAO || risk.RATING || risk.NIVEL)) {
-    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#ED7D31;color:white"><th colspan="4" style="padding:6px">Classificação de Risco</th></tr>';
-    html += tr('Classificação', risk.CLASSIFICACAO || risk.RATING || risk.NIVEL || '-');
-    if (risk.PROBABILIDADE) html += tr('Probabilidade', risk.PROBABILIDADE || '-');
+  // Capital Social (from QUADRO_SOCIETARIO)
+  var qsCap = cred.QUADRO_SOCIETARIO || {};
+  if (qsCap && qsCap.CAPITAL_SOCIAL) {
+    html += '<div style="background:#d4edda;padding:8px;border-radius:4px;margin-bottom:8px"><b>Capital Social:</b> R$ ' + qsCap.CAPITAL_SOCIAL + '</div>';
+  }
+
+  // Emails
+  var emails = cred.EMAILS || {};
+  if (emails && emails.INFOEMAILS) {
+    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#2E75B6;color:white"><th colspan="4" style="padding:6px">E-mails</th></tr>';
+    html += tr('E-mails', JSON.stringify(emails.INFOEMAILS).substring(0, 500));
     html += '</table>';
+  }
+
+  // Passagens Comerciais
+  var pass = cred.PASSAGENS_COMERCIAIS || {};
+  if (pass && pass.QUANTIDADE_OCORRENCIA && pass.QUANTIDADE_OCORRENCIA !== '0' && pass.QUANTIDADE_OCORRENCIA !== 0) {
+    html += '<div style="background:#fff3cd;padding:8px;border-radius:4px;margin-bottom:8px"><b>Passagens Comerciais:</b> ' + pass.QUANTIDADE_OCORRENCIA + '</div>';
+  }
+
+  // Pagamento Atrasado
+  var pagAtr = cred.PAGAMENTO_ATRASADO || {};
+  if (pagAtr && pagAtr.STATUS_RETORNO && pagAtr.STATUS_RETORNO.CODIGO === '1') {
+    html += '<div style="background:#fff3cd;padding:8px;border-radius:4px;margin-bottom:8px"><b>⚠ Pagamento Atrasado: Informação disponível</b></div>';
   }
 
   return html;
