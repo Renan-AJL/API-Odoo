@@ -63,7 +63,7 @@ async function processPendingConsultations() {
   try {
     orders = await odooExec(conn, 'sale.order', 'search_read', [
       [['x_studio_cf_status', '=', 'pendente']],
-    ], { limit: MAX_PER_POLL, fields: ['x_studio_cf_cpfcnpj', 'x_studio_cf_tipo_pessoa', 'partner_id'] });
+    ], { limit: MAX_PER_POLL, fields: ['x_studio_cf_cpfcnpj', 'x_studio_cf_tipo_pessoa', 'x_studio_cf_tipo_operacao', 'partner_id'] });
   } catch (e) {
     console.error('[CF-POLL] Error searching pending:', e.message);
     return { processed: 0, error: e.message };
@@ -82,6 +82,7 @@ async function processPendingConsultations() {
     var order = orders[i];
     var cpfcnpj = (order.x_studio_cf_cpfcnpj || '').replace(/\D/g, '');
     var tipoPessoa = order.x_studio_cf_tipo_pessoa || '';
+    var tipoOperacao = order.x_studio_cf_tipo_operacao || 'basico'; // 'basico' ou 'credito_total'
 
     // Fallback: get from partner
     if (!cpfcnpj && order.partner_id && order.partner_id.length > 0) {
@@ -116,7 +117,7 @@ async function processPendingConsultations() {
 
     // Call ConsultFlex API
     try {
-      var resultado = await consultarCredito({ cpfcnpj: cpfcnpj, tipoPessoa: tipoPessoa });
+      var resultado = await consultarCredito({ cpfcnpj: cpfcnpj, tipoPessoa: tipoPessoa, tipoOperacao: tipoOperacao });
       var html = formatarRespostaHtml(resultado);
 
       var writeVals = {
@@ -132,7 +133,7 @@ async function processPendingConsultations() {
 
       await odooExec(conn, 'sale.order', 'write', [[order.id], writeVals]);
       sucesso++;
-      console.log('[CF-POLL] Consulta concluida: sale.order %s (%s %s)', order.id, tipoPessoa === 'J' ? 'CNPJ' : 'CPF', cpfcnpj.substring(0, 3) + '***');
+      console.log('[CF-POLL] Consulta concluida: sale.order %s (%s %s, tipo=%s)', order.id, tipoPessoa === 'J' ? 'CNPJ' : 'CPF', cpfcnpj.substring(0, 3) + '***', tipoOperacao);
     } catch (cfErr) {
       console.error('[CF-POLL] ConsultFlex API error for order %s:', order.id, cfErr.message);
       try {

@@ -1,17 +1,26 @@
 /**
  * services/consultflex.js — ConsultFlex API Integration
  * ====================================================
- * Consulta crédito básico PJ/PF via ConsultFlex Webservice.
+ * Consulta crédito PJ/PF via ConsultFlex Webservice.
  * URL: https://api.consultflex.com.br/json/service.aspx
- * Produto: 1761 (CREDITO BASICO PJ), 1762 (CREDITO BASICO PF)
+ *
+ * Produtos (CodigoProduto):
+ *   Básico:        1760 (PF) / 1761 (PJ)
+ *   Crédito Total: 1762 (PF) / 1763 (PJ)
+ *
  * Versao: 20180521
  */
 var https = require('https');
 var config = require('../config');
 
 var API_URL = 'https://api.consultflex.com.br/json/service.aspx';
-var PRODUTO_PJ = '1761';
-var PRODUTO_PF = '1760';
+// Crédito Básico
+var PRODUTO_BASICO_PJ = '1761';
+var PRODUTO_BASICO_PF = '1760';
+// Crédito Total
+var PRODUTO_CREDITO_TOTAL_PJ = '1763';
+var PRODUTO_CREDITO_TOTAL_PF = '1762';
+
 var VERSAO = '20180521';
 
 /**
@@ -19,6 +28,7 @@ var VERSAO = '20180521';
  * @param {Object} opts
  * @param {string} opts.cpfcnpj - CPF (11 digitos) ou CNPJ (14 digitos), somente números
  * @param {string} [opts.tipoPessoa] - 'J' (PJ/CNPJ) ou 'F' (PF/CPF). Auto-detectado se vazio.
+ * @param {string} [opts.tipoOperacao] - 'basico' (padrão) ou 'credito_total'
  * @param {string} [opts.solicitante] - CNPJ do cliente final (opcional)
  * @returns {Promise<Object>} Resposta completa da ConsultFlex
  */
@@ -27,10 +37,17 @@ async function consultarCredito(opts) {
   if (!cpfcnpj) throw new Error('CPF/CNPJ não informado');
 
   var tipoPessoa = opts.tipoPessoa || (cpfcnpj.length <= 11 ? 'F' : 'J');
+  var tipoOperacao = opts.tipoOperacao || 'basico'; // 'basico' ou 'credito_total'
   var chaveAcesso = config.consultflex && config.consultflex.apiKey || process.env.CONSULTFLEX_API_KEY || '';
   if (!chaveAcesso) throw new Error('ConsultFlex API Key não configurada (CONSULTFLEX_API_KEY)');
 
-  var codigoProduto = tipoPessoa === 'F' ? PRODUTO_PF : PRODUTO_PJ;
+  // Selecionar produto conforme tipo de operação e pessoa
+  var codigoProduto;
+  if (tipoOperacao === 'credito_total') {
+    codigoProduto = tipoPessoa === 'F' ? PRODUTO_CREDITO_TOTAL_PF : PRODUTO_CREDITO_TOTAL_PJ;
+  } else {
+    codigoProduto = tipoPessoa === 'F' ? PRODUTO_BASICO_PF : PRODUTO_BASICO_PJ;
+  }
 
   var payload = {
     CodigoProduto: codigoProduto,
@@ -48,7 +65,7 @@ async function consultarCredito(opts) {
     payload.Info.Solicitante = opts.solicitante;
   }
 
-  console.log('[CONSULTFLEX] Consultando %s: %s (produto=%s)', tipoPessoa === 'J' ? 'CNPJ' : 'CPF', cpfcnpj, codigoProduto);
+  console.log('[CONSULTFLEX] Consultando %s: %s (produto=%s, tipo=%s)', tipoPessoa === 'J' ? 'CNPJ' : 'CPF', cpfcnpj, codigoProduto, tipoOperacao);
 
   var result = await postJson(API_URL, payload);
   return result;
@@ -161,6 +178,73 @@ function formatarRespostaHtml(resp) {
   var cont = cred.CONTUMACIA || {};
   if (cont && cont.QUANTIDADE_OCORRENCIA && cont.QUANTIDADE_OCORRENCIA !== '0') {
     html += '<div style="background:#fff3cd;padding:8px;border-radius:4px;margin-bottom:8px"><b>⚠ Contumácia:</b> ' + cont.QUANTIDADE_OCORRENCIA + ' ocorrência(s)</div>';
+  }
+
+  // ===== Campos extras do Crédito Total =====
+
+  // Score / Pontuação
+  var score = cred.SCORE || cred.PONTUACAO || {};
+  if (score && (score.VALOR || score.PONTUACAO || score.SCORE)) {
+    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#2E75B6;color:white"><th colspan="4" style="padding:6px">Score / Pontuação</th></tr>';
+    html += tr('Score', score.VALOR || score.PONTUACAO || score.SCORE || '-');
+    if (score.DESCRICAO || score.CLASSIFICACAO) html += tr('Classificação', score.DESCRICAO || score.CLASSIFICACAO || '-');
+    if (score.FAIXA) html += tr('Faixa', score.FAIXA || '-');
+    html += '</table>';
+  }
+
+  // Limite de Crédito
+  var limite = cred.LIMITE_CREDITO || {};
+  if (limite && (limite.VALOR || limite.LIMITE || limite.TOTAL)) {
+    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#548235;color:white"><th colspan="4" style="padding:6px">Limite de Crédito</th></tr>';
+    html += tr('Valor', (limite.MOEDA || 'R$') + ' ' + (limite.VALOR || limite.LIMITE || limite.TOTAL || '-'));
+    if (limite.FONTE) html += tr('Fonte', limite.FONTE || '-');
+    if (limite.DATA_CONSULTA) html += tr('Data Consulta', limite.DATA_CONSULTA || '-');
+    html += '</table>';
+  }
+
+  // Ações Judiciais
+  var aj = cred.ACOES_JUDICIAIS || {};
+  if (aj && aj.OCORRENCIAS && aj.OCORRENCIAS.length > 0) {
+    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px">';
+    html += '<tr style="background:#C00000;color:white"><th colspan="4" style="padding:6px">Ações Judiciais (' + (aj.QUANTIDADE_OCORRENCIA || aj.OCORRENCIAS.length) + ')</th></tr>';
+    html += '<tr style="background:#f2f2f2"><th style="padding:4px">Data</th><th style="padding:4px">Comarca</th><th style="padding:4px">Valor</th><th style="padding:4px">Tipo</th></tr>';
+    for (var i = 0; i < aj.OCORRENCIAS.length; i++) {
+      var a = aj.OCORRENCIAS[i];
+      html += '<tr><td style="padding:4px">' + (a.DATA_ACAO || '-') + '</td><td style="padding:4px">' + (a.COMARCA || '-') + '</td><td style="padding:4px">' + (a.VALOR || '-') + '</td><td style="padding:4px">' + (a.TIPO_ACAO || '-') + '</td></tr>';
+    }
+    html += '</table>';
+  }
+
+  // Participações em outras empresas
+  var part = cred.PARTICIPACOES || {};
+  if (part && part.OCORRENCIAS && part.OCORRENCIAS.length > 0) {
+    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px">';
+    html += '<tr style="background:#2E75B6;color:white"><th colspan="4" style="padding:6px">Participações em Outras Empresas (' + (part.QUANTIDADE_OCORRENCIAS || part.OCORRENCIAS.length) + ')</th></tr>';
+    html += '<tr style="background:#f2f2f2"><th style="padding:4px">Empresa</th><th style="padding:4px">CNPJ</th><th style="padding:4px">Participação</th><th style="padding:4px">Cargo</th></tr>';
+    for (var i = 0; i < part.OCORRENCIAS.length; i++) {
+      var p = part.OCORRENCIAS[i];
+      html += '<tr><td style="padding:4px">' + (p.NOME || p.RAZAO_SOCIAL || '-') + '</td><td style="padding:4px">' + (p.CNPJ || '-') + '</td><td style="padding:4px">' + (p.PERCENTUAL_PARTICIPACAO || '-') + '%</td><td style="padding:4px">' + (p.CARGO || '-') + '</td></tr>';
+    }
+    html += '</table>';
+  }
+
+  // Recomendação / Parecer
+  var rec = cred.RECOMENDACAO || cred.PARECER || {};
+  if (rec && (rec.PARECER || rec.RECOMENDACAO || rec.CLASSIFICACAO)) {
+    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#548235;color:white"><th colspan="4" style="padding:6px">Recomendação / Parecer</th></tr>';
+    html += tr('Parecer', rec.PARECER || rec.RECOMENDACAO || '-');
+    if (rec.CLASSIFICACAO) html += tr('Classificação', rec.CLASSIFICACAO || '-');
+    if (rec.JUSTIFICATIVA) html += tr('Justificativa', rec.JUSTIFICATIVA || '-');
+    html += '</table>';
+  }
+
+  // Risk Rating (classificação de risco)
+  var risk = cred.CLASSIFICACAO_RISCO || cred.RISK_RATING || {};
+  if (risk && (risk.CLASSIFICACAO || risk.RATING || risk.NIVEL)) {
+    html += '<table style="width:100%;border-collapse:collapse;margin-bottom:10px"><tr style="background:#ED7D31;color:white"><th colspan="4" style="padding:6px">Classificação de Risco</th></tr>';
+    html += tr('Classificação', risk.CLASSIFICACAO || risk.RATING || risk.NIVEL || '-');
+    if (risk.PROBABILIDADE) html += tr('Probabilidade', risk.PROBABILIDADE || '-');
+    html += '</table>';
   }
 
   return html;

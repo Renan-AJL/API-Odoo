@@ -53,13 +53,14 @@ router.post('/consultar', apiKeyAuth, async function(req, res) {
   try {
     var cpfcnpj = req.body.cpfcnpj || '';
     var tipoPessoa = req.body.tipoPessoa || '';
+    var tipoOperacao = req.body.tipoOperacao || 'basico'; // 'basico' ou 'credito_total'
     var solicitante = req.body.solicitante || '';
 
     if (!cpfcnpj) {
       return res.status(400).json({ success: false, error: 'cpfcnpj é obrigatório' });
     }
 
-    var resultado = await consultarCredito({ cpfcnpj: cpfcnpj, tipoPessoa: tipoPessoa, solicitante: solicitante });
+    var resultado = await consultarCredito({ cpfcnpj: cpfcnpj, tipoPessoa: tipoPessoa, tipoOperacao: tipoOperacao, solicitante: solicitante });
     var html = formatarRespostaHtml(resultado);
 
     res.json({ success: true, data: resultado, html: html });
@@ -79,6 +80,7 @@ router.post('/consultar-odoo/:saleOrderId', apiKeyAuth, async function(req, res)
     var saleOrderId = parseInt(req.params.saleOrderId);
     var cpfcnpj = req.body.cpfcnpj || '';
     var tipoPessoa = req.body.tipoPessoa || '';
+    var tipoOperacao = req.body.tipoOperacao || ''; // '' = read from Odoo field
 
     if (!saleOrderId) {
       return res.status(400).json({ success: false, error: 'saleOrderId é obrigatório' });
@@ -104,13 +106,14 @@ router.post('/consultar-odoo/:saleOrderId', apiKeyAuth, async function(req, res)
       try {
         var fields = await odooExec(oc, odooHost, odooUid, 'sale.order', 'read', [
           [saleOrderId],
-          ['x_studio_cf_cpfcnpj', 'x_studio_cf_tipo_pessoa', 'partner_id']
+          ['x_studio_cf_cpfcnpj', 'x_studio_cf_tipo_pessoa', 'x_studio_cf_tipo_operacao', 'partner_id']
         ]);
 
         if (fields && fields.length > 0) {
           var rec = fields[0];
           cpfcnpj = rec.x_studio_cf_cpfcnpj || '';
           tipoPessoa = rec.x_studio_cf_tipo_pessoa || '';
+          if (!tipoOperacao) tipoOperacao = rec.x_studio_cf_tipo_operacao || 'basico';
 
           // Fallback: se não preencheu o campo custom, usa o CNPJ/CPF do partner
           if (!cpfcnpj && rec.partner_id && rec.partner_id.length > 0) {
@@ -135,7 +138,8 @@ router.post('/consultar-odoo/:saleOrderId', apiKeyAuth, async function(req, res)
     }
 
     // 3. Consulta ConsultFlex
-    var resultado = await consultarCredito({ cpfcnpj: cpfcnpj, tipoPessoa: tipoPessoa });
+    if (!tipoOperacao) tipoOperacao = 'basico';
+    var resultado = await consultarCredito({ cpfcnpj: cpfcnpj, tipoPessoa: tipoPessoa, tipoOperacao: tipoOperacao });
     var html = formatarRespostaHtml(resultado);
 
     // 4. Grava resultado no Odoo
@@ -173,7 +177,7 @@ router.post('/consultar-odoo/:saleOrderId', apiKeyAuth, async function(req, res)
       }
     }
 
-    res.json({ success: true, data: resultado, html: html, odoo_updated: odooUpdated, cpfcnpj: cpfcnpj, tipoPessoa: tipoPessoa });
+    res.json({ success: true, data: resultado, html: html, odoo_updated: odooUpdated, cpfcnpj: cpfcnpj, tipoPessoa: tipoPessoa, tipoOperacao: tipoOperacao });
   } catch (err) {
     console.error('[CONSULTFLEX] Erro:', err.message);
     res.status(500).json({ success: false, error: err.message });
