@@ -78,6 +78,7 @@ const itauPagamentosRoutes = require('./routes/itau-pagamentos');
 const siegRoutes = require('./routes/sieg');
 const nfeCertRoutes = require('./routes/nfe-cert');
 const consultflexRoutes = require('./routes/consultflex');
+const cepRoutes         = require('./routes/cep');
 
 app.use('/admin', adminRoutes);
 app.get('/', (req, res) => res.redirect('/admin'));
@@ -93,6 +94,7 @@ app.use('/api/v1/itau', itauPagamentosRoutes);
 app.use('/api/v1/sieg', siegRoutes);
 app.use('/api/v1/nfe', nfeCertRoutes);
 app.use('/api/v1/consultflex', consultflexRoutes);
+app.use('/api/v1/cep', cepRoutes);
 app.use('/callback/sieg', siegRoutes);
 
 // --- Root ---
@@ -135,6 +137,8 @@ app.get('/', (req, res) => {
       pix_pagar_listar: 'GET /api/v1/itau/pix-pagar/consultar',
       consultflex_consultar: 'POST /api/v1/consultflex/consultar',
       consultflex_consultar_odoo: 'POST /api/v1/consultflex/consultar-odoo/:saleOrderId',
+      cep_consultar: 'POST /api/v1/cep/cep',
+      cep_fontes: 'GET /api/v1/cep/fontes',
     },
     auth: 'Envie header X-API-Key para autenticacao.',
   });
