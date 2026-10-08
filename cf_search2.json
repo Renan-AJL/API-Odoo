@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://docs.payflex.co.za",
+    "name": "payflex API",
+    "snippet": "No information is available for this page.",
+    "host_name": "docs.payflex.co.za",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developers.lexware.io",
+    "name": "Lexware API Documentation",
+    "snippet": "This endpoint provides read and write access to credit notes and also the possibility to render the document as a PDF in order to download it.",
+    "host_name": "developers.lexware.io",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://my.adflex.co.uk/documentation",
+    "name": "Adflex API Documentation",
+    "snippet": "The Adflex payment API is a comprehensive set of RESTful API based web services which allow you to implement card payment processing into your applications.",
+    "host_name": "my.adflex.co.uk",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developers.intelex.com",
+    "name": "Intelex API Reference",
+    "snippet": "The Intelex API is organized around REST. Our API has predictable, resource-oriented URLs, and uses HTTP response codes to indicate API errors.",
+    "host_name": "developers.intelex.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://doc.adflex.io/openapi",
+    "name": "AdFlex API Documentation",
+    "snippet": "Learn how to use the AdFlex API to access millions of ad records from top platforms, with guides, filters, endpoints, and integration examples for developers.",
+    "host_name": "doc.adflex.io",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]
