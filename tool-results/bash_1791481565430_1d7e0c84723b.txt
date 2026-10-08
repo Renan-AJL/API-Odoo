@@ -1,0 +1,1036 @@
+Authenticated UID: 2
+================================================================================
+1. FIELDS ON sale.order CONTAINING 'consult' IN NAME
+================================================================================
+
+  Field: x_studio_resposta_consultflex
+    Description: Resposta ConsultFlex:
+    Type: html
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+    Help: False
+
+================================================================================
+2. ALL x_studio FIELDS ON sale.order
+================================================================================
+  Found 69 x_studio fields:
+
+  Field: x_studio_aliquota_destino
+    Description: aliquota_destino
+    Type: float
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_aliquota_interestadual
+    Description: aliquota_interestadual
+    Type: float
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_anexo_oc_venda
+    Description: Anexo OC
+    Type: binary
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_oc
+
+  Field: x_studio_anexo_oc_venda_fn
+    Description: Nome do Arquivo da OC
+    Type: char
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_oc_filename
+
+  Field: x_studio_arquivo_assinado
+    Description: Arquivo Assinado (Fabricação)
+    Type: binary
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_arquivo_assinado_filename
+    Description: Nome do Arquivo Assinado
+    Type: char
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_cartao_cnpj
+    Description: New Texto
+    Type: char
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_cartao_cnpj_1
+    Description: Cartão CNPJ
+    Type: binary
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_contrato_social
+    Description: Contrato Social
+    Type: binary
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_detector_altprecos
+    Description: Detector alt/preços
+    Type: boolean
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_endereco_completo
+    Description: Endereço Completo
+    Type: char
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_existe_solicitacao_em_aberto
+    Description: Existe Solicitação em Aberto?
+    Type: boolean
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: result = any(
+    atividade.activity_type_id.name == 'Revisão de Preços'
+    and not atividade.date_done
+    for atividade in self.activity_ids
+)
+    Related: False
+
+  Field: x_studio_forma_de_pagamento
+    Description: Forma de Pagamento
+    Type: selection
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_historico_bi
+    Description: Histórico bi
+    Type: text
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_identificacao_1
+    Description: Identificação 1
+    Type: selection
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_identificacao_2
+    Description: Identificação 2
+    Type: selection
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_identificacao_3
+    Description: Identificação 3
+    Type: selection
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_identificacao_4
+    Description: Identificação 4
+    Type: selection
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_impostos_aplicados
+    Description: Imposto(s) Aplicado(s):
+    Type: html
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_libera_cancel_base44
+    Description: Liberação de Cancelamento (Base44)
+    Type: boolean
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_link_assinatura
+    Description: Link para Assinatura:
+    Type: char
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_mini_bi
+    Description: Mini bi
+    Type: html
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_motorista
+    Description: Motorista
+    Type: selection
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_numero_oc_venda
+    Description: Número OC
+    Type: char
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_numero_oc
+
+  Field: x_studio_opcoes_de_entrega
+    Description: Opções de Entrega
+    Type: selection
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_pedido_de_venda
+    Description: Pedido de Venda
+    Type: char
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_peso_total
+    Description: Peso Total
+    Type: float
+    Store: True
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: for record in self:
+    total = 0.0
+
+    for line in record.order_line:
+        total += line.x_studio_peso_total_1 or 0.0
+
+    record["x_studio_peso_total"] = total
+    Related: False
+
+  Field: x_studio_preco_base_sem_difal
+    Description: preco_base_sem_difal
+    Type: monetary
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_related_field_18q_1jmtsti34
+    Description: Medidas Técnicas
+    Type: html
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: partner_id.opportunity_ids.x_studio_medidas_tecnicas
+
+  Field: x_studio_related_field_1jm_1jmtss8su
+    Description: Produto
+    Type: many2one
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: product.product
+    Compute: False
+    Related: partner_id.opportunity_ids.x_studio_related_field_5se_1jmbn02g7
+
+  Field: x_studio_related_field_1ul_1k32icjt7_filename
+    Description: x_studio_related_field_1ul_1k32icjt7 Filename
+    Type: char
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_cartao_cnpj_filename
+
+  Field: x_studio_related_field_311_1k264f31d
+    Description: Anexo 6
+    Type: binary
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_6
+
+  Field: x_studio_related_field_3v2_1k264bd31
+    Description: Anexo 3
+    Type: binary
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_3
+
+  Field: x_studio_related_field_4lu_1jub9afh9
+    Description: Status de Entrega TE
+    Type: html
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: invoice_ids.x_studio_status_de_entrega_te
+
+  Field: x_studio_related_field_4om_1jmtsrghf
+    Description: Tipo de Produto/Venda
+    Type: selection
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: partner_id.opportunity_ids.x_studio_tipo_de_produtovenda
+
+  Field: x_studio_related_field_4qt_1k264il8m
+    Description: Anexo 10
+    Type: binary
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_10
+
+  Field: x_studio_related_field_51j_1k264gu06
+    Description: Anexo 8
+    Type: binary
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_8
+
+  Field: x_studio_related_field_5fe_1k32ikg1s_filename
+    Description: x_studio_related_field_5fe_1k32ikg1s Filename
+    Type: char
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_contrato_social_filename
+
+  Field: x_studio_related_field_5u8_1jmtt10ln
+    Description: Anexo 2
+    Type: binary
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: partner_id.opportunity_ids.x_studio_anexo_2
+
+  Field: x_studio_related_field_5u8_1jmtt10ln_filename
+    Description: x_studio_related_field_5u8_1jmtt10ln Filename
+    Type: char
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: partner_id.opportunity_ids.x_studio_anexo_2_filename
+
+  Field: x_studio_related_field_64q_1jmtsvm3o
+    Description: Anexo 1
+    Type: binary
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: partner_id.opportunity_ids.x_studio_anexo_1
+
+  Field: x_studio_related_field_64q_1jmtsvm3o_filename
+    Description: x_studio_related_field_64q_1jmtsvm3o Filename
+    Type: char
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: partner_id.opportunity_ids.x_studio_anexo_1_filename
+
+  Field: x_studio_related_field_68a_1k264g3u0
+    Description: Anexo 7
+    Type: binary
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_7
+
+  Field: x_studio_related_field_6fs_1k264hsn1
+    Description: Anexo 9
+    Type: binary
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_9
+
+  Field: x_studio_related_field_6ip_1k264cf01
+    Description: Anexo 4
+    Type: binary
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_4
+
+  Field: x_studio_related_field_7qo_1k37utkte
+    Description: Anexo OC:
+    Type: binary
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_oc
+
+  Field: x_studio_related_field_7qo_1k37utkte_filename
+    Description: x_studio_related_field_7qo_1k37utkte Filename
+    Type: char
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_oc_filename
+
+  Field: x_studio_related_field_841_1jmtst07u
+    Description: Quantidade (Metros)
+    Type: float
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: partner_id.opportunity_ids.x_studio_related_field_5qt_1jmbng996
+
+  Field: x_studio_related_field_8ga_1jmtsqifc
+    Description: Produto Possui Cadastro?
+    Type: selection
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: partner_id.opportunity_ids.x_studio_produto_possui_cadastro
+
+  Field: x_studio_related_field_9cg_1k37unq6t
+    Description: Anexo OC:
+    Type: binary
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_oc
+
+  Field: x_studio_related_field_9cg_1k37unq6t_filename
+    Description: x_studio_related_field_9cg_1k37unq6t Filename
+    Type: char
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_oc_filename
+
+  Field: x_studio_related_field_9jg_1k264dqnc
+    Description: Anexo 5
+    Type: binary
+    Store: False
+    Required: False
+    Readonly: True
+    Relation: False
+    Compute: False
+    Related: opportunity_id.x_studio_anexo_5
+
+  Field: x_studio_related_field_9lu_1k29a1hhv
+    Description: Número OC:
+    Type: char
+    Store: False
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: x_studio_related_field_9o4_1jsu8vj6f
+
+  Field: x_studio_related_field_9o4_1jsu8vj6f
+    Description: Número OC:
+    Type: char
+    Store: False
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: partner_id.opportunity_ids.x_studio_numero_oc
+
+  Field: x_studio_resposta_consultflex
+    Description: Resposta ConsultFlex:
+    Type: html
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_resposta_financeiro
+    Description: Resposta (Financeiro)
+    Type: html
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_status_de_entrega_te
+    Description: Status de Entrega TE:
+    Type: html
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_studio_difal
+    Description: studio_difal
+    Type: float
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_te_delivery_type
+    Description: te_delivery_type
+    Type: char
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_te_error
+    Description: te_error
+    Type: text
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_te_last_sync
+    Description: te_last_sync
+    Type: date
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_te_order_id
+    Description: te order id
+    Type: char
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_te_situation
+    Description: te situation
+    Type: selection
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_te_sync
+    Description: te sync
+    Type: boolean
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_te_tracking_code
+    Description: te tracking code
+    Type: char
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_te_tracking_url
+    Description: te tracking url
+    Type: char
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_te_webhook_received
+    Description: te_webhook_received
+    Type: boolean
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_text_field_1ah_1k1cbbsmq
+    Description: New Texto multilinha
+    Type: text
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+  Field: x_studio_valor_difal
+    Description: valor_difal
+    Type: float
+    Store: True
+    Required: False
+    Readonly: False
+    Relation: False
+    Compute: False
+    Related: False
+
+
+================================================================================
+3. INHERITED VIEWS OF sale.order FORM CONTAINING 'consult' or 'ConsultFlex'
+================================================================================
+  No views found.
+
+  --- Additional search: views with 'ConsultFlex' in arch_db ---
+  Found 1 views referencing ConsultFlex in arch:
+
+  View ID: 3513
+    Name: Odoo Studio: sale.order.form customization
+    Key: studio_customization.odoo_studio_sale_ord_e09404d1-bb45-4467-a691-996ef3dfdc5d
+    Inherits: [1157, 'sale.order.form']
+    Arch DB (full):
+<data>
+  <xpath expr="/form" position="attributes">
+    <attribute name="create">false</attribute>
+  </xpath>
+  <xpath expr="/form//button[@name='1380']" position="after">
+    <button string="Solicitar Revisão de Preços" type="action" invisible="not x_studio_detector_altprecos or x_studio_existe_solicitacao_em_aberto" name="studio_customization.executar_codigo_392a83ce-aac0-47af-b47c-d6bed3e3654c"/>
+  </xpath>
+  <xpath expr="/form//button[@id='create_invoice']" position="attributes">
+    <attribute name="groups">account.group_account_manager</attribute>
+  </xpath>
+  <xpath expr="/form/header/button[@name='action_confirm'][2]" position="attributes">
+    <attribute name="invisible">x_studio_detector_altprecos</attribute>
+  </xpath>
+  <xpath expr="/form//button[@name='1380']" position="attributes">
+    <attribute name="groups">base.group_erp_manager,sales_team.group_sale_manager,project.group_project_manager,mrp.group_mrp_manager,quality.group_quality_manager,account.group_account_manager,purchase.group_purchase_manager,approvals.group_approval_manager,approvals.group_approval_user,hr.group_hr_manager,hr.group_hr_user,hr_expense.group_hr_expense_manager,im_livechat.im_livechat_group_manager,documents.group_documents_manager,documents.group_documents_system,survey.group_survey_manager,sign.group_sign_manager,helpdesk.group_helpdesk_manager,appointment.group_appointment_manager,stock.group_stock_manager,planning.group_planning_manager,mail.group_mail_canned_response_admin,whatsapp.group_whatsapp_admin,base.group_system</attribute>
+    <attribute name="invisible">False</attribute>
+  </xpath>
+  <xpath expr="/form//button[@name='action_view_delivery']" position="attributes">
+    <attribute name="invisible">True</attribute>
+  </xpath>
+  <xpath expr="/form//field[@name='sale_order_template_id']" position="after">
+    <field name="x_studio_detector_altprecos" invisible="True" force_save="0" readonly="False"/>
+    <field name="x_studio_existe_solicitacao_em_aberto" invisible="True"/>
+  </xpath>
+  <xpath expr="/form//field[@name='validity_date']" position="before">
+    <field invisible="True" name="x_studio_related_field_7qo_1k37utkte_filename"/>
+    <xpath expr="/form//field[@name='x_studio_numero_oc_venda']" position="move"/>
+    <xpath expr="/form//field[@name='x_studio_anexo_oc_venda']" position="move"/>
+    <field name="x_studio_forma_de_pagamento" required="True"/>
+    <field name="x_studio_opcoes_de_entrega"/>
+    <field name="x_studio_motorista" force_save="0" readonly="False" invisible="False" groups="account.group_account_manager"/>
+  </xpath>
+  <xpath expr="/form/sheet/group[@name='sale_header']/group[@name='order_details']/field[@name='date_order']" position="after">
+    <field name="x_studio_link_assinatura" widget="url" string="Link para Assinatura:"/>
+  </xpath>
+  <xpath expr="/form//field[@name='payment_term_id']" position="attributes">
+    <attribute name="invisible">True</attribute>
+  </xpath>
+  <xpath expr="/form//page[@name='other_information']" position="after">
+    <page string="Cotação Inicial (CRM)" name="studio_page_70b_1jmtspoot">
+      <group name="studio_group_70b">
+        <group name="studio_group_70b_left" string="DADOS CRM">
+          <field name="x_studio_related_field_8ga_1jmtsqifc"/>
+          <field name="x_studio_related_field_4om_1jmtsrghf"/>
+          <field name="x_studio_related_field_9lu_1k29a1hhv" string="Número OC:"/>
+          <field filename="x_studio_related_field_9cg_1k37unq6t_filename" name="x_studio_related_field_9cg_1k37unq6t"/>
+          <field invisible="True" name="x_studio_related_field_9cg_1k37unq6t_filename"/>
+        </group>
+        <group name="studio_group_70b_right" string="DADOS CRM">
+          <field name="x_studio_related_field_1jm_1jmtss8su"/>
+          <field name="x_studio_related_field_841_1jmtst07u"/>
+          <field name="x_studio_related_field_18q_1jmtsti34"/>
+        </group>
+      </group>
+      <group name="studio_group_3ec_1jmtsumbg">
+        <group name="studio_group_3ec_left" string="FOTOS" invisible="True">
+          <field filename="x_studio_related_field_64q_1jmtsvm3o_filename" name="x_studio_related_field_64q_1jmtsvm3o" widget="contact_image"/>
+          <field name="x_studio_related_field_3v2_1k264bd31" invisible="not x_studio_related_field_5u8_1jmtt10ln"/>
+          <field name="x_studio_related_field_9jg_1k264dqnc" invisible="not x_studio_related_field_6ip_1k264cf01"/>
+          <field name="x_studio_related_field_68a_1k264g3u0" invisible="not x_studio_related_field_311_1k264f31d"/>
+          <field name="x_studio_related_field_6fs_1k264hsn1" invisible="not x_studio_related_field_51j_1k264gu06"/>
+          <field invisible="True" name="x_studio_related_field_64q_1jmtsvm3o_filename"/>
+        </group>
+        <group name="studio_group_3ec_right" string="FOTOS" invisible="True">
+          <field filename="x_studio_related_field_5u8_1jmtt10ln_filename" name="x_studio_related_field_5u8_1jmtt10ln" widget="contact_image"/>
+          <!-- CORRIGIDO: refer&#234;ncia para o campo que realmente existe -->
+          <field name="x_studio_related_field_6ip_1k264cf01" invisible="not x_studio_related_field_3v2_1k264bd31"/>
+          <field name="x_studio_related_field_311_1k264f31d" invisible="not x_studio_related_field_9jg_1k264dqnc"/>
+          <field name="x_studio_related_field_51j_1k264gu06" invisible="not x_studio_related_field_68a_1k264g3u0"/>
+          <field name="x_studio_related_field_4qt_1k264il8m" invisible="not x_studio_related_field_6fs_1k264hsn1"/>
+          <field invisible="True" name="x_studio_related_field_5u8_1jmtt10ln_filename"/>
+        </group>
+      </group>
+    </page>
+    <page string="Resumo" name="studio_page_50d_1jnv8v1uo" groups="sales_team.group_sale_manager" invisible="True">
+      <group name="studio_group_50d">
+        <group name="studio_group_50d_left">
+          <field name="x_studio_aliquota_destino" groups="sales_team.group_sale_manager"/>
+          <field name="x_studio_aliquota_interestadual" string="ICMS:" groups="sales_team.group_sale_manager"/>
+          <field name="x_studio_studio_difal" groups="sales_team.group_sale_manager"/>
+          <field name="x_studio_valor_difal" groups="sales_team.group_sale_manager"/>
+          <field name="x_studio_preco_base_sem_difal" groups="sales_team.group_sale_manager"/>
+        </group>
+        <group name="studio_group_50d_right"/>
+      </group>
+    </page>
+    <page string="TudoEntregue" name="studio_page_2g0_1jsubvake" invisible="False">
+      <group name="studio_group_2g0" invisible="True">
+        <group name="studio_group_2g0_left">
+          <field name="x_studio_te_sync"/>
+          <field name="x_studio_te_order_id"/>
+          <field name="x_studio_te_tracking_code"/>
+          <field name="x_studio_te_tracking_url"/>
+          <field name="x_studio_te_situation"/>
+        </group>
+        <group name="studio_group_2g0_right">
+          <field name="x_studio_te_last_sync"/>
+          <field name="x_studio_te_error"/>
+          <field name="x_studio_te_webhook_received"/>
+          <field name="x_studio_te_delivery_type"/>
+        </group>
+      </group>
+      <group name="studio_group_10c_1jual5no8">
+        <group name="studio_group_10c_left">
+          <field name="x_studio_status_de_entrega_te" force_save="1" readonly="True" invisible="True"/>
+          <field name="x_studio_related_field_4lu_1jub9afh9"/>
+        </group>
+        <group name="studio_group_10c_right"/>
+      </group>
+    </page>
+    <page string="Produção" name="studio_page_20v_1k14ju6us">
+      <group name="studio_group_20v">
+        <field name="x_studio_mini_bi" force_save="1" readonly="True"/>
+        <field name="x_studio_historico_bi" force_save="1" readonly="True" invisible="True"/>
+      </group>
+    </page>
+    <page string="Aprovação de Boleto" name="studio_page_8gj_1k32iag6g">
+      <group name="studio_group_8gj">
+        <group name="studio_group_8gj_left" string="VENDAS:">
+          <field invisible="True" name="x_studio_related_field_5fe_1k32ikg1s_filename"/>
+          <field invisible="True" name="x_studio_related_field_1ul_1k32icjt7_filename"/>
+          <field widget="binary" name="x_studio_cartao_cnpj_1"/>
+          <field name="x_studio_endereco_completo"/>
+          <field widget="binary" name="x_studio_contrato_social"/>
+          <field name="x_studio_pedido_de_venda"/>
+        </group>
+        <group name="studio_group_8gj_right" string="RESPOSTA:" groups="account.group_account_manager">
+          <field name="x_studio_resposta_financeiro"/>
+        </group>
+      </group>
+      <group name="studio_group_714_1k32iqapc">
+        <group name="studio_group_714_left"/>
+      </group>
+    </page>
+    <page string="Consult Flex" name="studio_page_7b7_1k4e8rnuv" groups="account.group_account_manager">
+      <group name="studio_group_7b7">
+        <group name="studio_group_7b7_left">
+          <field name="x_studio_resposta_consultflex"/>
+        </group>
+        <group name="studio_group_7b7_right"/>
+      </group>
+    </page>
+  </xpath>
+  <xpath expr="/form//group[@name='note_group']" position="after">
+    <group name="studio_group_5gj_1jobgmuu5">
+      <group name="studio_group_5gj_left"/>
+      <group name="studio_group_5gj_right">
+        <field name="currency_id"/>
+        <field name="amount_total"/>
+        <field name="x_studio_peso_total" force_save="1" readonly="True"/>
+        <field name="x_studio_impostos_aplicados" groups="sales_team.group_sale_manager"/>
+      </group>
+    </group>
+  </xpath>
+  <xpath expr="/form//field[@name='order_line']" position="attributes">
+    <attribute name="force_save">1</attribute>
+    <attribute name="readonly">state == "cancel" or locked or state == "sale"</attribute>
+  </xpath>
+  <xpath expr="/form/sheet/notebook/page[@name='order_lines']/field[@name='order_line']/form//field[@name='tax_ids']" position="after">
+    <field name="x_studio_preco_base_sem_difal"/>
+    <field name="currency_id"/>
+    <field name="x_studio_related_field_5se_1jshsqjt6"/>
+    <field name="x_studio_peso_total_1" invisible="False" force_save="0" readonly="False"/>
+    <xpath expr="/form/sheet/notebook/page[@name='order_lines']/field[@name='order_line']/list//field[@name='x_studio_margem_']" position="move"/>
+    <field name="x_studio_preco_total"/>
+  </xpath>
+  <xpath expr="/form/sheet/notebook/page[@name='order_lines']/field[@name='order_line']/form//field[@name='x_studio_margem_']" position="attributes">
+    <attribute name="groups"/>
+    <attribute name="optional"/>
+    <attribute name="string"/>
+  </xpath>
+  <xpath expr="/form/sheet/notebook/page[@name='order_lines']/field[@name='order_line']/form//field[@name='route_ids']" position="after">
+    <field widget="contact_image" name="x_studio_foto" alt="Inserir foto" help="Insira a foto clicando neste campo"/>
+    <field name="x_studio_fabricar" help="Itens que serão enviados ao chão de fábrica para produção." class="text-center" style="transform: scale(1.12);"/>
+    <field name="x_studio_related_field_8s3_1k2gdpaj7"/>
+    <field name="price_total" invisible="True"/>
+    <field name="price_reduce_taxinc" invisible="True"/>
+  </xpath>
+  <xpath expr="/form/sheet/notebook/page[@name='order_lines']/field[@name='order_line']/form//field[@name='invoice_lines']" position="inside">
+    <form string="Journal Item" create="false">
+      <sheet name="studio_sheet_27060">
+        <field name="company_id" invisible="1"/>
+        <field name="parent_state" invisible="1"/>
+        <group name="studio_group_f8f1bf">
+          <group name="studio_group_9f9b93">
+            <field name="account_id" options="{'no_create': True}" domain="[('company_ids', 'parent_of', company_id)]" readonly="1"/>
+            <field name="debit" readonly="1"/>
+            <field name="credit" readonly="1"/>
+            <field name="balance" readonly="1"/>
+            <field name="quantity" readonly="1"/>
+          </group>
+          <group string="Dates" name="studio_group_a3a2cc">
+            <field name="date" groups="account.group_account_readonly"/>
+            <field name="date_maturity"/>
+          </group>
+          <group string="Taxes" invisible="not tax_line_id and not tax_ids" name="studio_group_41f6df">
+            <field name="tax_line_id" readonly="1" invisible="not tax_line_id"/>
+            <field name="tax_ids" widget="many2many_tax_tags" readonly="1" invisible="not tax_ids"/>
+          </group>
+          <group string="Matching" invisible="not matched_debit_ids and not matched_credit_ids" name="studio_group_a9f3d0">
+            <label for="full_reconcile_id"/>
+            <div name="studio_div_723bdf">
+              <field name="full_reconcile_id" invisible="full_reconcile_id"/>
+              <field name="matched_debit_ids" invisible="1"/>
+              <field name="matched_credit_ids" invisible="1"/>
+              <button name="open_reconcile_view" class="oe_link" type="object" string="-&gt; View partially reconciled entries" invisible="full_reconcile_id or not matched_debit_ids and not matched_credit_ids">
+              </button>
+            </div>
+          </group>
+          <group string="Currency" groups="base.group_multi_currency" name="studio_group_6834b6">
+            <field name="currency_id" invisible="1"/>
+            <field name="display_type" invisible="1"/>
+            <field name="amount_currency" readonly="display_type != 'tax' or parent_state != 'draft'"/>
+          </group>
+          <group string="Product" invisible="not product_id" name="studio_group_6b6cf5">
+            <field name="product_id" readonly="1"/>
+          </group>
+          <group string="Analytic" groups="analytic.group_analytic_accounting" name="studio_group_268c67">
+            <field name="analytic_distribution" widget="analytic_distribution" groups="analytic.group_analytic_accounting" readonly="1"/>
+          </group>
+        </group>
+      </sheet>
+    </form>
+  </xpath>
+  <xpath expr="/form/sheet/notebook/page[@name='order_lines']/field[@name='order_line']/list//field[@name='name']" position="after">
+    <field name="x_studio_margem_" optional="show" widget="percentpie" invisible="False" column_invisible="False" groups="base.group_erp_manager"/>
+  </xpath>
+  <xpath expr="/form/sheet/notebook/page[@name='order_lines']/field[@name='order_line']/list//field[@name='product_uom_qty']" position="after">
+    <field name="x_studio_related_field_5se_1jshsqjt6" optional="show"/>
+    <field name="x_studio_peso_total_1" optional="show"/>
+  </xpath>
+  <xpath expr="/form/sheet/notebook/page[@name='order_lines']/field[@name='order_line']/list//field[@name='price_unit']" position="after">
+    <field name="x_studio_preco_total" optional="show"/>
+  </xpath>
+  <xpath expr="/form/sheet/notebook/page[@name='order_lines']/field[@name='order_line']/list//field[@name='tax_ids']" position="after">
+    <field name="x_studio_foto" optional="show"/>
+    <field name="x_studio_related_field_8s3_1k2gdpaj7" optional="show" string="Estoque Qtde"/>
+    <field name="x_studio_fabricar" optional="show" class="text-center" style="transform: scale(1.12);"/>
+    <xpath expr="/form/sheet/notebook/page[@name='order_lines']/field[@name='order_line']/list/field[@name='price_subtotal']" position="move"/>
+  </xpath>
+  <xpath expr="/form/sheet/notebook/page[@name='order_lines']/field[@name='order_line']/list/field[@name='price_subtotal']" position="attributes">
+    <attribute name="column_invisible">True</attribute>
+  </xpath>
+  <xpath expr="/form//button[@name='button_external_tax_calculation']" position="after">
+    <button string="Desconto / Acréscimo" name="1398" type="action" class="btn btn-secondary" invisible="locked or state == 'cancel'"/>
+  </xpath>
+  <xpath expr="/form/sheet/notebook/page[@name='order_lines']/div[@name='so_button_below_order_lines']/button[@name='action_open_discount_wizard']" position="attributes">
+    <attribute name="invisible">False</attribute>
+  </xpath>
+  <xpath expr="/form/sheet/notebook/page[@name='order_lines']/div[@name='so_button_below_order_lines']/button[@name='action_open_delivery_wizard']" position="attributes">
+    <attribute name="invisible">True</attribute>
+  </xpath>
+  <xpath expr="/form//group[@name='sale_total']" position="replace"/>
+  <xpath expr="/form//page[@name='pdf_quote_builder']" position="attributes">
+    <attribute name="invisible">True</attribute>
+  </xpath>
+</data>
+
+
+================================================================================
+4. MAIN sale.order FORM VIEW (key = sale.view_order_form)
+================================================================================
+  Main form view not found by key. Trying name search...
+  View ID: 1157, Name: sale.order.form, Key: False
+  Arch (first 3000 chars):
+<form string="Sales Order" class="o_sale_order">
+            <header>
+                <button string="Capture Transaction" name="payment_action_capture" type="object" data-hotkey="shift+g" class="oe_highlight" invisible="not has_authorized_transaction_ids"/>
+                <button string="Void Transaction" name="payment_action_void" type="object" data-hotkey="shift+v" confirm="Are you sure you want to void the authorized transaction? This action can't be undone." invisible="not has_authorized_transaction_ids"/>
+                <button string="Create Invoice" id="create_invoice" name="429" type="action" class="btn-primary" data-hotkey="q" invisible="invoice_status != 'to invoice'"/>
+                <button string="Create Invoice" id="create_invoice_percentage" name="429" type="action" context="{'default_advance_payment_method': 'percentage'}" data-hotkey="q" invisible="invoice_status != 'no' or state != 'sale'"/>
+                <button string="Deliver" id="deliver_quantities" name="deliver_sold_quantity" type="object" invisible="not show_deliver_button" data-hotkey="d"/>
+                <button string="Send" id="quotation_send_primary" name="action_quotation_send" type="object" context="{'validate_analytic': True, 'check_document_layout': True}" class="btn-primary" data-hotkey="g" invisible="state != 'draft'"/>
+                <button string="Send PRO FORMA Invoice" id="send_proforma_primary" name="action_quotation_send" type="object" context="{'proforma': True, 'validate_analytic': True}" class="btn-primary" groups="sale.group_proforma_sales" invisible="state != 'draft' or invoice_count &gt;= 1"/>
+                <button string="Confirm" id="action_confirm" name="action_confirm" type="object" context="{'validate_analytic': True}" class="btn-primary" data-hotkey="q" invisible="state != 'sent'"/>
+                <button string="Print" name="sale.action_report_saleorder" type="action" data-hotkey="i" invisible="state == 'sale'"/>
+                <button string="Confirm" name="action_confirm" type="object" context="{'validate_analytic': True}" data-hotkey="q" invisible="state != 'draft'"/>
+                <button string="Send PRO FORMA Invoice" id="send_proforma" name="action_quotation_send" type="object" context="{'proforma': True, 'validate_analytic': True}" invisible="state == 'draft' or invoice_count &gt;= 1" groups="sale.group_proforma_sales"/>
+                <button string="Send" id="quotation_send" name="action_quotation_send" type="object" context="{'validate_analytic': True, 'check_document_layout': True}" data-hotkey="g" invisible="state not in ('sent', 'sale')"/>
+
+                <!-- allow to unlock locked orders even if setting is not enabled (e.g. orders synchronized from connectors) -->
+                <button string="Unlock" name="action_unlock" type="object" invisible="not locked" groups="sales_team.group_sale_manager"/>
+                <button string="Preview" name="action_preview_sale_order" type="object" class="btn-secondary"/>
+
+
+================================================================================
+5. SERVER ACTIONS RELATED TO ConsultFlex ON sale.order
+================================================================================
+  No server actions found.
+
+  --- Broader search: any ir.actions.server with 'consult' in name ---
+  No actions found.
+
+================================================================================
+6. GROUPS RELATED TO 'financeiro' OR 'financial'
+================================================================================
+  Error: <Fault 1: 'Traceback (most recent call last):\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 3132, in _determine_fields_to_fetch\n    field = self._fields[field_name]\n            ~~~~~~~~~~~~^^^^^^^^^^^^\nKeyError: \'category_id\'\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File "/home/odoo/src/odoo/saas-19.3/addons/rpc/controllers/xmlrpc.py", line 164, in xmlrpc_2\n    response = self._xmlrpc(service)\n               ^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/custom/trial/saas_trial/controllers/main.py", line 486, in _xmlrpc\n    res = super()._xmlrpc(service)\n          ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/addons/rpc/controllers/xmlrpc.py", line 136, in _xmlrpc\n    result = dispatch_rpc(service, method, params)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/http/router.py", line 142, in dispatch_rpc\n    return dispatch(method, params)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 90, in dispatch\n    res = execute_cr(cr, uid, model, method_, args, kw)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 106, in execute_cr\n    result = retrying(partial(call_kw, recs, method, args, kw), env)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/http/retrying.py", line 52, in retrying\n    result = func()\n             ^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 55, in call_kw\n    result = method(recs, *args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 5183, in search_read\n    records = self.search_fetch(domain or [], fields, offset=offset, limit=limit, order=order)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 1456, in search_fetch\n    fields_to_fetch = self._determine_fields_to_fetch(field_names)\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 3134, in _determine_fields_to_fetch\n    raise ValueError(f"Invalid field {field_name!r} on {self._name!r}") from e\nValueError: Invalid field \'category_id\' on \'res.groups\'\n'>
+
+================================================================================
+INVESTIGATION COMPLETE
+================================================================================

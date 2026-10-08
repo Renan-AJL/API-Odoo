@@ -1,0 +1,380 @@
+================================================================================
+6. GROUPS RELATED TO 'financeiro' OR 'financial'
+================================================================================
+  Error with extended fields: <Fault 1: 'Traceback (most recent call last):\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 3132, in _determine_fields_to_fetch\n    field = self._fields[field_name]\n            ~~~~~~~~~~~~^^^^^^^^^^^^\nKeyError: \'users\'\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File "/home/odoo/src/odoo/saas-19.3/addons/rpc/controllers/xmlrpc.py", line 164, in xmlrpc_2\n    response = self._xmlrpc(service)\n               ^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/custom/trial/saas_trial/controllers/main.py", line 486, in _xmlrpc\n    res = super()._xmlrpc(service)\n          ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/addons/rpc/controllers/xmlrpc.py", line 136, in _xmlrpc\n    result = dispatch_rpc(service, method, params)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/http/router.py", line 142, in dispatch_rpc\n    return dispatch(method, params)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 90, in dispatch\n    res = execute_cr(cr, uid, model, method_, args, kw)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 106, in execute_cr\n    result = retrying(partial(call_kw, recs, method, args, kw), env)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/http/retrying.py", line 52, in retrying\n    result = func()\n             ^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 55, in call_kw\n    result = method(recs, *args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 5183, in search_read\n    records = self.search_fetch(domain or [], fields, offset=offset, limit=limit, order=order)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 1456, in search_fetch\n    fields_to_fetch = self._determine_fields_to_fetch(field_names)\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 3134, in _determine_fields_to_fetch\n    raise ValueError(f"Invalid field {field_name!r} on {self._name!r}") from e\nValueError: Invalid field \'users\' on \'res.groups\'\n'>
+  Error with minimal fields too: <Fault 1: 'Traceback (most recent call last):\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 3132, in _determine_fields_to_fetch\n    field = self._fields[field_name]\n            ~~~~~~~~~~~~^^^^^^^^^^^^\nKeyError: \'users\'\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File "/home/odoo/src/odoo/saas-19.3/addons/rpc/controllers/xmlrpc.py", line 164, in xmlrpc_2\n    response = self._xmlrpc(service)\n               ^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/custom/trial/saas_trial/controllers/main.py", line 486, in _xmlrpc\n    res = super()._xmlrpc(service)\n          ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/addons/rpc/controllers/xmlrpc.py", line 136, in _xmlrpc\n    result = dispatch_rpc(service, method, params)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/http/router.py", line 142, in dispatch_rpc\n    return dispatch(method, params)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 90, in dispatch\n    res = execute_cr(cr, uid, model, method_, args, kw)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 106, in execute_cr\n    result = retrying(partial(call_kw, recs, method, args, kw), env)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/http/retrying.py", line 52, in retrying\n    result = func()\n             ^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 55, in call_kw\n    result = method(recs, *args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 5183, in search_read\n    records = self.search_fetch(domain or [], fields, offset=offset, limit=limit, order=order)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 1456, in search_fetch\n    fields_to_fetch = self._determine_fields_to_fetch(field_names)\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 3134, in _determine_fields_to_fetch\n    raise ValueError(f"Invalid field {field_name!r} on {self._name!r}") from e\nValueError: Invalid field \'users\' on \'res.groups\'\n'>
+  No groups found or all queries failed.
+
+================================================================================
+4. FULL MAIN sale.order FORM VIEW
+================================================================================
+  View ID: 1157
+  Name: sale.order.form
+
+  FULL ARCH DB:
+<form string="Sales Order" class="o_sale_order">
+            <header>
+                <button string="Capture Transaction" name="payment_action_capture" type="object" data-hotkey="shift+g" class="oe_highlight" invisible="not has_authorized_transaction_ids"/>
+                <button string="Void Transaction" name="payment_action_void" type="object" data-hotkey="shift+v" confirm="Are you sure you want to void the authorized transaction? This action can't be undone." invisible="not has_authorized_transaction_ids"/>
+                <button string="Create Invoice" id="create_invoice" name="429" type="action" class="btn-primary" data-hotkey="q" invisible="invoice_status != 'to invoice'"/>
+                <button string="Create Invoice" id="create_invoice_percentage" name="429" type="action" context="{'default_advance_payment_method': 'percentage'}" data-hotkey="q" invisible="invoice_status != 'no' or state != 'sale'"/>
+                <button string="Deliver" id="deliver_quantities" name="deliver_sold_quantity" type="object" invisible="not show_deliver_button" data-hotkey="d"/>
+                <button string="Send" id="quotation_send_primary" name="action_quotation_send" type="object" context="{'validate_analytic': True, 'check_document_layout': True}" class="btn-primary" data-hotkey="g" invisible="state != 'draft'"/>
+                <button string="Send PRO FORMA Invoice" id="send_proforma_primary" name="action_quotation_send" type="object" context="{'proforma': True, 'validate_analytic': True}" class="btn-primary" groups="sale.group_proforma_sales" invisible="state != 'draft' or invoice_count &gt;= 1"/>
+                <button string="Confirm" id="action_confirm" name="action_confirm" type="object" context="{'validate_analytic': True}" class="btn-primary" data-hotkey="q" invisible="state != 'sent'"/>
+                <button string="Print" name="sale.action_report_saleorder" type="action" data-hotkey="i" invisible="state == 'sale'"/>
+                <button string="Confirm" name="action_confirm" type="object" context="{'validate_analytic': True}" data-hotkey="q" invisible="state != 'draft'"/>
+                <button string="Send PRO FORMA Invoice" id="send_proforma" name="action_quotation_send" type="object" context="{'proforma': True, 'validate_analytic': True}" invisible="state == 'draft' or invoice_count &gt;= 1" groups="sale.group_proforma_sales"/>
+                <button string="Send" id="quotation_send" name="action_quotation_send" type="object" context="{'validate_analytic': True, 'check_document_layout': True}" data-hotkey="g" invisible="state not in ('sent', 'sale')"/>
+
+                <!-- allow to unlock locked orders even if setting is not enabled (e.g. orders synchronized from connectors) -->
+                <button string="Unlock" name="action_unlock" type="object" invisible="not locked" groups="sales_team.group_sale_manager"/>
+                <button string="Preview" name="action_preview_sale_order" type="object" class="btn-secondary"/>
+                <button string="Cancel" name="action_cancel" type="object" confirm-title="Cancel Order" confirm="Cancelling this order will set its status to 'Cancelled' and will update related documents and processes. Are you sure?" confirm-label="Yes, cancel order" cancel-label="No, go back" data-hotkey="x" invisible="state not in ['draft', 'sent', 'sale'] or not id or locked"/>
+                <button string="Set to Quotation" name="action_draft" type="object" data-hotkey="w" invisible="state != 'cancel'"/>
+                <t groups="sale.group_auto_done_setting">
+                    <button string="Lock" name="action_lock" type="object" help="If the sale is locked, you can not modify it anymore. However, you will still be able to invoice or deliver." invisible="locked or state != 'sale'" groups="sales_team.group_sale_manager"/>
+                </t>
+                <button string="Reopen Invoicing" name="action_reopen_order" type="object" class="btn-primary" invisible="not invoicing_closed or state != 'sale'" groups="sales_team.group_sale_manager"/>
+                <field name="state" widget="statusbar" statusbar_visible="draft,sent,sale"/>
+            </header>
+            <div class="alert alert-warning" role="alert" invisible="not sale_warning_text">
+                <field name="sale_warning_text" class="fw-bold"/>
+            </div>
+            <div class="alert alert-warning" role="alert" invisible="partner_credit_warning == ''">
+                <field name="partner_credit_warning"/>
+            </div>
+            <div class="alert alert-warning p-3 text-center" role="alert" invisible="state not in ['draft', 'sent'] or not has_archived_products">
+                <span>Warning: This quote contains archived product(s)</span>
+            </div>
+            <div class="alert alert-warning w-100 d-flex align-items-center gap-1" invisible="state != 'draft' or not duplicated_order_ids" role="alert">
+                <span>Warning: this order might be a duplicate of</span>
+                <field name="duplicated_order_ids" widget="x2many_buttons" string="Duplicated Documents"/>
+            </div>
+            <sheet>
+                <div class="oe_button_box" name="button_box">
+                    <button name="action_view_invoice" type="object" class="oe_stat_button" icon="fa-pencil-square-o" invisible="invoice_count == 0">
+                        <field name="invoice_count" widget="statinfo" string="Invoices"/>
+                    </button>
+                </div>
+                <div class="badge rounded-pill text-bg-secondary float-end fs-6 border-0" invisible="not locked">
+                    <i class="fa fa-lock"/>
+                    Locked
+                </div>
+                <div class="oe_title">
+                    <h1 class="o_outlined">
+                        <field name="name" readonly="1"/>
+                    </h1>
+                </div>
+                <group name="sale_header">
+                    <group name="partner_details">
+                        <field name="partner_id" widget="res_partner_many2one" context="{'res_partner_search_mode': 'customer', 'show_address': 1, 'show_vat': True}" placeholder="Type to find a customer..." readonly="state in ['cancel', 'sale']"/>
+                        <field name="partner_invoice_id" groups="account.group_delivery_invoice_address" options="{'no_quick_create': True}" context="{'default_type': 'invoice', 'show_address': False, 'show_vat': False, 'default_parent_id': partner_id}" readonly="state == 'cancel' or locked"/>
+                        <field name="partner_shipping_id" groups="account.group_delivery_invoice_address" options="{'no_quick_create': True}" context="{'default_type': 'delivery', 'show_address': False, 'show_vat': False, 'default_parent_id': partner_id}" readonly="state == 'cancel' or locked"/>
+                    </group>
+                    <group name="order_details">
+                        <field name="validity_date" invisible="state == 'sale'" readonly="state in ['cancel', 'sale']"/>
+                        <div class="o_td_label" groups="base.group_no_one" invisible="state in ['sale', 'cancel']">
+                            <label for="date_order" string="Quotation Date"/>
+                        </div>
+                        <field name="date_order" nolabel="1" groups="base.group_no_one" invisible="state in ['sale', 'cancel']" readonly="state in ['cancel', 'sale']"/>
+                        <div class="o_td_label" invisible="state in ['draft', 'sent']">
+                            <label for="date_order" string="Order Date"/>
+                        </div>
+                        <field name="date_order" nolabel="1" invisible="state in ['draft', 'sent']" readonly="state in ['cancel', 'sale']"/>
+                        <field name="show_update_pricelist" invisible="1"/>
+                        <label for="pricelist_id" groups="product.group_product_pricelist" invisible="not has_active_pricelist"/>
+                        <div groups="product.group_product_pricelist" class="o_row" invisible="not has_active_pricelist">
+                            <field name="pricelist_id" options="{'no_open': True, 'no_create': True}" readonly="state in ['cancel', 'sale']"/>
+                            <button name="action_update_prices" type="object" string="Update Prices" help="Recompute all prices based on this pricelist" class="btn-link mb-1 px-0" icon="fa-refresh" confirm="This will update the unit price of all products based on the new pricelist." invisible="not show_update_pricelist or state in ['sale', 'cancel']"/>
+                        </div>
+                        <field name="currency_id" invisible="1"/>
+                        <field name="pricelist_id" invisible="1" readonly="state in ['cancel', 'sale']" groups="!product.group_product_pricelist"/>
+                        <field name="payment_term_id" placeholder="Immediate" options="{'no_open': True, 'no_create': True}"/>
+                        <label for="commitment_date" invisible="state == 'draft'"/>
+                        <label for="commitment_date" string="Delivery Date" invisible="state != 'draft'"/>
+                        <div name="commitment_date_div" class="o_row align-items-center">
+                            <field name="commitment_date" options="{'placeholder_field': 'expected_date'}" readonly="state == 'cancel' or locked"/>
+                            <field name="delivery_status" widget="badge" decoration-success="delivery_status == 'full'" decoration-warning="delivery_status == 'partial'" decoration-info="delivery_status in ['pending', 'started']" invisible="state != 'sale'"/>
+                        </div>
+                        <field name="expected_date" invisible="1"/>  <!-- Needed for the placeholder widget -->
+                   </group>
+                </group>
+                <notebook>
+                    <page string="Order Lines" name="order_lines">
+                        <field name="order_line" widget="sol_o2m" mode="list,kanban" readonly="state == 'cancel' or locked" aggregated_fields="price_subtotal,price_total" options="{'hide_composition': True, 'hide_prices': True, 'subsections': True}">
+                            <form>
+                                <field name="technical_price_unit" invisible="1"/>
+                                <!--
+                                    We need the sequence field to be here for new lines to be added at the correct position.
+                                    TODO: at some point we want to fix this in the framework so that an invisible field is not required.
+                                -->
+                                <field name="sequence" invisible="1"/>
+                                <!-- Display_type must be specified as non readonly (which would be the case with the default field added by ORM) -->
+                                <field name="display_type" invisible="1"/>
+                                <group>
+                                    <group invisible="display_type">
+                                        <label for="product_id"/>
+                                        <div class="d-flex align-items-baseline">
+                                            <span class="fa fa-exclamation-triangle text-warning me-1" title="This product is archived" invisible="state not in ['draft', 'sent'] or not is_product_archived"/>
+                                            <field name="product_id" context="{                                                     'default_uom_id': product_uom_id,                                                     'partner_id': parent.partner_id,                                                 }" readonly="not product_updatable" required="not display_type and not is_downpayment" force_save="1" widget="many2one_barcode"/>
+                                        </div>
+                                        <label for="product_uom_qty"/>
+                                        <div class="o_row" name="ordered_qty">
+                                            <field name="product_uom_qty"/>
+                                            <field name="product_uom_id" force_save="1" groups="uom.group_uom" class="oe_no_button" widget="many2one_uom" readonly="product_uom_readonly" required="not display_type and not is_downpayment"/>
+                                            <widget name="simple_qty_at_date_widget"/>
+                                        </div>
+                                        <label for="qty_delivered" string="Delivered" invisible="parent.state != 'sale'"/>
+                                        <div name="delivered_qty" invisible="parent.state != 'sale'">
+                                            <field name="qty_delivered" readonly="qty_delivered_method != 'manual'"/>
+                                        </div>
+                                        <label for="qty_invoiced" string="Invoiced" invisible="parent.state != 'sale'"/>
+                                        <div name="invoiced_qty" invisible="parent.state != 'sale'">
+                                            <field name="qty_invoiced"/>
+                                        </div>
+                                        <field name="price_unit"/>
+                                        <field name="tax_ids" widget="many2many_tax_tags" options="{'no_create': True}" context="{'search_view_ref': 'account.account_tax_view_search'}" readonly="qty_invoiced &gt; 0"/>
+                                        <t groups="sale.group_discount_per_so_line">
+                                            <label for="discount"/>
+                                            <div name="discount">
+                                                <field name="discount" class="oe_inline"/> %
+                                            </div>
+                                        </t>
+                                    </group>
+                                    <group invisible="display_type">
+                                        <label for="customer_lead"/>
+                                        <div name="lead">
+                                            <field name="customer_lead" class="oe_inline" readonly="product_type != 'consu'"/> days
+                                        </div>
+                                        <field name="analytic_distribution" widget="analytic_distribution" groups="analytic.group_analytic_accounting" options="{'product_field': 'product_id', 'business_domain': 'sale_order'}"/>
+                                    </group>
+                                </group>
+                                <label for="name" string="Description" invisible="display_type"/>
+                                <label for="name" string="Section Name (eg. Products, Services)" invisible="display_type != 'line_section'"/>
+                                <label for="name" string="Subsection Name" invisible="display_type != 'line_subsection'"/>
+                                <label for="name" string="Note" invisible="display_type != 'line_note'"/>
+                                <field name="name"/>
+                                <group>
+                                    <field name="collapse_composition" invisible="display_type not in ['line_section', 'line_subsection']" readonly="1"/>
+                                    <field name="collapse_prices" invisible="display_type not in ['line_section', 'line_subsection']" readonly="1"/>
+                                </group>
+                                <div name="invoice_lines" groups="base.group_no_one" invisible="display_type">
+                                    <label for="invoice_lines"/>
+                                    <field name="invoice_lines"/>
+                                </div>
+                            </form>
+                            <list string="Sales Order Lines" editable="bottom" limit="200" decoration-warning="(state in ['draft', 'sent'] and is_product_archived) or sale_line_warn_msg">
+                                <control>
+                                    <create name="add_product_control" string="Add a product" data-hotkey="shift+p"/>
+                                    <create name="add_section_control" string="Add a section" data-hotkey="shift+h" context="{'default_display_type': 'line_section'}"/>
+                                    <create name="add_note_control" string="Add a note" data-hotkey="shift+n" context="{'default_display_type': 'line_note'}"/>
+                                    <button string="Catalog" data-hotkey="shift+k" name="action_add_from_catalog" type="object" class="px-4 btn-link" context="{'order_id': parent.id}"/>
+                                </control>
+
+                                <!-- Non readonly invisible fields, must be specified manually, because fields added automatically by the ORM
+                                    are readonly, widgets fieldDependencies too -->
+                                <field name="display_type" column_invisible="True"/>
+                                <field name="product_custom_attribute_value_ids" column_invisible="1">
+                                    <list>
+                                        <field name="custom_product_template_attribute_value_id"/>
+                                        <field name="custom_value"/>
+                                    </list>
+                                </field>
+                                <field name="product_no_variant_attribute_value_ids" column_invisible="1"/>
+                                <field name="technical_price_unit" column_invisible="1"/>
+                                <field name="linked_line_id" column_invisible="1"/>
+                                <field name="combo_item_id" column_invisible="1"/>
+                                <field name="selected_combo_items" column_invisible="1"/>
+                                <field name="virtual_id" column_invisible="1"/>
+                                <field name="linked_virtual_id" column_invisible="1"/>
+                                <field name="collapse_composition" column_invisible="1"/>
+                                <field name="collapse_prices" column_invisible="1"/>
+
+                                <!-- Currency, needed for monetary widgets to display the currency symbol -->
+                                <field name="currency_id" column_invisible="True"/>
+
+                                <!-- Standard fields -->
+                                <field name="sequence" invisible="combo_item_id" widget="handle"/>
+                                <field name="product_id" string="Product Variant" readonly="not product_updatable" required="not display_type and not is_downpayment" force_save="1" context="{                                         'default_lst_price': price_unit,                                         'default_uom_id': product_uom_id,                                         'partner_id': parent.partner_id,                                     }" options="{                                         'show_label_warning': True                                     }" optional="hide" widget="sol_product_many2one"/>
+                                <field name="product_template_id" string="Product" readonly="id and not product_updatable" required="not display_type and not is_downpayment" context="{                                         'default_list_price': price_unit,                                         'default_uom_id': product_uom_id,                                         'partner_id': parent.partner_id,                                     }" options="{                                         'show_label_warning': True                                     }" optional="show" widget="sol_product_many2one" placeholder="Type to find a product..."/>
+                                <field name="name" widget="sol_text" optional="show"/>
+                                <field name="analytic_distribution" widget="analytic_distribution" options="{                                         'product_field': 'product_id',                                         'business_domain': 'sale_order',                                         'amount_field': 'price_subtotal',                                     }" optional="hide" groups="analytic.group_analytic_accounting"/>
+                                <field name="product_uom_qty" decoration-info="(not display_type and invoice_status == 'to invoice')" decoration-bf="(not display_type and invoice_status == 'to invoice')" readonly="is_downpayment"/>
+                                <widget name="simple_qty_at_date_widget" width="20px"/>
+                                <field name="qty_delivered_percent" decoration-info="(not display_type and invoice_status == 'to invoice')" decoration-bf="(not display_type and invoice_status == 'to invoice')" readonly="qty_delivered_method != 'manual' or is_downpayment or product_uom_qty == 0" column_invisible="parent.state != 'sale'" optional="hide"/>
+                                <field name="qty_delivered" string="Delivered" decoration-info="(not display_type and invoice_status == 'to invoice')" decoration-bf="(not display_type and invoice_status == 'to invoice')" column_invisible="parent.state != 'sale'" readonly="qty_delivered_method != 'manual' or is_downpayment" optional="show"/>
+                                <field name="qty_invoiced" string="Invoiced" decoration-info="(not display_type and invoice_status == 'to invoice')" decoration-bf="(not display_type and invoice_status == 'to invoice')" column_invisible="parent.state != 'sale'" optional="show"/>
+                                <field name="product_uom_id" force_save="1" readonly="product_uom_readonly" required="not display_type and not is_downpayment" widget="many2one_uom" groups="uom.group_uom" options="{&quot;no_open&quot;: True, &quot;no_create&quot;: True}" width="60px" optional="show"/>
+                                <field name="customer_lead" optional="hide" width="80px" readonly="parent.state not in ['draft', 'sent', 'sale'] or is_downpayment or product_type != 'consu'"/>
+                                <field name="price_unit" readonly="qty_invoiced &gt; 0"/>
+                                <field name="tax_ids" widget="many2many_tax_tags" options="{'no_create': True}" context="{'active_test': True}" readonly="qty_invoiced &gt; 0 or is_downpayment" optional="show"/>
+                                <field name="discount" string="Disc.%" groups="sale.group_discount_per_so_line" width="50px" optional="show"/>
+                                <field name="price_subtotal" string="Amount" column_invisible="parent.company_price_include == 'tax_included'" invisible="is_downpayment"/>
+                                <field name="price_total" string="Amount" column_invisible="parent.company_price_include == 'tax_excluded'" invisible="is_downpayment"/>
+                                <!-- Optional amounts columns -->
+                                <field name="price_total" string="Tax Incl." column_invisible="parent.company_price_include == 'tax_included'" invisible="is_downpayment" optional="hide"/>
+                                <field name="price_subtotal" string="Tax Excl." column_invisible="parent.company_price_include == 'tax_excluded'" invisible="is_downpayment" optional="hide"/>
+                                <widget name="section_state"/>
+                            </list>
+                            <kanban class="o_kanban_mobile">
+                                <field name="display_type"/>
+                                <field name="currency_id"/>
+                                <control>
+                                    <create name="add_product_control" string="Add product"/>
+                                    <create name="add_section_control" string="Add section" context="{'default_display_type': 'line_section'}"/>
+                                    <create name="add_note_control" string="Add note" context="{'default_display_type': 'line_note'}"/>
+                                    <button string="Catalog" name="action_add_from_catalog" type="object" class="btn-secondary" context="{'order_id': parent.id}"/>
+                                </control>
+                                <templates>
+                                    <t t-name="card" class="row g-0 ps-0 pe-0">
+                                        <t t-if="!record.display_type.raw_value">
+                                            <aside class="col-2 p-1">
+                                                <span t-att-title="record.product_id.value">
+                                                    <field name="product_id" widget="image" options="{'preview_image': 'image_128', 'img_class': 'object-fit-contain w-100'}"/>
+                                                </span>
+                                            </aside>
+                                            <main class="col">
+                                                <div class="row">
+                                                    <div class="col">
+                                                        <span class="fa fa-exclamation-triangle text-warning me-1" title="This product is archived" invisible="state not in ['draft', 'sent'] or not is_product_archived"/>
+                                                        <field name="product_id" class="fw-bold"/>
+                                                    </div>
+                                                    <div class="col-auto">
+                                                        <field name="price_subtotal" class="fw-bolder float-end pe-1" widget="monetary"/>
+                                                    </div>
+                                                </div>
+                                                <div class="text-muted">
+                                                    Quantity:
+                                                    <field name="product_uom_qty"/> <field name="product_uom_id"/>
+                                                </div>
+                                                <div class="text-muted">
+                                                    Unit Price:
+                                                    <field name="price_unit"/>
+                                                </div>
+                                                <t t-if="record.discount?.raw_value">
+                                                    <div class="text-muted">
+                                                        Discount:
+                                                        <field name="discount"/>%
+                                                    </div>
+                                                </t>
+                                            </main>
+                                        </t>
+                                        <t t-if="['line_section', 'line_subsection', 'line_note'].includes(record.display_type.raw_value)">
+                                            <div t-att-class="{                                                 'fw-bolder': record.display_type.raw_value === 'line_section',                                                 'fw-bold': record.display_type.raw_value === 'line_subsection',                                                 'fst-italic': record.display_type.raw_value === 'line_note',                                             }">
+                                                <field name="name"/>
+                                            </div>
+                                        </t>
+                                    </t>
+                                </templates>
+                            </kanban>
+                        </field>
+                        <div class="float-end d-flex d-print-none gap-1 mb-2" name="so_button_below_order_lines">
+                            <button string="Discount" name="action_open_discount_wizard" type="object" class="btn btn-secondary" groups="sale.group_discount_per_so_line" invisible="locked or state == 'cancel'"/>
+                            <button string="Discounts" name="action_open_discount_wizard" type="object" class="btn btn-secondary" groups="sale.group_discount_per_so_line" disabled="1" invisible="not (locked or state == 'cancel')"/>
+                        </div>
+                        <group name="note_group" col="6" class="mt-2 mt-md-0">
+                            <group colspan="4" class="order-1 order-lg-0">
+                                <field colspan="2" name="note" nolabel="1" placeholder="Terms and conditions..."/>
+                            </group>
+                            <group class="oe_subtotal_footer border-top-0 d-flex order-0 order-lg-1 flex-column gap-0 gap-sm-3" colspan="2" name="sale_total">
+                                <field name="tax_totals" widget="account-tax-totals-field" nolabel="1" readonly="1"/>
+                            </group>
+                        </group>
+                    </page>
+                    <page string="Other Info" name="other_information">
+                        <group>
+                            <group name="sales_person" string="Sales">
+                                <field name="user_id" widget="many2one_avatar_user"/>
+                                <field name="team_id" context="{'kanban_view_ref': 'sales_team.crm_team_view_kanban'}" options="{'no_create': True}"/>
+                                <field name="company_id" options="{'no_create': True}" groups="base.group_multi_company"/>
+                                <field name="require_signature" widget="boolean_toggle" readonly="state in ['cancel', 'sale']"/>
+                                <field name="require_payment" widget="boolean_toggle" readonly="state in ['cancel', 'sale']"/>
+                                <field name="prepayment_percent" readonly="state in ['cancel', 'sale']" invisible="not require_payment" widget="percentage"/>
+                                <field name="reference" readonly="1" invisible="not reference"/>
+                                <field name="client_order_ref"/>
+                                <field name="tag_ids" widget="many2many_tags" options="{'color_field': 'color', 'on_tag_click': 'edit_color', 'no_create_edit': True}"/>
+                            </group>
+                            <group name="sale_info" string="Invoicing">
+                                <field name="show_update_fpos" invisible="1"/>
+                                <label for="fiscal_position_id"/>
+                                <div class="o_row">
+                                    <field name="fiscal_position_id" options="{'no_create': True}"/>
+                                    <button string="Update Taxes" name="action_update_taxes" type="object" help="Recompute all taxes based on this fiscal position" class="btn-link mb-1 px-0" icon="fa-refresh" confirm="This will update all taxes based on the currently selected fiscal position." invisible="not show_update_fpos or state in ['sale', 'cancel']"/>
+                                </div>
+                                <field name="preferred_payment_method_line_id"/>
+                                <field name="partner_invoice_id" groups="!account.group_delivery_invoice_address" invisible="1"/>
+                                <field name="journal_id" groups="base.group_no_one" readonly="invoice_count != 0 and state == 'sale'"/>
+                                <field name="invoice_status" invisible="state != 'sale'" groups="base.group_no_one"/>
+                                <!-- test_event_configurator -->
+                                <field name="invoice_status" invisible="1" groups="!base.group_no_one"/>
+                            </group>
+                            <group name="sale_shipping" string="Shipping">
+                                <field name="incoterm" options="{'no_open': True, 'no_create': True}"/>
+                                <field name="incoterm_location"/>
+                            </group>
+                            <group name="sale_reporting" string="Tracking">
+                                <field name="origin"/>
+                                <field name="campaign_id" options="{'create_name_field': 'title'}"/>
+                                <field name="medium_id" readonly="1"/>
+                                <field name="source_id"/>
+                                <field name="utm_reference" string="Reference" options="{'hide_model': True}" invisible="not utm_reference" readonly="True"/>
+                            </group>
+                        </group>
+                    </page>
+                </notebook>
+            </sheet>
+            <chatter/>
+            </form>
+
+================================================================================
+ALL INHERITED VIEWS OF sale.order FORM
+================================================================================
+  Total inherited views: 27
+
+  ID: 2881 | Name: sale.order.form.sale.project | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4836 | Name: AJL - Senha de Liberação (form pedido) | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4837 | Name: AJL - Trava Fabricar c/ estoque coberto (senha de liberação) | Key: False | Inherits: [3513, 'Odoo Studio: sale.order.form customization'] | Active: True
+  ID: 4830 | Name: AJL-APROV painel de aprovação no form do pedido | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4833 | Name: AJL-PCT desconto exibe decimais mínimos no form do pedido | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4828 | Name: AJL-RULE bloqueia Fabricar p/ não-fabricáveis — Odoo Studio: sale.order.form cus | Key: False | Inherits: [3513, 'Odoo Studio: sale.order.form customization'] | Active: True
+  ID: 1222 | Name: sale.order.form | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 3116 | Name: sale.order.form | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4807 | Name: sale.order.form | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 2883 | Name: sale.order.form.from.task | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4445 | Name: sale.order.form.inherit | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4446 | Name: sale.order.form.inherit | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4467 | Name: sale.order.form.inherit | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 3285 | Name: sale.order.form.inherit.sale | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4682 | Name: sale.order.form.inherit.sale.expense | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 1208 | Name: sale.order.form.inherit.sale_management | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 1217 | Name: sale.order.form.pdf.quote.builder | Key: False | Inherits: [1208, 'sale.order.form.inherit.sale_management'] | Active: True
+  ID: 2861 | Name: sale.order.form.sale.planning | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4389 | Name: sale.order.inherited.form.mrp | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 3899 | Name: sale.order.inherited.form.purchase | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 3151 | Name: sale.order.view.form.inherit.website.appointment.sale | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4364 | Name: sale.order.form.sale.stock | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 2914 | Name: delivery.sale.order.form.view.with_carrier | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4820 | Name: Sale Order Margin Button | Key: ajl.sale_order_margin_button | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4825 | Name: Sale Order Line Margin Column | Key: ajl.sale_order_line_margin_tree | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 4827 | Name: Sale Order Line Local Armazenagem | Key: ajl.sale_order_line_local_armazenagem | Inherits: [1157, 'sale.order.form'] | Active: True
+  ID: 3513 | Name: Odoo Studio: sale.order.form customization | Key: studio_customization.odoo_studio_sale_ord_e09404d1-bb45-4467 | Inherits: [1157, 'sale.order.form'] | Active: True
+
+================================================================================
+AUTOMATED ACTIONS (base.automation) RELATED TO 'consult' or 'ConsultFlex'
+================================================================================
+  Error: <Fault 1: 'Traceback (most recent call last):\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 3132, in _determine_fields_to_fetch\n    field = self._fields[field_name]\n            ~~~~~~~~~~~~^^^^^^^^^^^^\nKeyError: \'action_server_id\'\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File "/home/odoo/src/odoo/saas-19.3/addons/rpc/controllers/xmlrpc.py", line 164, in xmlrpc_2\n    response = self._xmlrpc(service)\n               ^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/custom/trial/saas_trial/controllers/main.py", line 486, in _xmlrpc\n    res = super()._xmlrpc(service)\n          ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/addons/rpc/controllers/xmlrpc.py", line 136, in _xmlrpc\n    result = dispatch_rpc(service, method, params)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/http/router.py", line 142, in dispatch_rpc\n    return dispatch(method, params)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 90, in dispatch\n    res = execute_cr(cr, uid, model, method_, args, kw)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 106, in execute_cr\n    result = retrying(partial(call_kw, recs, method, args, kw), env)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/http/retrying.py", line 52, in retrying\n    result = func()\n             ^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 55, in call_kw\n    result = method(recs, *args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 5183, in search_read\n    records = self.search_fetch(domain or [], fields, offset=offset, limit=limit, order=order)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 1456, in search_fetch\n    fields_to_fetch = self._determine_fields_to_fetch(field_names)\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 3134, in _determine_fields_to_fetch\n    raise ValueError(f"Invalid field {field_name!r} on {self._name!r}") from e\nValueError: Invalid field \'action_server_id\' on \'base.automation\'\n'>
+
+================================================================================
+SERVER ACTIONS - BROADER SEARCH (name ilike 'flex' or 'Consult')
+================================================================================
+  No actions found.
+
+================================================================================
+STUDIO CUSTOMIZATION ACTIONS (name ilike 'studio_customization%')
+================================================================================
+  No studio actions found.
+
+================================================================================
+DONE
+================================================================================

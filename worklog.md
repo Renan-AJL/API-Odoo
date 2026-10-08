@@ -45,3 +45,29 @@ Stage Summary:
 - NF-e XML includes IPI for any CRT, sale order number, and boleto info in infAdic
 - Middleware URL fixed across codebase
 - Cancelar Boleto server action script ready but needs new API key to execute
+---
+Task ID: consultflex-integration
+Agent: Super Z (main)
+Task: Implementar integração ConsultFlex no middleware + Odoo
+
+Work Log:
+- Acessou documentação da API ConsultFlex via Google Drive (endpoint, auth, request/response format)
+- Investigou Odoo sale.order: campo x_studio_resposta_consultflex (html) já existe, aba "Consult Flex" no Studio view 3513
+- Corrigiu bug no service: PRODUTO_PF de 1762 para 1760 (conforme documentação)
+- Corrigiu campo Odoo no route: x_studio_cf_resultado_html -> x_studio_resposta_consultflex
+- Atualizou rota /consultar-odoo/:saleOrderId para ler campos do Odoo automaticamente (fallback partner_id.vat)
+- Criou 4 campos no sale.order: x_studio_cf_tipo_pessoa (selection F/J), x_studio_cf_cpfcnpj (char), x_studio_cf_status (char), x_studio_cf_data_consulta (datetime)
+- Criou view herdada (ID 4861) com campos de input na aba Consult Flex (herdando do Studio view 3513)
+- Criou Server Action (ID 1463) "AJL-ConsultFlex Consultar" - marca status=pendente via records.write()
+- Criou polling ConsultFlex (services/consultflex-poll.js) - processa consultas pendentes a cada 15s
+- Adicionou polling ao server.js startup + logs
+- Atualizou render.yaml com CONSULTFLEX_API_KEY
+- Atualizou .env.example com seção ConsultFlex
+- Commit + push para GitHub (52fb270)
+
+Stage Summary:
+- Integração ConsultFlex completa no middleware e Odoo
+- Server Action ID 1463 criada (vincular ao botão no Studio)
+- Polling automático de consultas pendentes (15s)
+- Chave API: CONSULTFLEX_API_KEY precisa ser configurada no Render
+- Parâmetro ajl.middleware.url configurado no Odoo

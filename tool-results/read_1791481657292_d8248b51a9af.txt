@@ -1,0 +1,280 @@
+   101→                   </group>
+   102→                </group>
+   103→                <notebook>
+   104→                    <page string="Order Lines" name="order_lines">
+   105→                        <field name="order_line" widget="sol_o2m" mode="list,kanban" readonly="state == 'cancel' or locked" aggregated_fields="price_subtotal,price_total" options="{'hide_composition': True, 'hide_prices': True, 'subsections': True}">
+   106→                            <form>
+   107→                                <field name="technical_price_unit" invisible="1"/>
+   108→                                <!--
+   109→                                    We need the sequence field to be here for new lines to be added at the correct position.
+   110→                                    TODO: at some point we want to fix this in the framework so that an invisible field is not required.
+   111→                                -->
+   112→                                <field name="sequence" invisible="1"/>
+   113→                                <!-- Display_type must be specified as non readonly (which would be the case with the default field added by ORM) -->
+   114→                                <field name="display_type" invisible="1"/>
+   115→                                <group>
+   116→                                    <group invisible="display_type">
+   117→                                        <label for="product_id"/>
+   118→                                        <div class="d-flex align-items-baseline">
+   119→                                            <span class="fa fa-exclamation-triangle text-warning me-1" title="This product is archived" invisible="state not in ['draft', 'sent'] or not is_product_archived"/>
+   120→                                            <field name="product_id" context="{                                                     'default_uom_id': product_uom_id,                                                     'partner_id': parent.partner_id,                                                 }" readonly="not product_updatable" required="not display_type and not is_downpayment" force_save="1" widget="many2one_barcode"/>
+   121→                                        </div>
+   122→                                        <label for="product_uom_qty"/>
+   123→                                        <div class="o_row" name="ordered_qty">
+   124→                                            <field name="product_uom_qty"/>
+   125→                                            <field name="product_uom_id" force_save="1" groups="uom.group_uom" class="oe_no_button" widget="many2one_uom" readonly="product_uom_readonly" required="not display_type and not is_downpayment"/>
+   126→                                            <widget name="simple_qty_at_date_widget"/>
+   127→                                        </div>
+   128→                                        <label for="qty_delivered" string="Delivered" invisible="parent.state != 'sale'"/>
+   129→                                        <div name="delivered_qty" invisible="parent.state != 'sale'">
+   130→                                            <field name="qty_delivered" readonly="qty_delivered_method != 'manual'"/>
+   131→                                        </div>
+   132→                                        <label for="qty_invoiced" string="Invoiced" invisible="parent.state != 'sale'"/>
+   133→                                        <div name="invoiced_qty" invisible="parent.state != 'sale'">
+   134→                                            <field name="qty_invoiced"/>
+   135→                                        </div>
+   136→                                        <field name="price_unit"/>
+   137→                                        <field name="tax_ids" widget="many2many_tax_tags" options="{'no_create': True}" context="{'search_view_ref': 'account.account_tax_view_search'}" readonly="qty_invoiced &gt; 0"/>
+   138→                                        <t groups="sale.group_discount_per_so_line">
+   139→                                            <label for="discount"/>
+   140→                                            <div name="discount">
+   141→                                                <field name="discount" class="oe_inline"/> %
+   142→                                            </div>
+   143→                                        </t>
+   144→                                    </group>
+   145→                                    <group invisible="display_type">
+   146→                                        <label for="customer_lead"/>
+   147→                                        <div name="lead">
+   148→                                            <field name="customer_lead" class="oe_inline" readonly="product_type != 'consu'"/> days
+   149→                                        </div>
+   150→                                        <field name="analytic_distribution" widget="analytic_distribution" groups="analytic.group_analytic_accounting" options="{'product_field': 'product_id', 'business_domain': 'sale_order'}"/>
+   151→                                    </group>
+   152→                                </group>
+   153→                                <label for="name" string="Description" invisible="display_type"/>
+   154→                                <label for="name" string="Section Name (eg. Products, Services)" invisible="display_type != 'line_section'"/>
+   155→                                <label for="name" string="Subsection Name" invisible="display_type != 'line_subsection'"/>
+   156→                                <label for="name" string="Note" invisible="display_type != 'line_note'"/>
+   157→                                <field name="name"/>
+   158→                                <group>
+   159→                                    <field name="collapse_composition" invisible="display_type not in ['line_section', 'line_subsection']" readonly="1"/>
+   160→                                    <field name="collapse_prices" invisible="display_type not in ['line_section', 'line_subsection']" readonly="1"/>
+   161→                                </group>
+   162→                                <div name="invoice_lines" groups="base.group_no_one" invisible="display_type">
+   163→                                    <label for="invoice_lines"/>
+   164→                                    <field name="invoice_lines"/>
+   165→                                </div>
+   166→                            </form>
+   167→                            <list string="Sales Order Lines" editable="bottom" limit="200" decoration-warning="(state in ['draft', 'sent'] and is_product_archived) or sale_line_warn_msg">
+   168→                                <control>
+   169→                                    <create name="add_product_control" string="Add a product" data-hotkey="shift+p"/>
+   170→                                    <create name="add_section_control" string="Add a section" data-hotkey="shift+h" context="{'default_display_type': 'line_section'}"/>
+   171→                                    <create name="add_note_control" string="Add a note" data-hotkey="shift+n" context="{'default_display_type': 'line_note'}"/>
+   172→                                    <button string="Catalog" data-hotkey="shift+k" name="action_add_from_catalog" type="object" class="px-4 btn-link" context="{'order_id': parent.id}"/>
+   173→                                </control>
+   174→
+   175→                                <!-- Non readonly invisible fields, must be specified manually, because fields added automatically by the ORM
+   176→                                    are readonly, widgets fieldDependencies too -->
+   177→                                <field name="display_type" column_invisible="True"/>
+   178→                                <field name="product_custom_attribute_value_ids" column_invisible="1">
+   179→                                    <list>
+   180→                                        <field name="custom_product_template_attribute_value_id"/>
+   181→                                        <field name="custom_value"/>
+   182→                                    </list>
+   183→                                </field>
+   184→                                <field name="product_no_variant_attribute_value_ids" column_invisible="1"/>
+   185→                                <field name="technical_price_unit" column_invisible="1"/>
+   186→                                <field name="linked_line_id" column_invisible="1"/>
+   187→                                <field name="combo_item_id" column_invisible="1"/>
+   188→                                <field name="selected_combo_items" column_invisible="1"/>
+   189→                                <field name="virtual_id" column_invisible="1"/>
+   190→                                <field name="linked_virtual_id" column_invisible="1"/>
+   191→                                <field name="collapse_composition" column_invisible="1"/>
+   192→                                <field name="collapse_prices" column_invisible="1"/>
+   193→
+   194→                                <!-- Currency, needed for monetary widgets to display the currency symbol -->
+   195→                                <field name="currency_id" column_invisible="True"/>
+   196→
+   197→                                <!-- Standard fields -->
+   198→                                <field name="sequence" invisible="combo_item_id" widget="handle"/>
+   199→                                <field name="product_id" string="Product Variant" readonly="not product_updatable" required="not display_type and not is_downpayment" force_save="1" context="{                                         'default_lst_price': price_unit,                                         'default_uom_id': product_uom_id,                                         'partner_id': parent.partner_id,                                     }" options="{                                         'show_label_warning': True                                     }" optional="hide" widget="sol_product_many2one"/>
+   200→                                <field name="product_template_id" string="Product" readonly="id and not product_updatable" required="not display_type and not is_downpayment" context="{                                         'default_list_price': price_unit,                                         'default_uom_id': product_uom_id,                                         'partner_id': parent.partner_id,                                     }" options="{                                         'show_label_warning': True                                     }" optional="show" widget="sol_product_many2one" placeholder="Type to find a product..."/>
+   201→                                <field name="name" widget="sol_text" optional="show"/>
+   202→                                <field name="analytic_distribution" widget="analytic_distribution" options="{                                         'product_field': 'product_id',                                         'business_domain': 'sale_order',                                         'amount_field': 'price_subtotal',                                     }" optional="hide" groups="analytic.group_analytic_accounting"/>
+   203→                                <field name="product_uom_qty" decoration-info="(not display_type and invoice_status == 'to invoice')" decoration-bf="(not display_type and invoice_status == 'to invoice')" readonly="is_downpayment"/>
+   204→                                <widget name="simple_qty_at_date_widget" width="20px"/>
+   205→                                <field name="qty_delivered_percent" decoration-info="(not display_type and invoice_status == 'to invoice')" decoration-bf="(not display_type and invoice_status == 'to invoice')" readonly="qty_delivered_method != 'manual' or is_downpayment or product_uom_qty == 0" column_invisible="parent.state != 'sale'" optional="hide"/>
+   206→                                <field name="qty_delivered" string="Delivered" decoration-info="(not display_type and invoice_status == 'to invoice')" decoration-bf="(not display_type and invoice_status == 'to invoice')" column_invisible="parent.state != 'sale'" readonly="qty_delivered_method != 'manual' or is_downpayment" optional="show"/>
+   207→                                <field name="qty_invoiced" string="Invoiced" decoration-info="(not display_type and invoice_status == 'to invoice')" decoration-bf="(not display_type and invoice_status == 'to invoice')" column_invisible="parent.state != 'sale'" optional="show"/>
+   208→                                <field name="product_uom_id" force_save="1" readonly="product_uom_readonly" required="not display_type and not is_downpayment" widget="many2one_uom" groups="uom.group_uom" options="{&quot;no_open&quot;: True, &quot;no_create&quot;: True}" width="60px" optional="show"/>
+   209→                                <field name="customer_lead" optional="hide" width="80px" readonly="parent.state not in ['draft', 'sent', 'sale'] or is_downpayment or product_type != 'consu'"/>
+   210→                                <field name="price_unit" readonly="qty_invoiced &gt; 0"/>
+   211→                                <field name="tax_ids" widget="many2many_tax_tags" options="{'no_create': True}" context="{'active_test': True}" readonly="qty_invoiced &gt; 0 or is_downpayment" optional="show"/>
+   212→                                <field name="discount" string="Disc.%" groups="sale.group_discount_per_so_line" width="50px" optional="show"/>
+   213→                                <field name="price_subtotal" string="Amount" column_invisible="parent.company_price_include == 'tax_included'" invisible="is_downpayment"/>
+   214→                                <field name="price_total" string="Amount" column_invisible="parent.company_price_include == 'tax_excluded'" invisible="is_downpayment"/>
+   215→                                <!-- Optional amounts columns -->
+   216→                                <field name="price_total" string="Tax Incl." column_invisible="parent.company_price_include == 'tax_included'" invisible="is_downpayment" optional="hide"/>
+   217→                                <field name="price_subtotal" string="Tax Excl." column_invisible="parent.company_price_include == 'tax_excluded'" invisible="is_downpayment" optional="hide"/>
+   218→                                <widget name="section_state"/>
+   219→                            </list>
+   220→                            <kanban class="o_kanban_mobile">
+   221→                                <field name="display_type"/>
+   222→                                <field name="currency_id"/>
+   223→                                <control>
+   224→                                    <create name="add_product_control" string="Add product"/>
+   225→                                    <create name="add_section_control" string="Add section" context="{'default_display_type': 'line_section'}"/>
+   226→                                    <create name="add_note_control" string="Add note" context="{'default_display_type': 'line_note'}"/>
+   227→                                    <button string="Catalog" name="action_add_from_catalog" type="object" class="btn-secondary" context="{'order_id': parent.id}"/>
+   228→                                </control>
+   229→                                <templates>
+   230→                                    <t t-name="card" class="row g-0 ps-0 pe-0">
+   231→                                        <t t-if="!record.display_type.raw_value">
+   232→                                            <aside class="col-2 p-1">
+   233→                                                <span t-att-title="record.product_id.value">
+   234→                                                    <field name="product_id" widget="image" options="{'preview_image': 'image_128', 'img_class': 'object-fit-contain w-100'}"/>
+   235→                                                </span>
+   236→                                            </aside>
+   237→                                            <main class="col">
+   238→                                                <div class="row">
+   239→                                                    <div class="col">
+   240→                                                        <span class="fa fa-exclamation-triangle text-warning me-1" title="This product is archived" invisible="state not in ['draft', 'sent'] or not is_product_archived"/>
+   241→                                                        <field name="product_id" class="fw-bold"/>
+   242→                                                    </div>
+   243→                                                    <div class="col-auto">
+   244→                                                        <field name="price_subtotal" class="fw-bolder float-end pe-1" widget="monetary"/>
+   245→                                                    </div>
+   246→                                                </div>
+   247→                                                <div class="text-muted">
+   248→                                                    Quantity:
+   249→                                                    <field name="product_uom_qty"/> <field name="product_uom_id"/>
+   250→                                                </div>
+   251→                                                <div class="text-muted">
+   252→                                                    Unit Price:
+   253→                                                    <field name="price_unit"/>
+   254→                                                </div>
+   255→                                                <t t-if="record.discount?.raw_value">
+   256→                                                    <div class="text-muted">
+   257→                                                        Discount:
+   258→                                                        <field name="discount"/>%
+   259→                                                    </div>
+   260→                                                </t>
+   261→                                            </main>
+   262→                                        </t>
+   263→                                        <t t-if="['line_section', 'line_subsection', 'line_note'].includes(record.display_type.raw_value)">
+   264→                                            <div t-att-class="{                                                 'fw-bolder': record.display_type.raw_value === 'line_section',                                                 'fw-bold': record.display_type.raw_value === 'line_subsection',                                                 'fst-italic': record.display_type.raw_value === 'line_note',                                             }">
+   265→                                                <field name="name"/>
+   266→                                            </div>
+   267→                                        </t>
+   268→                                    </t>
+   269→                                </templates>
+   270→                            </kanban>
+   271→                        </field>
+   272→                        <div class="float-end d-flex d-print-none gap-1 mb-2" name="so_button_below_order_lines">
+   273→                            <button string="Discount" name="action_open_discount_wizard" type="object" class="btn btn-secondary" groups="sale.group_discount_per_so_line" invisible="locked or state == 'cancel'"/>
+   274→                            <button string="Discounts" name="action_open_discount_wizard" type="object" class="btn btn-secondary" groups="sale.group_discount_per_so_line" disabled="1" invisible="not (locked or state == 'cancel')"/>
+   275→                        </div>
+   276→                        <group name="note_group" col="6" class="mt-2 mt-md-0">
+   277→                            <group colspan="4" class="order-1 order-lg-0">
+   278→                                <field colspan="2" name="note" nolabel="1" placeholder="Terms and conditions..."/>
+   279→                            </group>
+   280→                            <group class="oe_subtotal_footer border-top-0 d-flex order-0 order-lg-1 flex-column gap-0 gap-sm-3" colspan="2" name="sale_total">
+   281→                                <field name="tax_totals" widget="account-tax-totals-field" nolabel="1" readonly="1"/>
+   282→                            </group>
+   283→                        </group>
+   284→                    </page>
+   285→                    <page string="Other Info" name="other_information">
+   286→                        <group>
+   287→                            <group name="sales_person" string="Sales">
+   288→                                <field name="user_id" widget="many2one_avatar_user"/>
+   289→                                <field name="team_id" context="{'kanban_view_ref': 'sales_team.crm_team_view_kanban'}" options="{'no_create': True}"/>
+   290→                                <field name="company_id" options="{'no_create': True}" groups="base.group_multi_company"/>
+   291→                                <field name="require_signature" widget="boolean_toggle" readonly="state in ['cancel', 'sale']"/>
+   292→                                <field name="require_payment" widget="boolean_toggle" readonly="state in ['cancel', 'sale']"/>
+   293→                                <field name="prepayment_percent" readonly="state in ['cancel', 'sale']" invisible="not require_payment" widget="percentage"/>
+   294→                                <field name="reference" readonly="1" invisible="not reference"/>
+   295→                                <field name="client_order_ref"/>
+   296→                                <field name="tag_ids" widget="many2many_tags" options="{'color_field': 'color', 'on_tag_click': 'edit_color', 'no_create_edit': True}"/>
+   297→                            </group>
+   298→                            <group name="sale_info" string="Invoicing">
+   299→                                <field name="show_update_fpos" invisible="1"/>
+   300→                                <label for="fiscal_position_id"/>
+   301→                                <div class="o_row">
+   302→                                    <field name="fiscal_position_id" options="{'no_create': True}"/>
+   303→                                    <button string="Update Taxes" name="action_update_taxes" type="object" help="Recompute all taxes based on this fiscal position" class="btn-link mb-1 px-0" icon="fa-refresh" confirm="This will update all taxes based on the currently selected fiscal position." invisible="not show_update_fpos or state in ['sale', 'cancel']"/>
+   304→                                </div>
+   305→                                <field name="preferred_payment_method_line_id"/>
+   306→                                <field name="partner_invoice_id" groups="!account.group_delivery_invoice_address" invisible="1"/>
+   307→                                <field name="journal_id" groups="base.group_no_one" readonly="invoice_count != 0 and state == 'sale'"/>
+   308→                                <field name="invoice_status" invisible="state != 'sale'" groups="base.group_no_one"/>
+   309→                                <!-- test_event_configurator -->
+   310→                                <field name="invoice_status" invisible="1" groups="!base.group_no_one"/>
+   311→                            </group>
+   312→                            <group name="sale_shipping" string="Shipping">
+   313→                                <field name="incoterm" options="{'no_open': True, 'no_create': True}"/>
+   314→                                <field name="incoterm_location"/>
+   315→                            </group>
+   316→                            <group name="sale_reporting" string="Tracking">
+   317→                                <field name="origin"/>
+   318→                                <field name="campaign_id" options="{'create_name_field': 'title'}"/>
+   319→                                <field name="medium_id" readonly="1"/>
+   320→                                <field name="source_id"/>
+   321→                                <field name="utm_reference" string="Reference" options="{'hide_model': True}" invisible="not utm_reference" readonly="True"/>
+   322→                            </group>
+   323→                        </group>
+   324→                    </page>
+   325→                </notebook>
+   326→            </sheet>
+   327→            <chatter/>
+   328→            </form>
+   329→
+   330→================================================================================
+   331→ALL INHERITED VIEWS OF sale.order FORM
+   332→================================================================================
+   333→  Total inherited views: 27
+   334→
+   335→  ID: 2881 | Name: sale.order.form.sale.project | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   336→  ID: 4836 | Name: AJL - Senha de Liberação (form pedido) | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   337→  ID: 4837 | Name: AJL - Trava Fabricar c/ estoque coberto (senha de liberação) | Key: False | Inherits: [3513, 'Odoo Studio: sale.order.form customization'] | Active: True
+   338→  ID: 4830 | Name: AJL-APROV painel de aprovação no form do pedido | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   339→  ID: 4833 | Name: AJL-PCT desconto exibe decimais mínimos no form do pedido | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   340→  ID: 4828 | Name: AJL-RULE bloqueia Fabricar p/ não-fabricáveis — Odoo Studio: sale.order.form cus | Key: False | Inherits: [3513, 'Odoo Studio: sale.order.form customization'] | Active: True
+   341→  ID: 1222 | Name: sale.order.form | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   342→  ID: 3116 | Name: sale.order.form | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   343→  ID: 4807 | Name: sale.order.form | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   344→  ID: 2883 | Name: sale.order.form.from.task | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   345→  ID: 4445 | Name: sale.order.form.inherit | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   346→  ID: 4446 | Name: sale.order.form.inherit | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   347→  ID: 4467 | Name: sale.order.form.inherit | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   348→  ID: 3285 | Name: sale.order.form.inherit.sale | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   349→  ID: 4682 | Name: sale.order.form.inherit.sale.expense | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   350→  ID: 1208 | Name: sale.order.form.inherit.sale_management | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   351→  ID: 1217 | Name: sale.order.form.pdf.quote.builder | Key: False | Inherits: [1208, 'sale.order.form.inherit.sale_management'] | Active: True
+   352→  ID: 2861 | Name: sale.order.form.sale.planning | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   353→  ID: 4389 | Name: sale.order.inherited.form.mrp | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   354→  ID: 3899 | Name: sale.order.inherited.form.purchase | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   355→  ID: 3151 | Name: sale.order.view.form.inherit.website.appointment.sale | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   356→  ID: 4364 | Name: sale.order.form.sale.stock | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   357→  ID: 2914 | Name: delivery.sale.order.form.view.with_carrier | Key: False | Inherits: [1157, 'sale.order.form'] | Active: True
+   358→  ID: 4820 | Name: Sale Order Margin Button | Key: ajl.sale_order_margin_button | Inherits: [1157, 'sale.order.form'] | Active: True
+   359→  ID: 4825 | Name: Sale Order Line Margin Column | Key: ajl.sale_order_line_margin_tree | Inherits: [1157, 'sale.order.form'] | Active: True
+   360→  ID: 4827 | Name: Sale Order Line Local Armazenagem | Key: ajl.sale_order_line_local_armazenagem | Inherits: [1157, 'sale.order.form'] | Active: True
+   361→  ID: 3513 | Name: Odoo Studio: sale.order.form customization | Key: studio_customization.odoo_studio_sale_ord_e09404d1-bb45-4467 | Inherits: [1157, 'sale.order.form'] | Active: True
+   362→
+   363→================================================================================
+   364→AUTOMATED ACTIONS (base.automation) RELATED TO 'consult' or 'ConsultFlex'
+   365→================================================================================
+   366→  Error: <Fault 1: 'Traceback (most recent call last):\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 3132, in _determine_fields_to_fetch\n    field = self._fields[field_name]\n            ~~~~~~~~~~~~^^^^^^^^^^^^\nKeyError: \'action_server_id\'\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File "/home/odoo/src/odoo/saas-19.3/addons/rpc/controllers/xmlrpc.py", line 164, in xmlrpc_2\n    response = self._xmlrpc(service)\n               ^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/custom/trial/saas_trial/controllers/main.py", line 486, in _xmlrpc\n    res = super()._xmlrpc(service)\n          ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/addons/rpc/controllers/xmlrpc.py", line 136, in _xmlrpc\n    result = dispatch_rpc(service, method, params)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/http/router.py", line 142, in dispatch_rpc\n    return dispatch(method, params)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 90, in dispatch\n    res = execute_cr(cr, uid, model, method_, args, kw)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 106, in execute_cr\n    result = retrying(partial(call_kw, recs, method, args, kw), env)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/http/retrying.py", line 52, in retrying\n    result = func()\n             ^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/service/model.py", line 55, in call_kw\n    result = method(recs, *args, **kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 5183, in search_read\n    records = self.search_fetch(domain or [], fields, offset=offset, limit=limit, order=order)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 1456, in search_fetch\n    fields_to_fetch = self._determine_fields_to_fetch(field_names)\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/odoo/src/odoo/saas-19.3/odoo/orm/models.py", line 3134, in _determine_fields_to_fetch\n    raise ValueError(f"Invalid field {field_name!r} on {self._name!r}") from e\nValueError: Invalid field \'action_server_id\' on \'base.automation\'\n'>
+   367→
+   368→================================================================================
+   369→SERVER ACTIONS - BROADER SEARCH (name ilike 'flex' or 'Consult')
+   370→================================================================================
+   371→  No actions found.
+   372→
+   373→================================================================================
+   374→STUDIO CUSTOMIZATION ACTIONS (name ilike 'studio_customization%')
+   375→================================================================================
+   376→  No studio actions found.
+   377→
+   378→================================================================================
+   379→DONE
+   380→================================================================================
