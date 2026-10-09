@@ -139,6 +139,7 @@ app.get('/', (req, res) => {
       consultflex_consultar_odoo: 'POST /api/v1/consultflex/consultar-odoo/:saleOrderId',
       cep_consultar: 'POST /api/v1/cep/cep',
       cep_consultar_odoo: 'POST /api/v1/cep/consultar-odoo/:partnerId',
+      cep_odoo_webhook: 'POST /api/v1/cep/odoo-webhook',
       cep_fontes: 'GET /api/v1/cep/fontes',
     },
     auth: 'Envie header X-API-Key para autenticacao.',

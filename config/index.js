@@ -135,6 +135,9 @@ const config = {
     apiKey: process.env.CONSULTFLEX_API_KEY || '',
     apiUrl: process.env.CONSULTFLEX_API_URL || 'https://api.consultflex.com.br/json/service.aspx',
   },
+
+  // --- CEP Webhook (segredo exclusivo para automacao Python do Odoo) ---
+  cepWebhookSecret: process.env.CEP_WEBHOOK_SECRET || '',
 };
 
 // Warnings

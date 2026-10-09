@@ -77,6 +77,10 @@ services:
       # --- ConsultFlex (Analise de Credito) ---
       - key: CONSULTFLEX_API_KEY
         sync: false
+      # --- CEP Webhook (segredo para automacao Python do Odoo) ---
+      - key: CEP_WEBHOOK_SECRET
+        generateValue: true
+        sync: false
       - key: NFE_RESP_TEC_CNPJ
         sync: false
       - key: NFE_RESP_TEC_CONTATO
