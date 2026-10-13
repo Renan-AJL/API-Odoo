@@ -70,20 +70,36 @@ async function processPendingPix() {
     return { processed: 0, paid: 0, errors: 1 };
   }
 
+  // Detectar campos disponiveis no Odoo
+  var fieldChecks;
+  try {
+    fieldChecks = await detectFields(oc, odooHost, odooUid);
+  } catch (err) {
+    console.error('[PAYMENT-POLL] Erro ao detectar campos:', err.message);
+    return { processed: 0, paid: 0, errors: 1 };
+  }
+
   // Buscar invoices com PIX emitido e status pendente
+  // Usa apenas campos que existem no Odoo
   var domain = [
     ['move_type', '=', 'out_invoice'],
     ['payment_state', '!=', 'paid'],
-    ['x_studio_itau_tipo_pagamento', 'like', 'PIX'],
-    ['x_studio_itau_txid', '!=', false],
-    ['x_studio_itau_txid', '!=', ''],
   ];
+  if (fieldChecks['x_studio_itau_tipo_pagamento']) {
+    domain.push(['x_studio_itau_tipo_pagamento', 'like', 'PIX']);
+  }
+  if (fieldChecks['x_studio_itau_txid']) {
+    domain.push(['x_studio_itau_txid', '!=', false]);
+    domain.push(['x_studio_itau_txid', '!=', '']);
+  }
+
+  // Filter domain to only use existing fields
+  domain = buildSafeDomain(domain, fieldChecks);
 
   var invoiceIds;
   try {
     invoiceIds = await odooExec(oc, odooHost, odooUid, 'account.move', 'search', [domain], { limit: 50 });
   } catch (err) {
-    // Campo x_studio_itau_txid pode nao existir ainda
     console.error('[PAYMENT-POLL] Erro ao buscar invoices PIX:', err.message);
     return { processed: 0, paid: 0, errors: 1 };
   }
@@ -92,9 +108,14 @@ async function processPendingPix() {
     return { processed: 0, paid: 0, errors: 0 };
   }
 
+  // Build read fields list (only existing custom fields)
+  var readFields = ['name', 'amount_total'];
+  if (fieldChecks['x_studio_itau_txid']) readFields.push('x_studio_itau_txid');
+  if (fieldChecks['x_studio_itau_status_pagamento']) readFields.push('x_studio_itau_status_pagamento');
+  if (fieldChecks['x_studio_itau_pix_status']) readFields.push('x_studio_itau_pix_status');
+
   var invoices = await odooExec(oc, odooHost, odooUid, 'account.move', 'read', [
-    invoiceIds,
-    ['name', 'x_studio_itau_txid', 'x_studio_itau_status_pagamento', 'x_studio_itau_pix_status', 'amount_total']
+    invoiceIds, readFields
   ]);
 
   var processed = 0;
@@ -155,8 +176,11 @@ async function processPendingPix() {
       }
       // ATIVA = ainda pendente, nao muda status_pagamento
 
-      // Atualizar invoice
-      await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[inv.id], writeVals]);
+      // Atualizar invoice (only write fields that exist)
+      var safeVals = filterWriteVals(writeVals, fieldChecks);
+      if (Object.keys(safeVals).length > 0) {
+        await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[inv.id], safeVals]);
+      }
 
       console.log('[PAYMENT-POLL] PIX invoice ' + inv.name + ' (txid=' + txid + '): ' + pixStatus);
 
@@ -196,14 +220,28 @@ async function processPendingBoletos() {
     return { processed: 0, paid: 0, errors: 1 };
   }
 
+  // Detectar campos disponiveis
+  var fieldChecks;
+  try {
+    fieldChecks = await detectFields(oc, odooHost, odooUid);
+  } catch (err) {
+    console.error('[PAYMENT-POLL] Erro ao detectar campos:', err.message);
+    return { processed: 0, paid: 0, errors: 1 };
+  }
+
   // Buscar invoices com boleto emitido e status pendente
   var domain = [
     ['move_type', '=', 'out_invoice'],
     ['payment_state', '!=', 'paid'],
-    ['x_studio_itau_tipo_pagamento', 'like', 'BOLETO'],
-    ['x_studio_itau_nosso_numero', '!=', false],
-    ['x_studio_itau_nosso_numero', '!=', ''],
   ];
+  if (fieldChecks['x_studio_itau_tipo_pagamento']) {
+    domain.push(['x_studio_itau_tipo_pagamento', 'like', 'BOLETO']);
+  }
+  if (fieldChecks['x_studio_itau_nosso_numero']) {
+    domain.push(['x_studio_itau_nosso_numero', '!=', false]);
+    domain.push(['x_studio_itau_nosso_numero', '!=', '']);
+  }
+  domain = buildSafeDomain(domain, fieldChecks);
 
   var invoiceIds;
   try {
@@ -217,9 +255,13 @@ async function processPendingBoletos() {
     return { processed: 0, paid: 0, errors: 0 };
   }
 
+  var boletoReadFields = ['name'];
+  if (fieldChecks['x_studio_itau_nosso_numero']) boletoReadFields.push('x_studio_itau_nosso_numero');
+  if (fieldChecks['x_studio_itau_status_pagamento']) boletoReadFields.push('x_studio_itau_status_pagamento');
+  if (fieldChecks['x_studio_itau_boleto_status']) boletoReadFields.push('x_studio_itau_boleto_status');
+
   var invoices = await odooExec(oc, odooHost, odooUid, 'account.move', 'read', [
-    invoiceIds,
-    ['name', 'x_studio_itau_nosso_numero', 'x_studio_itau_status_pagamento', 'x_studio_itau_boleto_status']
+    invoiceIds, boletoReadFields
   ]);
 
   var processed = 0;
@@ -284,8 +326,9 @@ async function processPendingBoletos() {
         writeVals['x_studio_itau_boleto_status'] = situacao;
       }
 
-      if (Object.keys(writeVals).length > 0) {
-        await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[inv.id], writeVals]);
+      var safeBoletoVals = filterWriteVals(writeVals, fieldChecks);
+      if (Object.keys(safeBoletoVals).length > 0) {
+        await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[inv.id], safeBoletoVals]);
         console.log('[PAYMENT-POLL] Boleto invoice ' + inv.name + ' (NN=' + nossoNumero + '): ' + situacao);
       }
 
@@ -329,14 +372,25 @@ async function reconcileStatementPayments(transacoes) {
   var matched = 0;
   var invoicesPaid = 0;
 
+  // Detectar campos disponiveis
+  var fieldChecks;
+  try {
+    fieldChecks = await detectFields(oc, odooHost, odooUid);
+  } catch (err) {
+    return { matched: 0, invoices_paid: 0 };
+  }
+
   // Buscar invoices pendentes
   var domain = [
     ['move_type', '=', 'out_invoice'],
     ['payment_state', '!=', 'paid'],
-    '|',
-    ['x_studio_itau_tipo_pagamento', 'like', 'BOLETO'],
-    ['x_studio_itau_tipo_pagamento', 'like', 'PIX'],
   ];
+  if (fieldChecks['x_studio_itau_tipo_pagamento']) {
+    domain.push('|');
+    domain.push(['x_studio_itau_tipo_pagamento', 'like', 'BOLETO']);
+    domain.push(['x_studio_itau_tipo_pagamento', 'like', 'PIX']);
+  }
+  domain = buildSafeDomain(domain, fieldChecks);
 
   var invoiceIds;
   try {
@@ -349,9 +403,13 @@ async function reconcileStatementPayments(transacoes) {
     return { matched: 0, invoices_paid: 0 };
   }
 
+  var recReadFields = ['name', 'amount_total'];
+  if (fieldChecks['x_studio_itau_nosso_numero']) recReadFields.push('x_studio_itau_nosso_numero');
+  if (fieldChecks['x_studio_itau_txid']) recReadFields.push('x_studio_itau_txid');
+  if (fieldChecks['x_studio_itau_tipo_pagamento']) recReadFields.push('x_studio_itau_tipo_pagamento');
+
   var invoices = await odooExec(oc, odooHost, odooUid, 'account.move', 'read', [
-    invoiceIds,
-    ['name', 'amount_total', 'x_studio_itau_nosso_numero', 'x_studio_itau_txid', 'x_studio_itau_tipo_pagamento']
+    invoiceIds, recReadFields
   ]);
 
   // Para cada crédito no extrato, tentar match com invoice
@@ -387,7 +445,13 @@ async function reconcileStatementPayments(transacoes) {
         }
 
         try {
-          await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[inv.id], writeVals]);
+          var safeRecVals = filterWriteVals(writeVals, fieldChecks);
+          if (Object.keys(safeRecVals).length > 0) {
+            await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[inv.id], safeRecVals]);
+          } else {
+            console.log('[PAYMENT-POLL] Nenhum campo valido para escrever (campos ausentes no Odoo)');
+            continue;
+          }
           invoicesPaid++;
 
           // Chatter note
