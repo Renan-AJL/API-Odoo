@@ -13,6 +13,7 @@ const { storeBoleto, generatePdf, generatePdfFromFields } = require('../services
 const { pushBoletosToOdoo, pushPixToOdoo } = require('../services/odoo-push');
 const { criarLinkPagamento } = require('../services/itau-link-pagamento');
 const { criarCobrancaPix, consultarCobrancaPix } = require('../services/itau-pix');
+const { buildDevedorFromDoc } = require('../utils/pix-devedor');
 const { buscarExtratoNormalizado } = require('../services/itau-extrato');
 const { criarExtrato } = require('../services/odoo-bank-statement');
 const config = require('../config');
@@ -322,14 +323,13 @@ router.post('/gerar', async function(req, res) {
     if (formaPag.trim().toUpperCase().indexOf('PIX') === 0) {
       console.log('[API/GERAR] PIX detectado:', formaPag, '| Valor:', fatValor);
       try {
-        var isCpf = pagCpf.replace(/\D/g, '').length <= 11;
+        var devedor = buildDevedorFromDoc(pagNome, pagCpf);
+        if (!devedor && pagNome) {
+          console.warn('[API/GERAR] PIX: pagador com nome mas sem CPF/CNPJ valido, criando PIX sem devedor');
+        }
         var pixResult = await criarCobrancaPix({
           valor: fatValor,
-          devedor: pagNome ? {
-            nome: pagNome,
-            cpf: isCpf ? pagCpf.replace(/\D/g, '') : null,
-            cnpj: !isCpf ? pagCpf.replace(/\D/g, '') : null,
-          } : undefined,
+          devedor: devedor,
           solicitacaoPagador: fatName || '',
           expiracao: 86400, // 24h
         });
@@ -516,14 +516,13 @@ async function handlePix(req, res, d) {
   }, PIX_LOCK_TTL);
 
   try {
-    var isCpf = pagCpf.replace(/\\D/g, '').length <= 11;
+    var devedor = buildDevedorFromDoc(pagNome, pagCpf);
+    if (!devedor && pagNome) {
+      console.warn('[API/PIX] Pagador com nome mas sem CPF/CNPJ valido, criando PIX sem devedor');
+    }
     var pixResult = await criarCobrancaPix({
       valor: valorTotal,
-      devedor: pagNome ? {
-        nome: pagNome,
-        cpf: isCpf ? pagCpf.replace(/\\D/g, '') : null,
-        cnpj: !isCpf ? pagCpf.replace(/\\D/g, '') : null,
-      } : undefined,
+      devedor: devedor,
       solicitacaoPagador: faturaName || '',
       expiracao: 86400,
     });

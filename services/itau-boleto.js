@@ -84,7 +84,8 @@ function montaPayloadBolecode(dadosBoleto) {
   const etapa = dadosBoleto.etapa || 'Efetivacao';
 
   // Determina tipo pessoa (F ou J) baseado no CPF/CNPJ
-  const cpfCnpj = dadosBoleto.cpfCnpjPagador || '';
+  const cpfCnpjRaw = dadosBoleto.cpfCnpjPagador || '';
+  const cpfCnpj = String(cpfCnpjRaw).replace(/\D/g, '');
   const tipoPessoa = cpfCnpj.length <= 11 ? 'F' : 'J';
   const campoPessoa = tipoPessoa === 'F' ? 'numero_cadastro_pessoa_fisica' : 'numero_cadastro_nacional_pessoa_juridica';
 
@@ -92,7 +93,7 @@ function montaPayloadBolecode(dadosBoleto) {
   const tipoPessoaObj = {
     codigo_tipo_pessoa: tipoPessoa
   };
-  tipoPessoaObj[campoPessoa] = String(cpfCnpj).replace(/\D/g, '');
+  tipoPessoaObj[campoPessoa] = cpfCnpj;
 
   const payload = {
     etapa_processo_boleto: etapa,
