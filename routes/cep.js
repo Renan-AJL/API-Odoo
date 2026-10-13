@@ -20,12 +20,17 @@
  *     Lista fontes disponiveis
  *     Auth: X-API-Key
  *
+ * v2.0 — Diff-guard + retry com backoff+jitter para resistir a
+ *        SerializationFailure (SQLSTATE 40001) em colisoes de
+ *        escrita concorrente no Odoo, sem latencia no caminho feliz.
+ *
  * Adaptado de Api-CEP-Odoo-AJL-main/main.py (Python/FastAPI)
  * para o padrao Node.js/Express do middleware AJL.
  */
 var express = require('express');
 var { apiKeyAuth } = require('../middleware/auth');
 var { consultarCEP } = require('../services/cep.service');
+var { odooWriteGuarded, isRetriableOdooError, retryWithJitter } = require('../utils/odoo-write-guard');
 var config = require('../config');
 var xmlrpc = require('xmlrpc');
 
@@ -95,11 +100,12 @@ router.post('/cep', apiKeyAuth, async function(req, res) {
 // POST /api/v1/cep/consultar-odoo/:partnerId
 // Webhook Odoo — consulta CEP do partner e grava resultado
 //
-// Fluxo:
+// Fluxo (v2.0 — diff-guard + retry):
 //   1. Le o CEP do res.partner (campo 'zip')
 //   2. Consulta CEP via fallback multi-fonte
-//   3. Grava rua/bairro/cidade/estado/ibge de volta no partner
-//   4. Retorna o resultado
+//   3. Monta writeVals com campos a escrever
+//   4. odooWriteGuarded: diff-guard (read+compare) + write com retry
+//   5. Retorna o resultado
 //
 // Body (opcional):
 //   { "cep": "83323-000" }  — se nao informado, le do Odoo
@@ -161,8 +167,11 @@ router.post('/consultar-odoo/:partnerId', apiKeyAuth, async function(req, res) {
     // 3. Consulta CEP
     var resultado = await consultarCEP(cepToConsult);
 
-    // 4. Grava resultado de volta no Odoo
+    // 4. Grava resultado de volta no Odoo (com diff-guard + retry)
     var odooUpdated = false;
+    var camposAtualizados = [];
+    var writeMotivo = null;
+
     if (resultado.sucesso && writeBack && odooUid) {
       try {
         var writeVals = {};
@@ -206,35 +215,45 @@ router.post('/consultar-odoo/:partnerId', apiKeyAuth, async function(req, res) {
         // CEP formatado
         if (resultado.cep) writeVals['zip'] = resultado.cep;
 
-        // Pais
-        if (!partnerData || !partnerData.country_id) {
-          try {
-            var brIds = await odooExec(oc, odooHost, odooUid, 'res.country', 'search', [
-              [['code', '=', 'BR']]
-            ]);
-            if (brIds && brIds.length > 0) writeVals['country_id'] = brIds[0];
-          } catch (countryErr) { /* ignore */ }
-        }
-
-        if (Object.keys(writeVals).length > 0) {
-          await odooExec(oc, odooHost, odooUid, 'res.partner', 'write', [
-            [partnerId],
-            writeVals
+        // Pais — sempre incluir BR se encontrado (diff-guard pula se ja setado)
+        try {
+          var brIds = await odooExec(oc, odooHost, odooUid, 'res.country', 'search', [
+            [['code', '=', 'BR']]
           ]);
-          odooUpdated = true;
-          console.log('[CEP] Resultado gravado no res.partner ID:', partnerId, JSON.stringify(writeVals));
+          if (brIds && brIds.length > 0) writeVals['country_id'] = brIds[0];
+        } catch (countryErr) { /* ignore */ }
+
+        // === Diff-guard + retry write ===
+        if (Object.keys(writeVals).length > 0) {
+          var guardResult = await odooWriteGuarded(
+            odooExec, oc, odooHost, odooUid,
+            'res.partner', partnerId, writeVals,
+            { label: 'CEP.partner[' + partnerId + ']' }
+          );
+
+          odooUpdated = guardResult.updated;
+          camposAtualizados = guardResult.campos_atualizados || [];
+          writeMotivo = guardResult.motivo || null;
+
+          if (guardResult.erro) {
+            console.error('[CEP] Erro ao gravar no Odoo (guard):', guardResult.erro);
+          }
         }
       } catch (odooErr) {
         console.error('[CEP] Erro ao gravar no Odoo:', odooErr.message);
       }
     }
 
-    return res.json({
+    var response = {
       sucesso: resultado.sucesso,
       data: resultado,
       partner_id: partnerId,
       odoo_updated: odooUpdated,
-    });
+      campos_atualizados: odooUpdated ? camposAtualizados : [],
+    };
+    if (writeMotivo) response.motivo = writeMotivo;
+
+    return res.json(response);
   } catch (err) {
     console.error('[CEP] Erro webhook Odoo:', err.message);
     return res.status(500).json({ sucesso: false, erro: err.message });
@@ -252,12 +271,15 @@ router.post('/consultar-odoo/:partnerId', apiKeyAuth, async function(req, res) {
 //   (segredo exclusivo CEP_WEBHOOK_SECRET, separado do X-API-Key,
 //    pois a automacao Python do Odoo pode nao conseguir enviar X-API-Key)
 //
-// Fluxo:
+// Fluxo (v2.0 — diff-guard + retry):
 //   1. Valida autenticacao por segredo exclusivo
 //   2. Valida id (partner ID) e cep no body
 //   3. Consulta CEP via fallback multi-fonte
-//   4. Verifica se o partner existe no Odoo
-//   5. Grava SOMENTE campos com valores nao vazios (street, street2, city, state_id, zip, country_id)
+//   4. Monta writeVals com campos nao vazios
+//   5. odooWriteGuarded: diff-guard (read+compare) + write com retry
+//      - Se registro nao existe: sucesso:false imediato, sem retry
+//      - Se nenhum campo mudou: sucesso:true, odoo_updated:false, motivo:sem_mudancas
+//      - Se ha mudancas: write com retry em colisao (SerializationFailure)
 //   6. Retorna resultado + status de atualizacao
 //
 // Garantias:
@@ -265,6 +287,10 @@ router.post('/consultar-odoo/:partnerId', apiKeyAuth, async function(req, res) {
 //   - Nunca atualiza em massa (somente o partner do ID recebido)
 //   - Diferencia consulta bem-sucedida de atualizacao efetiva
 //   - Nao revela segredos em logs ou respostas
+//   - Write-back falho NAO derruba o sucesso do lookup
+//   - Diff-guard: CEP com/sem mascara e igual; many2one comparado pelo ID
+//   - Retry: ate 3 tentativas, backoff ~0.5s ~1.5s ~4s (+-30% jitter)
+//   - Zero latencia nova no caminho feliz (read-before-write = milissegundos)
 // ============================================================
 router.post('/odoo-webhook', async function(req, res) {
   try {
@@ -328,7 +354,7 @@ router.post('/odoo-webhook', async function(req, res) {
       });
     }
 
-    // --- 4. Conectar ao Odoo e verificar partner ---
+    // --- 4. Conectar ao Odoo ---
     var oc = config.odoo;
     if (!oc || !oc.enabled || !oc.url) {
       return res.status(503).json({
@@ -358,47 +384,15 @@ router.post('/odoo-webhook', async function(req, res) {
       });
     }
 
-    // Verificar se o partner existe
-    var partnerExists = false;
-    try {
-      var partners = await odooExec(oc, odooHost, odooUid, 'res.partner', 'search_count', [
-        [['id', '=', partnerId]]
-      ]);
-      partnerExists = partners > 0;
-    } catch (searchErr) {
-      console.error('[CEP-WEBHOOK] Erro ao verificar partner:', searchErr.message);
-    }
-
-    if (!partnerExists) {
-      return res.status(404).json({
-        sucesso: true,
-        consulta: resultado,
-        id: partnerId,
-        odoo_updated: false,
-        erro: 'Contato res.partner ID ' + partnerId + ' nao encontrado no Odoo.',
-      });
-    }
-
-    // --- 5. Gravar SOMENTE campos com valores nao vazios ---
+    // --- 5. Montar writeVals com campos nao vazios ---
+    // Nao fazemos mais search_count — o diff-guard (read) detecta
+    // registro inexistente e retorna erro imediato.
     var writeVals = {};
-    var camposAtualizados = [];
 
-    if (resultado.rua) {
-      writeVals['street'] = resultado.rua;
-      camposAtualizados.push('street');
-    }
-    if (resultado.bairro) {
-      writeVals['street2'] = resultado.bairro;
-      camposAtualizados.push('street2');
-    }
-    if (resultado.cidade) {
-      writeVals['city'] = resultado.cidade;
-      camposAtualizados.push('city');
-    }
-    if (resultado.cep) {
-      writeVals['zip'] = resultado.cep;
-      camposAtualizados.push('zip');
-    }
+    if (resultado.rua) writeVals['street'] = resultado.rua;
+    if (resultado.bairro) writeVals['street2'] = resultado.bairro;
+    if (resultado.cidade) writeVals['city'] = resultado.cidade;
+    if (resultado.cep) writeVals['zip'] = resultado.cep;
 
     // Estado — resolver res.country.state pelo codigo UF
     if (resultado.estado) {
@@ -408,27 +402,18 @@ router.post('/odoo-webhook', async function(req, res) {
         ]);
         if (stateIds && stateIds.length > 0) {
           writeVals['state_id'] = stateIds[0];
-          camposAtualizados.push('state_id');
         }
       } catch (stateErr) {
         console.error('[CEP-WEBHOOK] Erro ao resolver state_id:', stateErr.message);
       }
     }
 
-    // Pais — resolver res.country pelo codigo BR (se o partner nao tem pais)
+    // Pais — sempre incluir BR (diff-guard pula se ja esta setado)
     try {
-      var partnerData = await odooExec(oc, odooHost, odooUid, 'res.partner', 'read', [
-        [partnerId], ['country_id']
+      var brIds = await odooExec(oc, odooHost, odooUid, 'res.country', 'search', [
+        [['code', '=', 'BR']]
       ]);
-      if (partnerData && partnerData.length > 0 && (!partnerData[0].country_id || !partnerData[0].country_id[0])) {
-        var brIds = await odooExec(oc, odooHost, odooUid, 'res.country', 'search', [
-          [['code', '=', 'BR']]
-        ]);
-        if (brIds && brIds.length > 0) {
-          writeVals['country_id'] = brIds[0];
-          camposAtualizados.push('country_id');
-        }
-      }
+      if (brIds && brIds.length > 0) writeVals['country_id'] = brIds[0];
     } catch (countryErr) {
       // Ignora — pais nao e critico
     }
@@ -442,34 +427,53 @@ router.post('/odoo-webhook', async function(req, res) {
         ]);
         if (ibgeField && ibgeField.length > 0) {
           writeVals['x_studio_ibge'] = resultado.ibge_cidade;
-          camposAtualizados.push('x_studio_ibge');
         }
       } catch (ibgeErr) { /* campo nao existe, ignora */ }
     }
 
+    // --- 6. Diff-guard + retry write ---
     var odooUpdated = false;
+    var camposAtualizados = [];
+    var writeMotivo = null;
+    var writeErro = null;
+
     if (Object.keys(writeVals).length > 0) {
-      try {
-        await odooExec(oc, odooHost, odooUid, 'res.partner', 'write', [
-          [partnerId],
-          writeVals
-        ]);
-        odooUpdated = true;
-        console.log('[CEP-WEBHOOK] Partner ID ' + partnerId + ' atualizado: ' + camposAtualizados.join(', '));
-      } catch (writeErr) {
-        console.error('[CEP-WEBHOOK] Erro ao gravar no Odoo:', writeErr.message);
-        return res.status(502).json({
-          sucesso: true,
-          consulta: resultado,
-          id: partnerId,
-          odoo_updated: false,
-          erro_odoo: 'Falha ao atualizar contato no Odoo: ' + writeErr.message,
-        });
-      }
+      var guardResult = await odooWriteGuarded(
+        odooExec, oc, odooHost, odooUid,
+        'res.partner', partnerId, writeVals,
+        { label: 'CEP-WEBHOOK.partner[' + partnerId + ']' }
+      );
+
+      odooUpdated = guardResult.updated;
+      camposAtualizados = guardResult.campos_atualizados || [];
+      writeMotivo = guardResult.motivo || null;
+      writeErro = guardResult.erro || null;
     }
 
-    // --- 6. Retornar resultado ---
-    return res.json({
+    // Registro nao existe — sucesso:false imediato, sem retry
+    if (writeMotivo === 'registro_nao_encontrado') {
+      return res.status(404).json({
+        sucesso: false,
+        consulta: resultado,
+        id: partnerId,
+        odoo_updated: false,
+        erro: 'Contato res.partner ID ' + partnerId + ' nao encontrado no Odoo.',
+      });
+    }
+
+    // Erro de escrita apos esgotar retries — nao derruba o lookup
+    if (writeErro) {
+      return res.status(502).json({
+        sucesso: true,
+        consulta: resultado,
+        id: partnerId,
+        odoo_updated: false,
+        erro_odoo: 'Falha ao atualizar contato no Odoo: ' + writeErro,
+      });
+    }
+
+    // --- 7. Retornar resultado ---
+    var response = {
       sucesso: true,
       consulta: {
         cep: resultado.cep,
@@ -483,7 +487,12 @@ router.post('/odoo-webhook', async function(req, res) {
       id: partnerId,
       odoo_updated: odooUpdated,
       campos_atualizados: odooUpdated ? camposAtualizados : [],
-    });
+    };
+
+    // Campo opcional: motivo (sem_mudancas, etc.)
+    if (writeMotivo) response.motivo = writeMotivo;
+
+    return res.json(response);
   } catch (err) {
     console.error('[CEP-WEBHOOK] Erro interno:', err.message);
     return res.status(500).json({ sucesso: false, erro: 'Erro interno no servidor.' });
