@@ -227,6 +227,122 @@ function runSiegPoll() {
   });
 }
 
+// ============================================================
+// ITAU PAYMENT POLLING: checa status PIX/Boleto a cada 60s
+// ============================================================
+var ITAU_PAY_POLL_MS = parseInt(process.env.ITAU_PAY_POLL_MS, 10) || 60000;
+var itauPayPollTimer = null;
+
+function startItauPayPolling() {
+  if (!config.odoo.enabled || !config.itau.clientId) {
+    console.log('  [ITAU-PAY-POLL] DESATIVADO (Odoo ou Itau nao configurados)');
+    return;
+  }
+  console.log('  [ITAU-PAY-POLL] ATIVO - intervalo: ' + (ITAU_PAY_POLL_MS / 1000) + 's');
+  setTimeout(function() {
+    runItauPayPoll();
+    itauPayPollTimer = setInterval(runItauPayPoll, ITAU_PAY_POLL_MS);
+  }, 15000); // Start after 15s
+}
+
+function runItauPayPoll() {
+  var payPoll = require('./services/itau-payment-poll');
+  // PIX pendentes
+  payPoll.processPendingPix().then(function(result) {
+    if (result.processed > 0) {
+      console.log('  [ITAU-PAY-POLL] PIX: ' + result.processed + ' consultado(s), ' + result.paid + ' pago(s)');
+    }
+  }).catch(function(err) {
+    console.error('  [ITAU-PAY-POLL] Erro PIX:', err.message);
+  });
+  // Boletos pendentes
+  payPoll.processPendingBoletos().then(function(result) {
+    if (result.processed > 0) {
+      console.log('  [ITAU-PAY-POLL] Boleto: ' + result.processed + ' consultado(s), ' + result.paid + ' pago(s)');
+    }
+  }).catch(function(err) {
+    console.error('  [ITAU-PAY-POLL] Erro Boleto:', err.message);
+  });
+}
+
+// ============================================================
+// ITAU EXTRATO AUTO-IMPORT: importa extrato bancario 1x/dia
+// ============================================================
+var ITAU_EXTRATO_IMPORT_MS = parseInt(process.env.ITAU_EXTRATO_IMPORT_MS, 10) || 1800000; // default: 30 min
+var itauExtratoTimer = null;
+var lastExtratoDate = null;
+
+function startItauExtratoImport() {
+  if (!config.odoo.enabled || !config.itau.clientId) {
+    console.log('  [ITAU-EXTRATO] DESATIVADO (Odoo ou Itau nao configurados)');
+    return;
+  }
+  console.log('  [ITAU-EXTRATO] ATIVO - intervalo: ' + (ITAU_EXTRATO_IMPORT_MS / 1000) + 's');
+  // Primeira importacao apos 20s
+  setTimeout(function() {
+    runItauExtratoImport();
+    itauExtratoTimer = setInterval(runItauExtratoImport, ITAU_EXTRATO_IMPORT_MS);
+  }, 20000);
+}
+
+function runItauExtratoImport() {
+  // Importar extrato do dia anterior (onde ja estao todas as transacoes consolidadas)
+  var yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  var dateStr = yesterday.toISOString().substring(0, 10); // YYYY-MM-DD
+
+  // Evitar importar o mesmo dia mais de uma vez (a menos que seja forçado)
+  var today = new Date().toISOString().substring(0, 10);
+  if (lastExtratoDate === dateStr && ITAU_EXTRATO_IMPORT_MS >= 3600000) {
+    return; // Ja importou este dia e o intervalo é >= 1h, pula
+  }
+
+  var extrato = require('./services/itau-extrato');
+  var bankStmt = require('./services/odoo-bank-statement');
+  var payPoll = require('./services/itau-payment-poll');
+
+  console.log('  [ITAU-EXTRATO] Importando extrato de ' + dateStr + '...');
+
+  extrato.buscarExtratoNormalizado(dateStr, dateStr).then(function(transacoes) {
+    if (!transacoes || transacoes.length === 0) {
+      console.log('  [ITAU-EXTRATO] Nenhuma transacao encontrada para ' + dateStr);
+      return;
+    }
+
+    console.log('  [ITAU-EXTRATO] ' + transacoes.length + ' transacoes encontradas');
+
+    // Verificar se ja existe extrato para este dia
+    return bankStmt.findBankJournal().then(function(journal) {
+      return bankStmt.findExistingStatement(journal.id, dateStr).then(function(existing) {
+        if (existing && existing.length > 0) {
+          console.log('  [ITAU-EXTRATO] Extrato ja existe para ' + dateStr + ' (id=' + existing[0] + '), pulando criacao');
+          // Ainda assim tentar reconciliar pagamentos
+          return payPoll.reconcileStatementPayments(transacoes).then(function(recResult) {
+            if (recResult.invoices_paid > 0) {
+              console.log('  [ITAU-EXTRATO] ' + recResult.invoices_paid + ' fatura(s) confirmada(s) via extrato');
+            }
+          });
+        }
+
+        // Criar extrato no Odoo
+        return bankStmt.criarExtrato(dateStr, transacoes).then(function(result) {
+          console.log('  [ITAU-EXTRATO] Extrato criado: id=' + result.statementId + ', ' + result.linesCreated + ' linhas, saldo R$ ' + result.balance.toFixed(2));
+          lastExtratoDate = dateStr;
+
+          // Reconciliar pagamentos com invoices pendentes
+          return payPoll.reconcileStatementPayments(transacoes).then(function(recResult) {
+            if (recResult.invoices_paid > 0) {
+              console.log('  [ITAU-EXTRATO] ' + recResult.invoices_paid + ' fatura(s) confirmada(s) via extrato');
+            }
+          });
+        });
+      });
+    });
+  }).catch(function(err) {
+    console.error('  [ITAU-EXTRATO] Erro:', err.message);
+  });
+}
+
 app.listen(PORT, () => {
   const mtls = config.createMtlsConfig();
   console.log('');
@@ -280,12 +396,22 @@ app.listen(PORT, () => {
   console.log('  [CONSULTFLEX]');
   console.log('  API Key: ' + (config.consultflex.apiKey ? '***' + config.consultflex.apiKey.slice(-4) : 'NAO CONFIGURADO'));
   console.log('  Polling: ' + (config.odoo.enabled && config.consultflex.apiKey ? 'ATIVO (' + (CF_POLL_INTERVAL_MS / 1000) + 's)' : 'DESATIVADO'));
+  console.log('  ---');
+  console.log('  [ITAU PAYMENT STATUS]');
+  console.log('  PIX/Boleto Polling: ' + (config.odoo.enabled && config.itau.clientId ? 'ATIVO (' + (ITAU_PAY_POLL_MS / 1000) + 's)' : 'DESATIVADO'));
+  console.log('  Extrato Auto-Import: ' + (config.odoo.enabled && config.itau.clientId ? 'ATIVO (' + (ITAU_EXTRATO_IMPORT_MS / 1000) + 's)' : 'DESATIVADO'));
 
   // Iniciar polling SIEG
   startSiegPolling();
 
   // Iniciar polling ConsultFlex
   startCfPolling();
+
+  // Iniciar polling status pagamento Itaú (PIX + Boleto)
+  startItauPayPolling();
+
+  // Iniciar importação automática de extrato bancário
+  startItauExtratoImport();
 });
 
 module.exports = app;

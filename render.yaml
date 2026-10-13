@@ -81,6 +81,15 @@ services:
       - key: CEP_WEBHOOK_SECRET
         generateValue: true
         sync: false
+      # --- Itau Payment Polling ---
+      - key: ITAU_PAY_POLL_MS
+        value: "60000"
+      # --- Itau Extrato Auto-Import ---
+      - key: ITAU_EXTRATO_IMPORT_MS
+        value: "1800000"
+      # --- Odoo Bank Journal ---
+      - key: ODOO_BANK_JOURNAL_ID
+        sync: false
       - key: NFE_RESP_TEC_CNPJ
         sync: false
       - key: NFE_RESP_TEC_CONTATO
