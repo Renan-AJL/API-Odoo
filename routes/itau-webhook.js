@@ -82,14 +82,30 @@ router.post('/pix-confirmacao', async function(req, res) {
     var invId = invoiceIds[0];
     var nowStr = new Date().toISOString().substring(0, 19).replace('T', ' ');
 
-    // Atualizar status
-    await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[invId], {
-      'x_studio_itau_situacao': 'PAGO',
-      'x_studio_itau_pix_status': 'CONCLUIDA',
-      'x_studio_itau_status_pagamento': 'PAGO',
-      'x_studio_itau_pix_data_pagamento': nowStr,
-      'x_studio_itau_pix_e2e': e2eId,
-    }]);
+    // Atualizar status (resiliente a campos inexistentes)
+    try {
+      await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[invId], {
+        'x_studio_itau_situacao': 'PAGO',
+        'x_studio_itau_pix_status': 'CONCLUIDA',
+        'x_studio_itau_status_pagamento': 'PAGO',
+        'x_studio_itau_pix_data_pagamento': nowStr,
+        'x_studio_itau_pix_e2e': e2eId,
+      }]);
+    } catch (writeErr) {
+      // Campo pode nao existir - tentar escrever apenas os que existem
+      console.warn('[WEBHOOK-PIX] Erro ao escrever todos os campos, tentando campo a campo:', writeErr.message);
+      var fields = ['x_studio_itau_situacao', 'x_studio_itau_status_pagamento', 'x_studio_itau_pix_status'];
+      for (var fi = 0; fi < fields.length; fi++) {
+        try {
+          var singleVal = {};
+          singleVal[fields[fi]] = 'PAGO';
+          await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[invId], singleVal]);
+          console.log('[WEBHOOK-PIX] Campo escrito OK: ' + fields[fi]);
+        } catch (singleErr) {
+          console.warn('[WEBHOOK-PIX] Campo ausente: ' + fields[fi]);
+        }
+      }
+    }
 
     // Post chatter note
     await odooExec(oc, odooHost, odooUid, 'mail.message', 'create', [{
@@ -155,13 +171,28 @@ router.post('/bolecode-confirmacao', async function(req, res) {
     var invId = invoiceIds[0];
     var todayStr = new Date().toISOString().substring(0, 10);
 
-    // Atualizar status
-    await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[invId], {
-      'x_studio_itau_situacao': 'PAGO',
-      'x_studio_itau_boleto_status': 'PAGO',
-      'x_studio_itau_status_pagamento': 'PAGO',
-      'x_studio_itau_boleto_data_pagamento': todayStr,
-    }]);
+    // Atualizar status (resiliente a campos inexistentes)
+    try {
+      await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[invId], {
+        'x_studio_itau_situacao': 'PAGO',
+        'x_studio_itau_boleto_status': 'PAGO',
+        'x_studio_itau_status_pagamento': 'PAGO',
+        'x_studio_itau_boleto_data_pagamento': todayStr,
+      }]);
+    } catch (writeErr) {
+      console.warn('[WEBHOOK-BOLETO] Erro ao escrever todos os campos, tentando campo a campo:', writeErr.message);
+      var fields = ['x_studio_itau_situacao', 'x_studio_itau_status_pagamento', 'x_studio_itau_boleto_status'];
+      for (var fi = 0; fi < fields.length; fi++) {
+        try {
+          var singleVal = {};
+          singleVal[fields[fi]] = 'PAGO';
+          await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[invId], singleVal]);
+          console.log('[WEBHOOK-BOLETO] Campo escrito OK: ' + fields[fi]);
+        } catch (singleErr) {
+          console.warn('[WEBHOOK-BOLETO] Campo ausente: ' + fields[fi]);
+        }
+      }
+    }
 
     // Post chatter note
     await odooExec(oc, odooHost, odooUid, 'mail.message', 'create', [{
