@@ -330,6 +330,14 @@ async function pushPixToOdoo(pushData) {
     // com as opcoes do Odoo Studio. Reative com os valores corretos se necessario.
 
     var textFields = {};
+
+    // Campos obrigatórios para polling e exibição no Odoo
+    textFields['x_studio_itau_situacao'] = 'EMITIDO';
+    textFields['x_studio_itau_tipo_pagamento'] = 'PIX';
+    if (txid) {
+      textFields['x_studio_itau_txid'] = txid;
+    }
+
     if (pixCopiaCola) {
       textFields['x_studio_itau_pix_copia_cola'] = pixCopiaCola;
     }
