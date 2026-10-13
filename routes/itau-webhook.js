@@ -84,6 +84,7 @@ router.post('/pix-confirmacao', async function(req, res) {
 
     // Atualizar status
     await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[invId], {
+      'x_studio_itau_situacao': 'PAGO',
       'x_studio_itau_pix_status': 'CONCLUIDA',
       'x_studio_itau_status_pagamento': 'PAGO',
       'x_studio_itau_pix_data_pagamento': nowStr,
@@ -156,6 +157,7 @@ router.post('/bolecode-confirmacao', async function(req, res) {
 
     // Atualizar status
     await odooExec(oc, odooHost, odooUid, 'account.move', 'write', [[invId], {
+      'x_studio_itau_situacao': 'PAGO',
       'x_studio_itau_boleto_status': 'PAGO',
       'x_studio_itau_status_pagamento': 'PAGO',
       'x_studio_itau_boleto_data_pagamento': todayStr,
