@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError
-from psycopg2.errors import SerializationFailure
 import logging
 import requests
 import re
-import time
-import random
 
 _logger = logging.getLogger(__name__)
 
@@ -82,200 +79,6 @@ class CrmLead(models.Model):
             'cnpja.middleware.api_key', 'cnpja-odoo-secret-key-change-me'
         )
 
-    # ===================================================================
-    # DIFF-GUARD: compara valores propostos com atuais, retorna só mudanças
-    # ===================================================================
-
-    @api.model
-    def _normalize_cep(self, val):
-        """Normaliza CEP: remove não-dígitos."""
-        if not val:
-            return ''
-        return re.sub(r'\D', '', str(val))
-
-    @api.model
-    def _normalize_cnpj(self, val):
-        """Normaliza CNPJ: remove não-dígitos."""
-        if not val:
-            return ''
-        return re.sub(r'\D', '', str(val))
-
-    @api.model
-    def _normalize_str(self, val):
-        """Normaliza string: strip + None/False → ''"""
-        if val is None or val is False:
-            return ''
-        return str(val).strip()
-
-    def _diff_guard(self, proposed_vals):
-        """
-        Diff-guard: compara valores propostos com atuais no registro.
-        Retorna dict com apenas os campos que realmente mudaram.
-        """
-        self.ensure_one()
-
-        if not proposed_vals:
-            return {}
-
-        field_names = list(proposed_vals.keys())
-        current_data = self.read(field_names, load=False)[0]
-
-        changed = {}
-        for field, proposed in proposed_vals.items():
-            current = current_data.get(field)
-
-            # many2one: comparar pelo ID
-            if field in ('state_id', 'country_id', 'city_id'):
-                current_id = current[0] if isinstance(current, (list, tuple)) and current else (current or 0)
-                proposed_id = proposed if proposed else 0
-                if current_id != proposed_id:
-                    changed[field] = proposed
-                continue
-
-            # CEP (zip): comparar normalizado
-            if field == 'zip':
-                if self._normalize_cep(current) != self._normalize_cep(proposed):
-                    changed[field] = proposed
-                continue
-
-            # CNPJ: comparar normalizado
-            if field in ('cnpj_cpf', 'vat'):
-                if self._normalize_cnpj(current) != self._normalize_cnpj(proposed):
-                    changed[field] = proposed
-                continue
-
-            # Boolean
-            if isinstance(proposed, bool):
-                if bool(current) != proposed:
-                    changed[field] = proposed
-                continue
-
-            # Number
-            if isinstance(proposed, (int, float)) and not isinstance(proposed, bool):
-                try:
-                    if float(current or 0) != float(proposed):
-                        changed[field] = proposed
-                except (ValueError, TypeError):
-                    changed[field] = proposed
-                continue
-
-            # String: comparar com trim
-            if self._normalize_str(current) != self._normalize_str(proposed):
-                changed[field] = proposed
-
-        if not changed:
-            _logger.info(
-                f"DIFF-GUARD: crm.lead ID {self.id} - write ignorado (sem mudancas). "
-                f"Campos verificados: {', '.join(field_names)}"
-            )
-        elif len(changed) < len(proposed_vals):
-            unchanged = [f for f in field_names if f not in changed]
-            _logger.info(
-                f"DIFF-GUARD: crm.lead ID {self.id} - "
-                f"{len(unchanged)} campo(s) inalterado(s) removido(s): {', '.join(unchanged)}"
-            )
-
-        return changed
-
-    # ===================================================================
-    # RETRY com backoff + jitter para SerializationFailure
-    # ===================================================================
-
-    def _write_with_retry(self, vals, max_retries=3, label='crm.lead'):
-        """
-        Escreve no registro com diff-guard + retry em colisão.
-
-        Fluxo:
-          1. Diff-guard: filtra só campos que mudaram
-          2. Se nenhum mudou: retorna sem write
-          3. Se há mudanças: write com retry em SerializationFailure
-          4. Antes de cada retry: re-executa diff-guard
-          5. Backoff: ~0.5s → ~1.5s → ~4s (±30% jitter)
-
-        :param vals: dict com campos e valores a escrever
-        :param max_retries: max tentativas extras (default: 3)
-        :param label: rótulo para logs
-        :returns: dict com { updated, campos_atualizados, motivo }
-        """
-        self.ensure_one()
-
-        if not vals:
-            return {'updated': False, 'campos_atualizados': [], 'motivo': 'sem_valores'}
-
-        # Diff-guard inicial
-        changed = self._diff_guard(vals)
-        if not changed:
-            return {'updated': False, 'campos_atualizados': [], 'motivo': 'sem_mudancas'}
-
-        changed_fields = list(changed.keys())
-        last_error = None
-
-        for attempt in range(max_retries + 1):
-            try:
-                # Re-executar diff-guard antes de cada retry (exceto a primeira)
-                if attempt > 0:
-                    self.invalidate_cache()
-                    changed = self._diff_guard(vals)
-                    if not changed:
-                        _logger.info(
-                            f"RETRY: {label} ID {self.id} - virou no-op após "
-                            f"tentativa {attempt}, encerrando com sucesso."
-                        )
-                        return {'updated': False, 'campos_atualizados': [], 'motivo': 'sem_mudancas'}
-                    changed_fields = list(changed.keys())
-
-                self.write(changed)
-                _logger.info(
-                    f"{label} ID {self.id} escrito com sucesso. "
-                    f"Campos: {', '.join(changed_fields)}"
-                )
-                return {
-                    'updated': True,
-                    'campos_atualizados': changed_fields,
-                    'motivo': None,
-                }
-
-            except SerializationFailure as e:
-                last_error = e
-                if attempt < max_retries:
-                    base_delay = 0.5 * (3 ** attempt)
-                    jitter = 1 + (random.random() * 0.6 - 0.3)
-                    delay = base_delay * jitter
-                    _logger.warning(
-                        f"RETRY: {label} ID {self.id} - SerializationFailure "
-                        f"na tentativa {attempt + 1}/{max_retries + 1}: {str(e)}. "
-                        f"Retry em {delay:.2f}s"
-                    )
-                    time.sleep(delay)
-                else:
-                    _logger.error(
-                        f"RETRY: {label} ID {self.id} - Esgotou {max_retries + 1} "
-                        f"tentativas após SerializationFailure: {str(e)}"
-                    )
-
-            except Exception as e:
-                err_msg = str(e).lower()
-                if 'access denied' in err_msg or 'permission' in err_msg:
-                    _logger.error(
-                        f"WRITE: {label} ID {self.id} - erro de permissão (não retriable): {str(e)}"
-                    )
-                elif 'validation' in err_msg or 'missing' in err_msg:
-                    _logger.error(
-                        f"WRITE: {label} ID {self.id} - erro de validação (não retriable): {str(e)}"
-                    )
-                else:
-                    _logger.error(
-                        f"WRITE: {label} ID {self.id} - erro não retriable: {str(e)}"
-                    )
-                raise
-
-        return {
-            'updated': False,
-            'campos_atualizados': [],
-            'motivo': 'erro_escrita',
-            'erro': str(last_error),
-        }
-
     # ====== BOTÃO DE CONSULTA NO CRM ======
 
     def action_consultar_cnpj_crm(self):
@@ -283,10 +86,6 @@ class CrmLead(models.Model):
         Ação do botão 'Consultar CNPJ' no CRM Lead.
         Consulta o CNP Já e preenche os campos do lead + parceiro associado.
         Os dados no parceiro usam campos nativos l10n_br.
-
-        v2.0: writes independentes (lead e partner separados),
-              cada um com diff-guard + retry próprio.
-              A falha de um NÃO impede nem reverte o outro.
         """
         self.ensure_one()
 
@@ -321,8 +120,8 @@ class CrmLead(models.Model):
         except Exception as e:
             raise UserError(_('Erro ao consultar CNP Já: %s') % str(e))
 
-        # ---- Write INDEPENDENTE 1: Lead ----
-        vals_lead = {
+        # ---- Preenche os dados do Lead (campos visuais) ----
+        vals = {
             'partner_name': cnpja_data.get('name', ''),
             'cnpj_cpf': cnpja_data.get('vat', ''),
             'l10n_br_ie_code': cnpja_data.get('l10n_br_ie_code', ''),
@@ -337,7 +136,7 @@ class CrmLead(models.Model):
         }
 
         # Endereço do lead
-        vals_lead.update({
+        vals.update({
             'street': cnpja_data.get('street', '') or False,
             'street2': cnpja_data.get('street2', '') or False,
             'city': cnpja_data.get('city', '') or False,
@@ -360,19 +159,13 @@ class CrmLead(models.Model):
             f"- Tipo de pessoa: PJ (Empresa)"
         )
         if comment:
-            vals_lead['description'] = comment + regra_msg
+            vals['description'] = comment + regra_msg
         else:
-            vals_lead['description'] = regra_msg.strip()
+            vals['description'] = regra_msg.strip()
 
-        lead_result = self._write_with_retry(vals_lead, label='CRM.lead')
-        _logger.info(
-            f"CNPJá CRM: Lead ID {self.id} - updated={lead_result.get('updated')}, "
-            f"motivo={lead_result.get('motivo', 'ok')}, "
-            f"campos={lead_result.get('campos_atualizados', [])}"
-        )
+        self.write(vals)
 
-        # ---- Write INDEPENDENTE 2: Parceiro associado ----
-        partner_result = {'updated': False, 'campos_atualizados': [], 'motivo': 'sem_partner'}
+        # ---- Se o lead tem parceiro associado, preenche com campos l10n_br ----
         if self.partner_id:
             partner_vals = {
                 'name': cnpja_data.get('name', ''),
@@ -412,14 +205,7 @@ class CrmLead(models.Model):
                 'email': cnpja_data.get('email', '') or False,
             })
 
-            # Use partner's _write_with_retry (from res_partner.py)
-            partner_result = self.partner_id._write_with_retry(partner_vals)
-            _logger.info(
-                f"CNPJá CRM: Partner ID {self.partner_id.id} - "
-                f"updated={partner_result.get('updated')}, "
-                f"motivo={partner_result.get('motivo', 'ok')}, "
-                f"campos={partner_result.get('campos_atualizados', [])}"
-            )
+            self.partner_id.write(partner_vals)
 
         # Retorna notificação
         return {

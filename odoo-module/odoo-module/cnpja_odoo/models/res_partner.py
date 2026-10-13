@@ -2,13 +2,10 @@
 
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError, ValidationError
-from psycopg2.errors import SerializationFailure
 import logging
 import requests
 import json
 import re
-import time
-import random
 
 _logger = logging.getLogger(__name__)
 
@@ -164,212 +161,7 @@ class ResPartner(models.Model):
             raise UserError(_('Erro inesperado ao consultar CNP Já: %s') % str(e))
 
     # ===================================================================
-    # DIFF-GUARD: compara valores propostos com atuais, retorna só mudanças
-    # ===================================================================
-
-    @api.model
-    def _normalize_cep(self, val):
-        """Normaliza CEP: remove não-dígitos. '84560-000' → '84560000'"""
-        if not val:
-            return ''
-        return re.sub(r'\D', '', str(val))
-
-    @api.model
-    def _normalize_cnpj(self, val):
-        """Normaliza CNPJ: remove não-dígitos."""
-        if not val:
-            return ''
-        return re.sub(r'\D', '', str(val))
-
-    @api.model
-    def _normalize_str(self, val):
-        """Normaliza string: strip + None/False → ''"""
-        if val is None or val is False:
-            return ''
-        return str(val).strip()
-
-    def _diff_guard(self, proposed_vals):
-        """
-        Diff-guard: compara valores propostos com atuais no registro.
-        Retorna dict com apenas os campos que realmente mudaram.
-
-        Normalização:
-          - CEP (zip): com/sem máscara é igual
-          - CNPJ (vat): com/sem máscara é igual
-          - many2one (state_id, country_id, city_id): compara pelo ID
-          - strings: trim()
-          - boolean/number: comparação direta
-        """
-        self.ensure_one()
-
-        if not proposed_vals:
-            return {}
-
-        # Ler valores atuais do registro
-        field_names = list(proposed_vals.keys())
-        current_data = self.read(field_names, load=False)[0]
-
-        changed = {}
-        for field, proposed in proposed_vals.items():
-            current = current_data.get(field)
-
-            # many2one: comparar pelo ID
-            if field in ('state_id', 'country_id', 'city_id'):
-                current_id = current[0] if isinstance(current, (list, tuple)) and current else (current or 0)
-                proposed_id = proposed if proposed else 0
-                if current_id != proposed_id:
-                    changed[field] = proposed
-                continue
-
-            # CEP (zip): comparar normalizado
-            if field == 'zip':
-                if self._normalize_cep(current) != self._normalize_cep(proposed):
-                    changed[field] = proposed
-                continue
-
-            # CNPJ (vat): comparar normalizado
-            if field == 'vat':
-                if self._normalize_cnpj(current) != self._normalize_cnpj(proposed):
-                    changed[field] = proposed
-                continue
-
-            # Boolean
-            if isinstance(proposed, bool):
-                if bool(current) != proposed:
-                    changed[field] = proposed
-                continue
-
-            # Number
-            if isinstance(proposed, (int, float)) and not isinstance(proposed, bool):
-                try:
-                    if float(current or 0) != float(proposed):
-                        changed[field] = proposed
-                except (ValueError, TypeError):
-                    changed[field] = proposed
-                continue
-
-            # String: comparar com trim
-            if self._normalize_str(current) != self._normalize_str(proposed):
-                changed[field] = proposed
-
-        if not changed:
-            _logger.info(
-                f"DIFF-GUARD: res.partner ID {self.id} - write ignorado (sem mudancas). "
-                f"Campos verificados: {', '.join(field_names)}"
-            )
-        elif len(changed) < len(proposed_vals):
-            unchanged = [f for f in field_names if f not in changed]
-            _logger.info(
-                f"DIFF-GUARD: res.partner ID {self.id} - "
-                f"{len(unchanged)} campo(s) inalterado(s) removido(s): {', '.join(unchanged)}"
-            )
-
-        return changed
-
-    # ===================================================================
-    # RETRY com backoff + jitter para SerializationFailure
-    # ===================================================================
-
-    def _write_with_retry(self, vals, max_retries=3):
-        """
-        Escreve no registro com diff-guard + retry em colisão.
-
-        Fluxo:
-          1. Diff-guard: filtra só campos que mudaram
-          2. Se nenhum mudou: retorna sem write
-          3. Se há mudanças: write com retry em SerializationFailure
-          4. Antes de cada retry: re-executa diff-guard
-          5. Backoff: ~0.5s → ~1.5s → ~4s (±30% jitter)
-
-        :param vals: dict com campos e valores a escrever
-        :param max_retries: max tentativas extras (default: 3)
-        :returns: dict com { updated, campos_atualizados, motivo }
-        """
-        self.ensure_one()
-
-        if not vals:
-            return {'updated': False, 'campos_atualizados': [], 'motivo': 'sem_valores'}
-
-        # Diff-guard inicial
-        changed = self._diff_guard(vals)
-        if not changed:
-            return {'updated': False, 'campos_atualizados': [], 'motivo': 'sem_mudancas'}
-
-        changed_fields = list(changed.keys())
-        last_error = None
-
-        for attempt in range(max_retries + 1):
-            try:
-                # Re-executar diff-guard antes de cada retry (exceto a primeira)
-                if attempt > 0:
-                    # Refresh record para pegar valores atualizados
-                    self.invalidate_cache()
-                    changed = self._diff_guard(vals)
-                    if not changed:
-                        _logger.info(
-                            f"RETRY: res.partner ID {self.id} - virou no-op após "
-                            f"tentativa {attempt}, encerrando com sucesso."
-                        )
-                        return {'updated': False, 'campos_atualizados': [], 'motivo': 'sem_mudancas'}
-                    changed_fields = list(changed.keys())
-
-                self.write(changed)
-                _logger.info(
-                    f"CNPJá: res.partner ID {self.id} escrito com sucesso. "
-                    f"Campos: {', '.join(changed_fields)}"
-                )
-                return {
-                    'updated': True,
-                    'campos_atualizados': changed_fields,
-                    'motivo': None,
-                }
-
-            except SerializationFailure as e:
-                last_error = e
-                if attempt < max_retries:
-                    # Backoff: ~0.5s → ~1.5s → ~4s (±30% jitter)
-                    base_delay = 0.5 * (3 ** attempt)
-                    jitter = 1 + (random.random() * 0.6 - 0.3)
-                    delay = base_delay * jitter
-                    _logger.warning(
-                        f"RETRY: res.partner ID {self.id} - SerializationFailure "
-                        f"na tentativa {attempt + 1}/{max_retries + 1}: {str(e)}. "
-                        f"Retry em {delay:.2f}s"
-                    )
-                    time.sleep(delay)
-                else:
-                    _logger.error(
-                        f"RETRY: res.partner ID {self.id} - Esgotou {max_retries + 1} "
-                        f"tentativas após SerializationFailure: {str(e)}"
-                    )
-
-            except Exception as e:
-                # Erro não retriable: falhar imediatamente
-                err_msg = str(e).lower()
-                if 'access denied' in err_msg or 'permission' in err_msg:
-                    _logger.error(
-                        f"WRITE: res.partner ID {self.id} - erro de permissão (não retriable): {str(e)}"
-                    )
-                elif 'validation' in err_msg or 'missing' in err_msg:
-                    _logger.error(
-                        f"WRITE: res.partner ID {self.id} - erro de validação (não retriable): {str(e)}"
-                    )
-                else:
-                    _logger.error(
-                        f"WRITE: res.partner ID {self.id} - erro não retriable: {str(e)}"
-                    )
-                raise
-
-        # Esgotou retries
-        return {
-            'updated': False,
-            'campos_atualizados': [],
-            'motivo': 'erro_escrita',
-            'erro': str(last_error),
-        }
-
-    # ===================================================================
-    # PREENCHIMENTO DOS CAMPOS l10n_br DO PARCEIRO
+    # PRENCHIMENTO DOS CAMPOS l10n_br DO PARCEIRO
     # ===================================================================
 
     def _preencher_dados_cnpja(self, cnpja_data):
@@ -378,7 +170,6 @@ class ResPartner(models.Model):
         Usa campos nativos do l10n_br:
           vat, l10n_br_ie_code, l10n_br_tax_regime, l10n_br_taxpayer,
           name, street, zip, city_id, state_id, country_id
-        v2.0: diff-guard + retry em colisão de escrita concorrente.
         """
         self.ensure_one()
 
@@ -457,29 +248,17 @@ class ResPartner(models.Model):
             'cnpja_consulted_at': fields.Datetime.now(),
         })
 
-        # ---- ATUALIZA O PARCEIRO (com diff-guard + retry) ----
-        write_result = self._write_with_retry(vals)
-
-        if write_result.get('motivo') == 'sem_mudancas':
-            _logger.info(
-                f"CNPJá: Parceiro {self.name} (ID {self.id}) - sem mudancas, write ignorado."
-            )
-        elif write_result.get('erro'):
-            _logger.error(
-                f"CNPJá: Parceiro {self.name} (ID {self.id}) - erro ao gravar: "
-                f"{write_result['erro']}"
-            )
+        # ---- ATUALIZA O PARCEIRO ----
+        self.write(vals)
 
         # ---- SÓCIOS ----
         self._salvar_socios(cnpja_data.get('members', []))
 
         _logger.info(
-            f"CNPJá: Parceiro {self.name} atualizado. "
+            f"CNPJá: Parceiro {self.name} atualizado com sucesso. "
             f"VAT={self.vat}, IE={self.l10n_br_ie_code or 'ISENTO'}, "
             f"Aliquota={aliquota}%, TaxRegime={vals.get('l10n_br_tax_regime')}, "
-            f"Taxpayer={vals.get('l10n_br_taxpayer')}, "
-            f"OdooUpdated={write_result.get('updated', False)}, "
-            f"Motivo={write_result.get('motivo', 'ok')}"
+            f"Taxpayer={vals.get('l10n_br_taxpayer')}"
         )
 
     # ====== BOTÃO DE AÇÃO ======
