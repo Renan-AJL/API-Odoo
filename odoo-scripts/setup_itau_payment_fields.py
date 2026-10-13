@@ -51,6 +51,13 @@ def execute(uid, model, method, args, kwargs=None):
 # ============================================================
 FIELDS_TO_CREATE = [
     {
+        'name': 'x_studio_itau_situacao',
+        'field_description': 'Status Itau',
+        'ttype': 'selection',
+        'selection': "([('emitido', 'Emitido'), ('pago', 'Pago'), ('cancelado', 'Cancelado'), ('expirado', 'Expirado'), ('erro', 'Erro')]",
+        'model_id': 'account.move',
+    },
+    {
         'name': 'x_studio_itau_status_pagamento',
         'field_description': 'Status Pagamento Itaú',
         'ttype': 'selection',
