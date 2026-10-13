@@ -3,6 +3,12 @@
  * ============================================================
  * Cria account.bank.statement + account.bank.statement.line
  * para conciliacao automatica de pagamentos e recebimentos
+ *
+ * Diario bancario: busca por nome (prioridade):
+ *   1. ODOO_BANK_JOURNAL_ID (env var, se configurado)
+ *   2. ODOO_BANK_JOURNAL_NAME (env var, default: "Diário Banco Itaú")
+ *   3. Qualquer diario tipo banco com "ITAU" no nome
+ *   4. Primeiro diario tipo banco disponivel
  */
 var xmlrpc = require('xmlrpc');
 var config = require('../config');
@@ -16,6 +22,7 @@ var ODOO_PASS = config.odoo.password;
 
 // Diario bancario padrao (configurado via env var)
 var BANK_JOURNAL_ID = parseInt(process.env.ODOO_BANK_JOURNAL_ID, 10) || 0;
+var BANK_JOURNAL_NAME = process.env.ODOO_BANK_JOURNAL_NAME || 'Diário Banco Itaú';
 
 function getConn() {
   var client = xmlrpc.createSecureClient(ODOO_URL + '/xmlrpc/2/common');
@@ -53,14 +60,23 @@ async function executeKw(model, method, args, kwargs) {
  * Busca o diario bancario configurado
  */
 async function findBankJournal() {
+  // 1. Tenta pelo ID configurado
   if (BANK_JOURNAL_ID) {
-    var journals = await executeKw('account.journal', 'read', [[BANK_JOURNAL_ID]], {
-      fields: ['id', 'name', 'code', 'bank_account_id'],
-    });
-    if (journals && journals[0]) return journals[0];
+    try {
+      var journals = await executeKw('account.journal', 'read', [[BANK_JOURNAL_ID]], {
+        fields: ['id', 'name', 'code', 'bank_account_id', 'type'],
+      });
+      if (journals && journals[0]) {
+        console.log('[BANK-STMT] Diario encontrado por ID: ' + journals[0].name + ' (id=' + journals[0].id + ')');
+        return journals[0];
+      }
+    } catch (err) {
+      console.warn('[BANK-STMT] ID ' + BANK_JOURNAL_ID + ' invalido, buscando por nome...');
+      BANK_JOURNAL_ID = 0;
+    }
   }
 
-  // Busca qualquer diario tipo banco
+  // Busca todos diarios tipo banco
   var ids = await executeKw('account.journal', 'search', [['type', '=', 'bank']]);
   if (!ids || !ids.length) throw new Error('Nenhum diario bancario encontrado no Odoo');
 
@@ -68,13 +84,29 @@ async function findBankJournal() {
     fields: ['id', 'name', 'code', 'bank_account_id', 'company_id'],
   });
 
-  // Prefere diarios do Itau
+  console.log('[BANK-STMT] Diarios bancarios encontrados: ' + journals.map(function(j) { return j.name + '(id=' + j.id + ')'; }).join(', '));
+
+  // 2. Tenta pelo nome configurado (default: "Diário Banco Itaú")
+  var byName = journals.find(function(j) {
+    return j.name.toUpperCase().indexOf(BANK_JOURNAL_NAME.toUpperCase()) >= 0
+      || BANK_JOURNAL_NAME.toUpperCase().indexOf(j.name.toUpperCase()) >= 0;
+  });
+  if (byName) {
+    BANK_JOURNAL_ID = byName.id;
+    console.log('[BANK-STMT] Diario encontrado por nome "' + BANK_JOURNAL_NAME + '": ' + byName.name + ' (id=' + byName.id + ')');
+    return byName;
+  }
+
+  // 3. Tenta por "ITAU" no nome
   var itau = journals.find(function(j) { return j.name.toUpperCase().indexOf('ITAU') >= 0; });
   if (itau) {
     BANK_JOURNAL_ID = itau.id;
+    console.log('[BANK-STMT] Diario Itaú encontrado: ' + itau.name + ' (id=' + itau.id + ')');
     return itau;
   }
 
+  // 4. Fallback: primeiro diario banco disponivel
+  console.warn('[BANK-STMT] Nenhum diario Itaú encontrado, usando: ' + journals[0].name + ' (id=' + journals[0].id + ')');
   BANK_JOURNAL_ID = journals[0].id;
   return journals[0];
 }

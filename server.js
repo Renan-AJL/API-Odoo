@@ -79,6 +79,7 @@ const siegRoutes = require('./routes/sieg');
 const nfeCertRoutes = require('./routes/nfe-cert');
 const consultflexRoutes = require('./routes/consultflex');
 const cepRoutes         = require('./routes/cep');
+const itauStatusRoutes  = require('./routes/itau-status');
 
 app.use('/admin', adminRoutes);
 app.get('/', (req, res) => res.redirect('/admin'));
@@ -95,6 +96,7 @@ app.use('/api/v1/sieg', siegRoutes);
 app.use('/api/v1/nfe', nfeCertRoutes);
 app.use('/api/v1/consultflex', consultflexRoutes);
 app.use('/api/v1/cep', cepRoutes);
+app.use('/api/v1/itau/status', itauStatusRoutes);
 app.use('/callback/sieg', siegRoutes);
 
 // --- Root ---
@@ -141,6 +143,16 @@ app.get('/', (req, res) => {
       cep_consultar_odoo: 'POST /api/v1/cep/consultar-odoo/:partnerId',
       cep_odoo_webhook: 'POST /api/v1/cep/odoo-webhook',
       cep_fontes: 'GET /api/v1/cep/fontes',
+      itau_status_invoice: 'GET /api/v1/itau/status/invoice/:invoiceId',
+      itau_status_poll_pix: 'POST /api/v1/itau/status/poll-pix',
+      itau_status_poll_boletos: 'POST /api/v1/itau/status/poll-boletos',
+      itau_status_poll_all: 'POST /api/v1/itau/status/poll-all',
+      itau_status_consultar_pix: 'POST /api/v1/itau/status/consultar-pix/:txid',
+      itau_status_consultar_boleto: 'POST /api/v1/itau/status/consultar-boleto/:nossoNumero',
+      itau_status_importar_extrato: 'POST /api/v1/itau/status/importar-extrato',
+      itau_status_diario: 'GET /api/v1/itau/status/diario',
+      itau_status_pendentes: 'GET /api/v1/itau/status/pendentes',
+      itau_status_odoo_test: 'GET /api/v1/itau/status/odoo-test',
     },
     auth: 'Envie header X-API-Key para autenticacao.',
   });
@@ -400,6 +412,8 @@ app.listen(PORT, () => {
   console.log('  [ITAU PAYMENT STATUS]');
   console.log('  PIX/Boleto Polling: ' + (config.odoo.enabled && config.itau.clientId ? 'ATIVO (' + (ITAU_PAY_POLL_MS / 1000) + 's)' : 'DESATIVADO'));
   console.log('  Extrato Auto-Import: ' + (config.odoo.enabled && config.itau.clientId ? 'ATIVO (' + (ITAU_EXTRATO_IMPORT_MS / 1000) + 's)' : 'DESATIVADO'));
+  console.log('  Diário Banco: ' + (process.env.ODOO_BANK_JOURNAL_NAME || 'Diário Banco Itaú') + ' (ID: ' + (process.env.ODOO_BANK_JOURNAL_ID || 'auto') + ')');
+  console.log('  Status Routes: /api/v1/itau/status/*');
 
   // Iniciar polling SIEG
   startSiegPolling();

@@ -90,6 +90,8 @@ services:
       # --- Odoo Bank Journal ---
       - key: ODOO_BANK_JOURNAL_ID
         sync: false
+      - key: ODOO_BANK_JOURNAL_NAME
+        value: "Diário Banco Itaú"
       - key: NFE_RESP_TEC_CNPJ
         sync: false
       - key: NFE_RESP_TEC_CONTATO
