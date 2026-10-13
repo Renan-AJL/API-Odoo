@@ -1,0 +1,664 @@
+   201→    var totalP = plano.parcelas.length;
+   202→    var pagamentos = [];
+   203→
+   204→    for (var i = 0; i < totalP; i++) {
+   205→      var parc = plano.parcelas[i];
+   206→      var valorParc = Math.round((valorTotal * parc.valor_pct / 100) * 100) / 100;
+   207→      if (i === totalP - 1) {
+   208→        var soma = 0;
+   209→        for (var j = 0; j < totalP - 1; j++) soma += Math.round((valorTotal * plano.parcelas[j].valor_pct / 100) * 100) / 100;
+   210→        valorParc = Math.round((valorTotal - soma) * 100) / 100;
+   211→      }
+   212→
+   213→      var dataVenc = calcDataVenc(dataVencBase, parc.dias);
+   214→      var pPayload = Object.assign({}, basePayload);
+   215→      pPayload.valor = valorParc;
+   216→      pPayload.dataVencimento = dataVenc;
+   217→      pPayload.numeroPedido = basePayload.numeroPedido + (totalP > 1 ? '-P' + parc.numero : '');
+   218→
+   219→      var resultado = await emitirBoleto(pPayload);
+   220→      var dados = (resultado.dados && resultado.dados.data) ? resultado.dados.data : {};
+   221→      var ind = (dados.dado_boleto && dados.dado_boleto.dados_individuais_boleto && dados.dado_boleto.dados_individuais_boleto[0]) || {};
+   222→      var qr = dados.dados_qrcode || {};
+   223→      var txid = qr.txid || ('BL' + Date.now() + '-' + parc.numero);
+   224→      var nossoNumero = ind.numero_nosso_numero || '';
+   225→
+   226→      storeBoleto(txid, {
+   227→        txid, nosso_numero: nossoNumero,
+   228→        linha_digitavel: ind.numero_linha_digitavel || '',
+   229→        codigo_barras: ind.codigo_barras || '',
+   230→        data_vencimento: ind.data_vencimento || dataVenc,
+   231→        data_emissao: dados.dado_boleto ? dados.dado_boleto.data_emissao : '',
+   232→        valor_titulo: ind.valor_titulo || '',
+   233→        pix_copia_cola: qr.emv || '',
+   234→        qrcode_base64: qr.base64 || '',
+   235→        nome_pagador: basePayload.nomePagador,
+   236→        cpf_cnpj_pagador: basePayload.cpfCnpjPagador,
+   237→        logradouro: basePayload.logradouro,
+   238→        cidade: basePayload.cidade,
+   239→        estado: basePayload.estado,
+   240→        cep: basePayload.cep,
+   241→        seu_numero: pPayload.numeroPedido,
+   242→        parcela: parc.numero, total_parcelas: totalP
+   243→      });
+   244→
+   245→      var vc = parseInt(String(ind.valor_titulo || '0'), 10);
+   246→
+   247→      // URL dinamica baseada no host da requisicao
+   248→      var host = req.get('host') || 'localhost:3000';
+   249→      var protocol = req.protocol || 'https';
+   250→
+   251→      pagamentos.push({
+   252→        tipo: 'boleto', parcela: parc.numero, total_parcelas: totalP,
+   253→        nosso_numero: nossoNumero,
+   254→        linha_digitavel: ind.numero_linha_digitavel || '',
+   255→        codigo_barras: ind.codigo_barras || '',
+   256→        pix_copia_cola: qr.emv || '',
+   257→        txid: txid,
+   258→        valor_titulo: (vc / 100).toFixed(2),
+   259→        data_vencimento: ind.data_vencimento || dataVenc,
+   260→        pdf_url_txid: protocol + '://' + host + '/api/v1/itau/boletos/pdf/' + txid,
+   261→        pdf_url_nn: protocol + '://' + host + '/api/v1/itau/boletos/pdf/nn/' + nossoNumero
+   262→      });
+   263→    }
+   264→
+   265→    // Gerar PDFs imediatamente
+   266→    var pdfsBase64 = [];
+   267→    for (var i = 0; i < pagamentos.length; i++) {
+   268→      try {
+   269→        var pdfBuf = await generatePdf(pagamentos[i].txid);
+   270→        pdfsBase64.push(pdfBuf.toString('base64'));
+   271→      } catch (pdfErr) {
+   272→        console.error('[API]   PDF', i + 1, 'ERRO:', pdfErr.message);
+   273→        pdfsBase64.push(null);
+   274→      }
+   275→    }
+   276→
+   277→    // Push Odoo
+   278→    var pushResult = { pushed: false, reason: 'not_called' };
+   279→    try {
+   280→      pushResult = await pushBoletosToOdoo({
+   281→        faturaId, faturaName, boletos: pagamentos, pdfsBase64
+   282→      });
+   283→    } catch (pushErr) {
+   284→      pushResult = { pushed: false, reason: pushErr.message };
+   285→    }
+   286→
+   287→    res.json({
+   288→      success: true,
+   289→      data: {
+   290→        forma_pagamento: formaPag, total_parcelas: totalP,
+   291→        valor_total: valorTotal.toFixed(2),
+   292→        fatura_name: faturaName || '(nao informado)',
+   293→        fatura_id: faturaId || 0,
+   294→        pagamentos: pagamentos,
+   295→        odoo_push: pushResult.pushed ? 'OK_' + pushResult.attachments + '_attachments' : 'falhou_' + (pushResult.reason || 'unknown')
+   296→      }
+   297→    });
+   298→
+   299→  } catch (e) {
+   300→    console.error('[API] ERRO:', e.message, e.stack);
+   301→    res.json({ success: false, message: e.message });
+   302→  }
+   303→});
+   304→
+   305→/**
+   306→ * POST /api/v1/itau/gerar - Simplificado para Odoo Server Actions
+   307→ */
+   308→router.post('/gerar', async function(req, res) {
+   309→  try {
+   310→    var formaPag = req.body.forma_pagamento || '';
+   311→    var fatName = req.body.fatura_name || '';
+   312→    var fatValor = parseFloat(req.body.fatura_valor) || 0;
+   313→    var fatVenc = req.body.fatura_vencimento || '';
+   314→    var pagNome = req.body.pagador_nome || '';
+   315→    var pagCpf = req.body.pagador_cpf || '';
+   316→    var pagStreet = req.body.pagador_street || '';
+   317→    var pagCity = req.body.pagador_city || '';
+   318→    var pagState = req.body.pagador_state || '';
+   319→    var pagZip = req.body.pagador_zip || '';
+   320→
+   321→    // === PIX ===
+   322→    if (formaPag.trim().toUpperCase().indexOf('PIX') === 0) {
+   323→      console.log('[API/GERAR] PIX detectado:', formaPag, '| Valor:', fatValor);
+   324→      try {
+   325→        var isCpf = pagCpf.replace(/\D/g, '').length <= 11;
+   326→        var pixResult = await criarCobrancaPix({
+   327→          valor: fatValor,
+   328→          devedor: pagNome ? {
+   329→            nome: pagNome,
+   330→            cpf: isCpf ? pagCpf.replace(/\D/g, '') : null,
+   331→            cnpj: !isCpf ? pagCpf.replace(/\D/g, '') : null,
+   332→          } : undefined,
+   333→          solicitacaoPagador: fatName || '',
+   334→          expiracao: 86400, // 24h
+   335→        });
+   336→        var pixTxid = pixResult.txid || '';
+   337→        var pixCopiaCola = pixResult.pixCopiaECola || '';
+   338→        console.log('[API/GERAR] PIX criado: TXID=' + pixTxid);
+   339→        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+   340→        res.send('OK|1\nTXID=' + pixTxid + '|PIX=' + pixCopiaCola + '|VD=' + fatValor.toFixed(2));
+   341→      } catch (pixErr) {
+   342→        console.error('[API/GERAR] PIX ERRO:', pixErr.message);
+   343→        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+   344→        res.send('ERRO|PIX: ' + (pixErr.message || 'Erro desconhecido'));
+   345→      }
+   346→      return;
+   347→    }
+   348→
+   349→    // === BOLETO ===
+   350→    var plano = parseFormaPagamento(formaPag);
+   351→    if (plano.tipo !== 'boleto' || plano.parcelas.length === 0) {
+   352→      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+   353→      res.send('ERRO|Forma de pagamento nao suportada: ' + formaPag);
+   354→      return;
+   355→    }
+   356→
+   357→    var basePayload = {
+   358→      cpfCnpjPagador: pagCpf, nomePagador: pagNome, numeroPedido: fatName,
+   359→      dataVencimento: fatVenc, logradouro: pagStreet, cidade: pagCity,
+   360→      estado: pagState, cep: pagZip
+   361→    };
+   362→
+   363→    var totalP = plano.parcelas.length;
+   364→    var lines = ['OK|' + totalP];
+   365→
+   366→    for (var i = 0; i < totalP; i++) {
+   367→      var parc = plano.parcelas[i];
+   368→      var valorParc = Math.round((fatValor * parc.valor_pct / 100) * 100) / 100;
+   369→      if (i === totalP - 1) {
+   370→        var soma = 0;
+   371→        for (var j = 0; j < totalP - 1; j++) soma += Math.round((fatValor * plano.parcelas[j].valor_pct / 100) * 100) / 100;
+   372→        valorParc = Math.round((fatValor - soma) * 100) / 100;
+   373→      }
+   374→
+   375→      var dataVenc = calcDataVenc(fatVenc, parc.dias);
+   376→      var pPayload = Object.assign({}, basePayload);
+   377→      pPayload.valor = valorParc;
+   378→      pPayload.dataVencimento = dataVenc;
+   379→      pPayload.numeroPedido = fatName + (totalP > 1 ? '-P' + parc.numero : '');
+   380→
+   381→      var resultado = await emitirBoleto(pPayload);
+   382→      var dados = (resultado.dados && resultado.dados.data) ? resultado.dados.data : {};
+   383→      var ind = (dados.dado_boleto && dados.dado_boleto.dados_individuais_boleto && dados.dado_boleto.dados_individuais_boleto[0]) || {};
+   384→      var qr = dados.dados_qrcode || {};
+   385→      var txid = qr.txid || ('BL' + Date.now() + '-' + parc.numero);
+   386→      var nossoNumero = ind.numero_nosso_numero || '';
+   387→
+   388→      storeBoleto(txid, {
+   389→        txid, nosso_numero: nossoNumero,
+   390→        linha_digitavel: ind.numero_linha_digitavel || '',
+   391→        codigo_barras: ind.codigo_barras || '',
+   392→        data_vencimento: ind.data_vencimento || dataVenc,
+   393→        data_emissao: dados.dado_boleto ? dados.dado_boleto.data_emissao : '',
+   394→        valor_titulo: ind.valor_titulo || '',
+   395→        pix_copia_cola: qr.emv || '',
+   396→        qrcode_base64: qr.base64 || '',
+   397→        nome_pagador: pagNome, cpf_cnpj_pagador: pagCpf,
+   398→        logradouro: pagStreet, cidade: pagCity, estado: pagState, cep: pagZip,
+   399→        seu_numero: pPayload.numeroPedido, parcela: parc.numero, total_parcelas: totalP
+   400→      });
+   401→
+   402→      var pdfBuf = await generatePdf(txid);
+   403→      var pdfB64 = pdfBuf.toString('base64');
+   404→      var vc = parseInt(String(ind.valor_titulo || '0'), 10);
+   405→
+   406→      lines.push(
+   407→        'NN=' + nossoNumero + '|TXID=' + txid +
+   408→        '|VD=' + (vc / 100).toFixed(2) + '|VC=' + (ind.data_vencimento || dataVenc) +
+   409→        '|LD=' + (ind.numero_linha_digitavel || '') + '|PIX=' + (qr.emv || '') +
+   410→        '|B64=' + pdfB64
+   411→      );
+   412→    }
+   413→
+   414→    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+   415→    res.send(lines.join('\n'));
+   416→  } catch (e) {
+   417→    console.error('[API/GERAR] ERRO:', e.message);
+   418→    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+   419→    res.send('ERRO|' + e.message);
+   420→  }
+   421→});
+   422→
+   423→/**
+   424→ * POST /api/v1/itau/regen
+   425→ */
+   426→router.post('/regen', async function(req, res) {
+   427→  try {
+   428→    var nn = req.body.nosso_numero || '';
+   429→    var ld = req.body.linha_digitavel || '';
+   430→    var cb = req.body.codigo_barras || '';
+   431→    var pix = req.body.pix_copia_cola || '';
+   432→    var vd = req.body.valor_titulo || '';
+   433→    var vc = req.body.data_vencimento || '';
+   434→    var pn = req.body.nome_pagador || '';
+   435→    var pc = req.body.cpf_cnpj_pagador || '';
+   436→    var sn = req.body.seu_numero || nn;
+   437→    var parc = req.body.parcela || '';
+   438→    var tp = req.body.total_parcelas || '';
+   439→
+   440→    if (!nn && !ld) {
+   441→      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+   442→      res.send('ERRO|Campos obrigatorios: nosso_numero ou linha_digitavel');
+   443→      return;
+   444→    }
+   445→
+   446→    var dados = {
+   447→      nosso_numero: nn, linha_digitavel: ld, codigo_barras: cb,
+   448→      pix_copia_cola: pix, valor_titulo: vd, data_vencimento: vc,
+   449→      nome_pagador: pn, cpf_cnpj_pagador: pc, seu_numero: sn,
+   450→      parcela: parc ? parseInt(parc) : 0, total_parcelas: tp ? parseInt(tp) : 0,
+   451→    };
+   452→
+   453→    var pdfBuf = await generatePdfFromFields(dados);
+   454→    var b64 = pdfBuf.toString('base64');
+   455→
+   456→    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+   457→    res.send('OK|' + b64);
+   458→  } catch(e) {
+   459→    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+   460→    res.send('ERRO|' + e.message);
+   461→  }
+   462→});
+   463→
+   464→// === PIX: handler para /pagar ===
+   465→async function handlePix(req, res, d) {
+   466→  var fat = d.fatura || {};
+   467→  var faturaName = fat.name || fat.seu_numero || d.fatura_name || '';
+   468→  var faturaId = (fat.id || d.fatura_id) ? parseInt(String(fat.id || d.fatura_id)) : 0;
+   469→  var valorTotal = parseFloat(fat.valor_nominal || d.fatura_valor) || 0;
+   470→  var pag = d.pagador || {};
+   471→  var pagNome = pag.nome || d.pagador_nome || '';
+   472→  var pagCpf = pag.cpf_cnpj || d.pagador_cpf || '';
+   473→
+   474→  console.log('[API/PIX] Fatura:', faturaName, '| Valor:', valorTotal);
+   475→
+   476→  if (valorTotal <= 0) {
+   477→    return res.json({ success: false, message: 'Valor invalido para PIX' });
+   478→  }
+   479→
+   480→  // === DEDUPLICACAO: verificar se ja tem requisicao em curso ou resultado recente ===
+   481→  var lockKey = getPixLockKey(faturaId, faturaName);
+   482→
+   483→  // Se tem resultado cacheado (mesma fatura, menos de 60s atras), reusa
+   484→  if (_pixCache[lockKey]) {
+   485→    var cached = _pixCache[lockKey];
+   486→    var age = Date.now() - cached.timestamp;
+   487→    if (age < PIX_CACHE_TTL) {
+   488→      console.log('[API/PIX] REUSANDO resultado cacheado (' + (age / 1000).toFixed(1) + 's atras) para', lockKey);
+   489→      return res.json(cached.response);
+   490→    }
+   491→    delete _pixCache[lockKey];
+   492→  }
+   493→
+   494→  // Se tem requisicao em curso, espera ela terminar
+   495→  if (_pixLocks[lockKey]) {
+   496→    console.log('[API/PIX] AGUARDANDO lock existente para', lockKey);
+   497→    try {
+   498→      var cachedResult = await _pixLocks[lockKey];
+   499→      console.log('[API/PIX] Lock liberado, retornando resultado da requisicao original');
+   500→      return res.json(cachedResult);
+   501→    } catch (lockErr) {
+   502→      console.log('[API/PIX] Requisicao original falhou, tentando novamente...');
+   503→    }
+   504→  }
+   505→
+   506→  // Criar lock
+   507→  var lockResolve;
+   508→  _pixLocks[lockKey] = new Promise(function(resolve) { lockResolve = resolve; });
+   509→
+   510→  // Auto-limpar lock apos TTL
+   511→  setTimeout(function() {
+   512→    if (_pixLocks[lockKey]) {
+   513→      console.warn('[API/PIX] Lock expirou por TTL para', lockKey);
+   514→      delete _pixLocks[lockKey];
+   515→    }
+   516→  }, PIX_LOCK_TTL);
+   517→
+   518→  try {
+   519→    var isCpf = pagCpf.replace(/\\D/g, '').length <= 11;
+   520→    var pixResult = await criarCobrancaPix({
+   521→      valor: valorTotal,
+   522→      devedor: pagNome ? {
+   523→        nome: pagNome,
+   524→        cpf: isCpf ? pagCpf.replace(/\\D/g, '') : null,
+   525→        cnpj: !isCpf ? pagCpf.replace(/\\D/g, '') : null,
+   526→      } : undefined,
+   527→      solicitacaoPagador: faturaName || '',
+   528→      expiracao: 86400,
+   529→    });
+   530→
+   531→    console.log('[API/PIX] PIX criado: TXID=' + (pixResult.txid || 'N/A'));
+   532→
+   533→    var pixCopiaCola = pixResult.pixCopiaECola || '';
+   534→    var qrcodeBase64 = '';
+   535→    var htmlPix = '';
+   536→
+   537→    // Gerar QR code a partir do pixCopiaECola (bwip-js v4 e async)
+   538→    if (pixCopiaCola) {
+   539→      try {
+   540→        var qrPng = await bwipjs.toBuffer({
+   541→          bcid: 'qrcode',
+   542→          text: pixCopiaCola,
+   543→          scale: 5,
+   544→          width: 12,
+   545→          height: 12,
+   546→        });
+   547→        qrcodeBase64 = 'data:image/png;base64,' + qrPng.toString('base64');
+   548→        console.log('[API/PIX] QR code gerado:', (qrPng.length / 1024).toFixed(1) + 'KB');
+   549→      } catch (qrErr) {
+   550→        console.error('[API/PIX] Erro ao gerar QR code:', qrErr.message);
+   551→      }
+   552→    }
+   553→
+   554→    // Montar HTML para o campo Odoo
+   555→    var valorFmt = 'R$ ' + valorTotal.toFixed(2).replace('.', ',');
+   556→    htmlPix = '<div style="text-align:center; font-family:Arial,sans-serif; padding:10px;">' +
+   557→      '<div style="font-size:18px; font-weight:bold; color:#333; margin-bottom:8px;">PIX</div>' +
+   558→      '<div style="font-size:14px; color:#666; margin-bottom:12px;">' + faturaName + ' - ' + valorFmt + '</div>' +
+   559→      (qrcodeBase64 ? '<img src="' + qrcodeBase64 + '" style="width:200px; height:200px; margin:0 auto 12px auto; display:block;" />' : '') +
+   560→      (pixCopiaCola ? '<div style="font-size:10px; color:#999; word-break:break-all; max-width:400px; margin:0 auto; line-height:1.4;">' + pixCopiaCola + '</div>' : '') +
+   561→      '</div>';
+   562→
+   563→    // Montar responseData ANTES do push (responde pro Odoo imediatamente)
+   564→    var responseData = {
+   565→      success: true,
+   566→      data: {
+   567→        forma_pagamento: 'PIX',
+   568→        total_parcelas: 1,
+   569→        valor_total: valorTotal.toFixed(2),
+   570→        fatura_name: faturaName || '(nao informado)',
+   571→        fatura_id: faturaId || 0,
+   572→        pagamentos: [{
+   573→          tipo: 'pix',
+   574→          parcela: 1,
+   575→          total_parcelas: 1,
+   576→          valor_titulo: valorTotal.toFixed(2),
+   577→          txid: pixResult.txid || '',
+   578→          pix_copia_cola: pixCopiaCola,
+   579→          qrcode_base64: qrcodeBase64,
+   580→          html_pix: htmlPix,
+   581→        }],
+   582→        odoo_push: 'pending',
+   583→      },
+   584→    };
+   585→
+   586→    // Cache resultado e liberar lock
+   587→    _pixCache[lockKey] = { timestamp: Date.now(), response: responseData };
+   588→    delete _pixLocks[lockKey];
+   589→    lockResolve(responseData);
+   590→
+   591→    // Responde pro Odoo IMEDIATAMENTE (o modulo Odoo grava os campos)
+   592→    res.json(responseData);
+   593→  } catch (err) {
+   594→    console.error('[API/PIX] ERRO:', err.message);
+   595→    var errResponse = { success: false, message: 'Erro ao criar PIX: ' + (err.message || 'Erro desconhecido') };
+   596→    delete _pixLocks[lockKey];
+   597→    lockResolve(errResponse);
+   598→    res.json(errResponse);
+   599→  }
+   600→}
+   601→
+   602→// === PIX: consultar status ===
+   603→router.get('/pix/status/:txid', async function(req, res) {
+   604→  try {
+   605→    var txid = req.params.txid;
+   606→    console.log('[API/PIX-STATUS] Consultando:', txid);
+   607→    var resultado = await consultarCobrancaPix(txid);
+   608→    var status = resultado.status || 'ATIVA';
+   609→    var pago = status === 'CONCLUIDA';
+   610→    res.json({
+   611→      success: true,
+   612→      txid: txid,
+   613→      status: status,
+   614→      situacao: pago ? 'pago' : 'pendente',
+   615→      valor: resultado.valor ? resultado.valor.original : null,
+   616→      pixCopiaECola: resultado.pixCopiaECola || '',
+   617→    });
+   618→  } catch (err) {
+   619→    console.error('[API/PIX-STATUS] ERRO:', err.message);
+   620→    res.status(err.status || 500).json({ success: false, error: err.message });
+   621→  }
+   622→});
+   623→
+   624→// === CANCELAR BOLETO ===
+   625→// POST /api/v1/itau/cancelar
+   626→// Body: { nosso_numero: string }
+   627→// Cancela um boleto no Itau (baixa por cancelamento)
+   628→router.post('/cancelar', apiKeyAuth, async function(req, res) {
+   629→  try {
+   630→    var nn = req.body.nosso_numero || '';
+   631→    if (!nn) {
+   632→      return res.status(400).json({ success: false, message: 'nosso_numero obrigatorio' });
+   633→    }
+   634→    console.log('[API/CANCELAR] Cancelando boleto NN:', nn);
+   635→    var resultado = await cancelarBoleto(nn);
+   636→    res.json({ success: true, message: 'Boleto cancelado com sucesso', dados: resultado.dados });
+   637→  } catch (err) {
+   638→    console.error('[API/CANCELAR] ERRO:', err.message);
+   639→    res.status(500).json({ success: false, message: 'Erro ao cancelar boleto: ' + err.message });
+   640→  }
+   641→});
+   642→
+   643→// GET /api/v1/itau/cancelar/web?odoo_id=XXX
+   644→// Le resposta_json do Odoo, cancela boletos no Itau, posta resultado no chatter e redireciona de volta
+   645→router.get('/cancelar/web', async function(req, res) {
+   646→  var odooId = req.query.odoo_id || '';
+   647→  var oc = config.odoo;
+   648→  var returnUrl = (oc && oc.url ? oc.url.replace(/\/+$/, '') : '') + '/web#id=' + odooId + '&model=account.move&view_type=form';
+   649→
+   650→  function odooRpc(model, method, args, kwargs) {
+   651→    var xmlrpc = require('xmlrpc');
+   652→    var base = oc.url.replace(/\/+$/, '');
+   653→    var host = base.replace('https://', '');
+   654→    var commonCli = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/common', port: 443 });
+   655→    var modelsCli = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/object', port: 443 });
+   656→    return new Promise(function(ok, fail) {
+   657→      commonCli.methodCall('authenticate', [oc.db, oc.user, oc.password, {}], function(e, uid) {
+   658→        if (e || !uid) return fail(e || new Error('auth failed'));
+   659→        var params = [oc.db, uid, oc.password, model, method, args || []];
+   660→        if (kwargs) params.push(kwargs);
+   661→        modelsCli.methodCall('execute_kw', params, function(e2, r) {
+   662→          if (e2) fail(e2); else ok(r);
+   663→        });
+   664→      });
+   665→    });
+   666→  }
+   667→
+   668→  function postChatter(recordId, bodyHtml) {
+   669→    return odooRpc('mail.message', 'create', [{
+   670→      model: 'account.move',
+   671→      res_id: parseInt(recordId),
+   672→      body: bodyHtml,
+   673→      message_type: 'comment',
+   674→    }]);
+   675→  }
+   676→
+   677→  if (!odooId || !oc || !oc.enabled || !oc.url || !oc.db || !oc.user || !oc.password) {
+   678→    return res.redirect(returnUrl);
+   679→  }
+   680→
+   681→  try {
+   682→    var nossoNumeros = [];
+   683→    console.log('[CANCELAR-WEB] Lendo resposta_json da fatura ID:', odooId);
+   684→    var fields = await odooRpc('account.move', 'read', [[parseInt(odooId)], ['x_studio_itau_resposta_json']]);
+   685→    var rawJson = '';
+   686→    if (fields && fields[0] && fields[0].x_studio_itau_resposta_json) {
+   687→      rawJson = fields[0].x_studio_itau_resposta_json;
+   688→    }
+   689→    if (!rawJson) {
+   690→      await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Fatura nao possui dados de boleto.</span>');
+   691→      return res.redirect(returnUrl);
+   692→    }
+   693→
+   694→    var jsonStr = rawJson.replace(/'/g, '"').replace(/True/g, 'true').replace(/False/g, 'false').replace(/None/g, 'null');
+   695→    var data = JSON.parse(jsonStr);
+   696→    var pagamentos = data.pagamentos || [];
+   697→    if (pagamentos.length === 0) {
+   698→      await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Nenhum pagamento encontrado.</span>');
+   699→      return res.redirect(returnUrl);
+   700→    }
+   701→    for (var i = 0; i < pagamentos.length; i++) {
+   702→      if (pagamentos[i].nosso_numero) nossoNumeros.push(pagamentos[i].nosso_numero);
+   703→    }
+   704→    if (nossoNumeros.length === 0) {
+   705→      await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Nenhum nosso numero encontrado.</span>');
+   706→      return res.redirect(returnUrl);
+   707→    }
+   708→
+   709→    console.log('[CANCELAR-WEB] Cancelando', nossoNumeros.length, 'boleto(s):', nossoNumeros.join(', '));
+   710→    var resultados = [];
+   711→    for (var i = 0; i < nossoNumeros.length; i++) {
+   712→      try {
+   713→        await cancelarBoleto(nossoNumeros[i]);
+   714→        resultados.push({ nn: nossoNumeros[i], ok: true });
+   715→      } catch (err) {
+   716→        resultados.push({ nn: nossoNumeros[i], ok: false, erro: err.message });
+   717→      }
+   718→    }
+   719→
+   720→    var sucesso = resultados.filter(function(r) { return r.ok; }).length;
+   721→    var falha = resultados.filter(function(r) { return !r.ok; }).length;
+   722→    var chatBody = '<b>Cancelar Boleto</b><br/>';
+   723→    if (falha === 0) {
+   724→      chatBody += '<span style="color:green">' + sucesso + ' boleto(s) cancelado(s) com sucesso no Itau.</span>';
+   725→    } else if (sucesso === 0) {
+   726→      chatBody += '<span style="color:red">Falha ao cancelar todos os boletos:</span><br/>';
+   727→      for (var i = 0; i < resultados.length; i++) chatBody += 'NN ' + resultados[i].nn + ': ' + resultados[i].erro + '<br/>';
+   728→    } else {
+   729→      chatBody += '<span style="color:orange">' + sucesso + ' cancelado(s), ' + falha + ' falha(s):</span><br/>';
+   730→      for (var i = 0; i < resultados.length; i++) {
+   731→        if (!resultados[i].ok) chatBody += 'NN ' + resultados[i].nn + ': ' + resultados[i].erro + '<br/>';
+   732→      }
+   733→    }
+   734→    chatBody += '<br/><small>NN: ' + nossoNumeros.join(', ') + '</small>';
+   735→
+   736→    await postChatter(odooId, chatBody);
+   737→
+   738→    try {
+   739→      await odooRpc('account.move', 'write', [[parseInt(odooId)], { 'x_studio_boleto_cancelado': true }]);
+   740→    } catch (wErr) {
+   741→      console.warn('[CANCELAR-WEB] Aviso:', wErr.message);
+   742→    }
+   743→
+   744→    res.redirect(returnUrl);
+   745→  } catch (err) {
+   746→    console.error('[CANCELAR-WEB] ERRO:', err.message);
+   747→    try { await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Erro: ' + err.message + '</span>'); } catch(e) {}
+   748→    res.redirect(returnUrl);
+   749→  }
+   750→});
+   751→
+   752→// === CHECKOUT DE CARTAO ===
+   753→var checkoutPage = require('../views/checkout-page');
+   754→var linkPagService = require('../services/itau-link-pagamento');
+   755→
+   756→// GET /api/v1/itau/checkout/:orderId - Pagina de pagamento
+   757→router.get('/checkout/:orderId', function(req, res) {
+   758→  var order = linkPagService.consultarPedido(req.params.orderId);
+   759→  if (!order) {
+   760→    res.status(404).send('Pedido nao encontrado ou expirado');
+   761→    return;
+   762→  }
+   763→  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+   764→  res.send(checkoutPage.checkoutHtml(order));
+   765→});
+   766→
+   767→// POST /api/v1/itau/checkout/:orderId/pay - Processar pagamento
+   768→router.post('/checkout/:orderId/pay', async function(req, res) {
+   769→  try {
+   770→    var result = await linkPagService.processarPagamento(req.params.orderId, req.body);
+   771→    res.json(result);
+   772→  } catch (err) {
+   773→    var status = err.status || 500;
+   774→    res.status(status).json({
+   775→      autorizado: false,
+   776→      returnMessage: err.message,
+   777→      detail: err.detail,
+   778→    });
+   779→  }
+   780→});
+   781→
+   782→// ============================================================
+   783→// EXTRATO BANCARIO — Importacao para Odoo
+   784→// ============================================================
+   785→
+   786→// POST /api/v1/itau/extrato/importar
+   787→// Body: { data_inicial?: "YYYY-MM-DD", data_final?: "YYYY-MM-DD" }
+   788→// Se nao informar, busca ontem (D-1)
+   789→router.post('/extrato/importar', async function(req, res) {
+   790→  try {
+   791→    var ontem = new Date(Date.now() - 24 * 3600000);
+   792→    var di = req.body.data_inicial || ontem.toISOString().substring(0, 10);
+   793→    var df = req.body.data_final || di;
+   794→
+   795→    console.log('[EXTRATO-IMPORT] Buscando extrato: ' + di + ' ate ' + df);
+   796→    var transacoes = await buscarExtratoNormalizado(di, df);
+   797→
+   798→    if (!transacoes.length) {
+   799→      return res.json({ success: true, message: 'Extrato vazio (' + di + ' a ' + df + ')', transacoes: 0 });
+   800→    }
+   801→
+   802→    // Cria o extrato no Odoo
+   803→    var resultado = await criarExtrato(df, transacoes);
+   804→
+   805→    res.json({
+   806→      success: true,
+   807→      message: transacoes.length + ' transacoes importadas para o diario ' + resultado.journalName,
+   808→      transacoes: transacoes.length,
+   809→      saldo: resultado.balance,
+   810→      statement_id: resultado.statementId,
+   811→    });
+   812→  } catch (err) {
+   813→    console.error('[EXTRATO-IMPORT] ERRO:', err.message);
+   814→    res.status(500).json({ success: false, message: 'Erro ao importar extrato: ' + err.message });
+   815→  }
+   816→});
+   817→
+   818→// GET /api/v1/itau/extrato/preview
+   819→// Preview do extrato (nao cria no Odoo)
+   820→router.get('/extrato/preview', async function(req, res) {
+   821→  try {
+   822→    var di = req.query.data_inicial || new Date(Date.now() - 24 * 3600000).toISOString().substring(0, 10);
+   823→    var df = req.query.data_final || di;
+   824→
+   825→    var transacoes = await buscarExtratoNormalizado(di, df);
+   826→    res.json({ success: true, data_inicial: di, data_final: df, transacoes: transacoes });
+   827→  } catch (err) {
+   828→    console.error('[EXTRATO-PREVIEW] ERRO:', err.message);
+   829→    res.status(500).json({ success: false, message: 'Erro ao buscar extrato: ' + err.message });
+   830→  }
+   831→});
+   832→
+   833→// GET /api/v1/itau/extrato/cron — Chamada diaria automatica
+   834→// Protegido por secret separado (CRON_SECRET)
+   835→router.get('/extrato/cron', async function(req, res) {
+   836→  var cronSecret = process.env.ODOO_BANK_STATEMENT_IMPORT_CRON_SECRET || '';
+   837→  if (!cronSecret || req.query.secret !== cronSecret) {
+   838→    return res.status(403).json({ success: false, message: 'Secret invalido' });
+   839→  }
+   840→
+   841→  try {
+   842→    var ontem = new Date(Date.now() - 24 * 3600000);
+   843→    var di = ontem.toISOString().substring(0, 10);
+   844→    var df = di;
+   845→
+   846→    console.log('[EXTRATO-CRON] Execucao automatica diaria: ' + di);
+   847→    var transacoes = await buscarExtratoNormalizado(di, df);
+   848→
+   849→    if (!transacoes.length) {
+   850→      console.log('[EXTRATO-CRON] Nenhuma transacao em ' + di);
+   851→      return res.json({ success: true, message: 'Extrato vazio', transacoes: 0 });
+   852→    }
+   853→
+   854→    var resultado = await criarExtrato(df, transacoes);
+   855→    console.log('[EXTRATO-CRON] Extrato criado: ' + resultado.statementId + ' (' + transacoes.length + ' linhas)');
+   856→
+   857→    res.json({ success: true, transacoes: transacoes.length, statement_id: resultado.statementId, saldo: resultado.balance });
+   858→  } catch (err) {
+   859→    console.error('[EXTRATO-CRON] ERRO:', err.message);
+   860→    res.status(500).json({ success: false, message: 'Erro cron extrato: ' + err.message });
+   861→  }
+   862→});
+   863→
+   864→module.exports = router;
