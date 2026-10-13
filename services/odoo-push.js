@@ -219,9 +219,9 @@ async function pushBoletosToOdoo(pushData) {
 
       // x_studio_itau_situacao
       if (totalAttachments > 0) {
-        camposWrite['x_studio_itau_situacao'] = 'EMITIDO';
+        camposWrite['x_studio_itau_situacao'] = 'emitido';
       } else {
-        camposWrite['x_studio_itau_situacao'] = 'ERRO';
+        camposWrite['x_studio_itau_situacao'] = 'erro';
       }
 
       // x_studio_itau_tipo_pagamento
@@ -351,7 +351,7 @@ async function pushPixToOdoo(pushData) {
     var textFields = {};
 
     // Campos obrigatórios para polling e exibição no Odoo
-    textFields['x_studio_itau_situacao'] = 'EMITIDO';
+    textFields['x_studio_itau_situacao'] = 'emitido';
     textFields['x_studio_itau_tipo_pagamento'] = 'PIX';
     if (txid) {
       textFields['x_studio_itau_txid'] = txid;

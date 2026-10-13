@@ -648,9 +648,7 @@ router.post('/send-invoice', async (req, res) => {
           console.log('[TE-SEND-INVOICE] Motorista many2one: ID=' + motoristaId + ' Nome=' + motoristaNome);
           // Tenta ler telefone do partner
           try {
-            var motoristaPartner = await odooTe.executeKw('res.partner', 'read', [[motoristaId]], {
-              fields: ['name', 'phone', 'mobile'],
-            });
+            var motoristaPartner = await odooTe.executeKw('res.partner', 'read', [[[motoristaId], ['name', 'phone', 'mobile']]]);
             if (motoristaPartner && motoristaPartner[0]) {
               driverPhone = motoristaPartner[0].phone || motoristaPartner[0].mobile || null;
               console.log('[TE-SEND-INVOICE] Phone do partner: ' + (driverPhone || 'N/A'));

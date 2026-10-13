@@ -138,8 +138,8 @@ async function processPendingPix() {
 
       if (pixStatus === 'CONCLUIDA') {
         // PIX foi pago!
-        writeVals['x_studio_itau_situacao'] = 'PAGO';
-        writeVals['x_studio_itau_status_pagamento'] = 'PAGO';
+        writeVals['x_studio_itau_situacao'] = 'pago';
+        writeVals['x_studio_itau_status_pagamento'] = 'pago';
         writeVals['x_studio_itau_pix_data_pagamento'] = (pixResult.pix && pixResult.pix.horario)
           ? pixResult.pix.horario.substring(0, 19).replace('T', ' ')
           : new Date().toISOString().substring(0, 19).replace('T', ' ');
@@ -171,8 +171,8 @@ async function processPendingPix() {
         } catch (msgErr) { /* ignore */ }
 
       } else if (pixStatus === 'EXPIRADA' || pixStatus === 'REMOVIDA_PELO_PSP') {
-        writeVals['x_studio_itau_situacao'] = 'EXPIRADO';
-        writeVals['x_studio_itau_status_pagamento'] = 'EXPIRADO';
+        writeVals['x_studio_itau_situacao'] = 'expirado';
+        writeVals['x_studio_itau_status_pagamento'] = 'expirado';
       }
       // ATIVA = ainda pendente, nao muda status_pagamento
 
@@ -297,9 +297,9 @@ async function processPendingBoletos() {
       // Mapear situação do Itaú para nosso status
       // Situações típicas: NORMAL, BAIXADO, CANCELADO, PROTESTADO, PAGO
       if (situacao === 'PAGO' || situacao === 'LIQUIDADO') {
-        writeVals['x_studio_itau_situacao'] = 'PAGO';
-        writeVals['x_studio_itau_boleto_status'] = 'PAGO';
-        writeVals['x_studio_itau_status_pagamento'] = 'PAGO';
+        writeVals['x_studio_itau_situacao'] = 'pago';
+        writeVals['x_studio_itau_boleto_status'] = 'pago';
+        writeVals['x_studio_itau_status_pagamento'] = 'pago';
         writeVals['x_studio_itau_boleto_data_pagamento'] = new Date().toISOString().substring(0, 10);
         paid++;
 
@@ -319,9 +319,9 @@ async function processPendingBoletos() {
         } catch (msgErr) { /* ignore */ }
 
       } else if (situacao === 'CANCELADO' || situacao === 'BAIXADO') {
-        writeVals['x_studio_itau_situacao'] = 'CANCELADO';
-        writeVals['x_studio_itau_boleto_status'] = 'CANCELADO';
-        writeVals['x_studio_itau_status_pagamento'] = 'CANCELADO';
+        writeVals['x_studio_itau_situacao'] = 'cancelado';
+        writeVals['x_studio_itau_boleto_status'] = 'cancelado';
+        writeVals['x_studio_itau_status_pagamento'] = 'cancelado';
       } else if (situacao) {
         writeVals['x_studio_itau_boleto_status'] = situacao;
       }
@@ -432,15 +432,15 @@ async function reconcileStatementPayments(transacoes) {
 
         // Atualizar status
         var writeVals = {
-          x_studio_itau_situacao: 'PAGO',
-          x_studio_itau_status_pagamento: 'PAGO',
+          x_studio_itau_situacao: 'pago',
+          x_studio_itau_status_pagamento: 'pago',
         };
 
         if (inv.x_studio_itau_tipo_pagamento && inv.x_studio_itau_tipo_pagamento.indexOf('PIX') >= 0) {
-          writeVals.x_studio_itau_pix_status = 'CONCLUIDA';
+          writeVals.x_studio_itau_pix_status = 'concluida';
           writeVals.x_studio_itau_pix_data_pagamento = txn.date + ' 00:00:00';
         } else {
-          writeVals.x_studio_itau_boleto_status = 'PAGO';
+          writeVals.x_studio_itau_boleto_status = 'pago';
           writeVals.x_studio_itau_boleto_data_pagamento = txn.date;
         }
 
@@ -531,7 +531,7 @@ async function detectFields(oc, host, uid) {
 
     if (fieldIds && fieldIds.length > 0) {
       var fieldsData = await odooExec(oc, host, uid, 'ir.model.fields', 'read', [
-        fieldIds, { fields: ['name'] }
+        fieldIds, ['name']
       ]);
       for (var f = 0; f < fieldsData.length; f++) {
         var fname = fieldsData[f].name;
@@ -548,7 +548,7 @@ async function detectFields(oc, host, uid) {
 
     if (studioIds && studioIds.length > 0) {
       var studioData = await odooExec(oc, host, uid, 'ir.model.fields', 'read', [
-        studioIds, { fields: ['name'] }
+        studioIds, ['name']
       ]);
       for (var s = 0; s < studioData.length; s++) {
         result[studioData[s].name] = true;

@@ -453,6 +453,106 @@ router.get('/pendentes', apiKeyAuth, async function(req, res) {
 });
 
 // ============================================================
+// GET /api/v1/itau/status/invoice-name/:invoiceName
+// Busca fatura pelo nome (ex: S01233) e mostra todos campos Itau
+// ============================================================
+router.get('/invoice-name/:invoiceName', apiKeyAuth, async function(req, res) {
+  var invoiceName = req.params.invoiceName;
+  if (!invoiceName) {
+    return res.status(400).json({ erro: 'invoiceName inválido' });
+  }
+
+  var oc = config.odoo;
+  if (!oc || !oc.enabled || !oc.url) {
+    return res.status(503).json({ erro: 'Integração Odoo desabilitada' });
+  }
+
+  try {
+    var authResult = await odooAuth(oc);
+    var odooUid = authResult.uid;
+    var odooHost = authResult.host;
+
+    // Search by name
+    var invoiceIds = await odooExec(oc, odooHost, odooUid, 'account.move', 'search', [
+      [['name', '=', invoiceName], ['move_type', '=', 'out_invoice']]
+    ]);
+
+    if (!invoiceIds || invoiceIds.length === 0) {
+      // Try with ilike
+      invoiceIds = await odooExec(oc, odooHost, odooUid, 'account.move', 'search', [
+        [['name', 'ilike', invoiceName], ['move_type', '=', 'out_invoice']]
+      ]);
+    }
+
+    if (!invoiceIds || invoiceIds.length === 0) {
+      return res.status(404).json({ erro: 'Fatura não encontrada: ' + invoiceName });
+    }
+
+    var fields = [
+      'name', 'move_type', 'payment_state', 'amount_total', 'amount_residual',
+      'x_studio_itau_tipo_pagamento',
+      'x_studio_itau_situacao',
+      'x_studio_itau_status_pagamento',
+      'x_studio_itau_pix_status',
+      'x_studio_itau_pix_data_pagamento',
+      'x_studio_itau_pix_e2e',
+      'x_studio_itau_txid',
+      'x_studio_itau_pix_copia_cola',
+      'x_studio_itau_boleto_status',
+      'x_studio_itau_boleto_data_pagamento',
+      'x_studio_itau_nosso_numero',
+      'x_studio_itau_link_status',
+      'x_studio_itau_boletos_html',
+      'x_studio_boleto_cancelado',
+    ];
+
+    var invoices = await odooExec(oc, odooHost, odooUid, 'account.move', 'read', [
+      invoiceIds, fields
+    ]);
+
+    if (!invoices || invoices.length === 0) {
+      return res.status(404).json({ erro: 'Fatura não encontrada após search' });
+    }
+
+    // Also get chatter messages to find TXID
+    var invId = invoices[0].id;
+    var chatterMsgs = [];
+    try {
+      var msgIds = await odooExec(oc, odooHost, odooUid, 'mail.message', 'search', [
+        [['model', '=', 'account.move'], ['res_id', '=', invId]],
+        { limit: 10, order: 'id desc' }
+      ]);
+      if (msgIds && msgIds.length > 0) {
+        var msgs = await odooExec(oc, odooHost, odooUid, 'mail.message', 'read', [
+          msgIds, ['body', 'message_type', 'create_date']
+        ]);
+        chatterMsgs = msgs.map(function(m) {
+          return { type: m.message_type, date: m.create_date, body: (m.body || '').substring(0, 300) };
+        });
+      }
+    } catch (msgErr) {
+      chatterMsgs = [{ error: msgErr.message }];
+    }
+
+    res.json({
+      sucesso: true,
+      fatura: invoices[0],
+      chatter: chatterMsgs,
+      diagnostico: {
+        tem_txid: !!(invoices[0].x_studio_itau_txid),
+        tem_tipo_pagamento: !!(invoices[0].x_studio_itau_tipo_pagamento),
+        tem_situacao: !!(invoices[0].x_studio_itau_situacao),
+        payment_state: invoices[0].payment_state,
+        pode_ser_encontrado_no_poll: !!(invoices[0].x_studio_itau_txid && invoices[0].x_studio_itau_tipo_pagamento),
+      }
+    });
+
+  } catch (err) {
+    res.status(500).json({ erro: 'Erro ao consultar fatura: ' + err.message });
+  }
+});
+
+// ============================================================
 // GET /api/v1/itau/status/odoo-test
 // Testa conexão com o Odoo (auth + read res.partner)
 // ============================================================

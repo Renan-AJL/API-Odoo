@@ -63,9 +63,9 @@ async function findBankJournal() {
   // 1. Tenta pelo ID configurado
   if (BANK_JOURNAL_ID) {
     try {
-      var journals = await executeKw('account.journal', 'read', [[BANK_JOURNAL_ID]], {
-        fields: ['id', 'name', 'code', 'bank_account_id', 'type'],
-      });
+      var journals = await executeKw('account.journal', 'read', [
+        [BANK_JOURNAL_ID], ['id', 'name', 'code', 'bank_account_id', 'type']
+      ]);
       if (journals && journals[0]) {
         console.log('[BANK-STMT] Diario encontrado por ID: ' + journals[0].name + ' (id=' + journals[0].id + ')');
         return journals[0];
@@ -80,9 +80,9 @@ async function findBankJournal() {
   var ids = await executeKw('account.journal', 'search', [['type', '=', 'bank']]);
   if (!ids || !ids.length) throw new Error('Nenhum diario bancario encontrado no Odoo');
 
-  var journals = await executeKw('account.journal', 'read', [ids], {
-    fields: ['id', 'name', 'code', 'bank_account_id', 'company_id'],
-  });
+  var journals = await executeKw('account.journal', 'read', [
+    ids, ['id', 'name', 'code', 'bank_account_id', 'company_id']
+  ]);
 
   console.log('[BANK-STMT] Diarios bancarios encontrados: ' + journals.map(function(j) { return j.name + '(id=' + j.id + ')'; }).join(', '));
 
