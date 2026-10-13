@@ -399,6 +399,7 @@ router.get('/pendentes', apiKeyAuth, async function(req, res) {
   }
 
   var tipo = (req.query.tipo || 'todos').toUpperCase();
+  var searchName = req.query.name || '';
 
   try {
     var authResult = await odooAuth(oc);
@@ -407,17 +408,22 @@ router.get('/pendentes', apiKeyAuth, async function(req, res) {
 
     var domain = [
       ['move_type', '=', 'out_invoice'],
-      ['payment_state', '!=', 'paid'],
     ];
 
-    if (tipo === 'PIX') {
-      domain.push(['x_studio_itau_tipo_pagamento', 'like', 'PIX']);
-    } else if (tipo === 'BOLETO') {
-      domain.push(['x_studio_itau_tipo_pagamento', 'like', 'BOLETO']);
+    // If searching by name, use that instead of tipo filter
+    if (searchName) {
+      domain.push(['name', 'ilike', searchName]);
     } else {
-      domain.push('|');
-      domain.push(['x_studio_itau_tipo_pagamento', 'like', 'PIX']);
-      domain.push(['x_studio_itau_tipo_pagamento', 'like', 'BOLETO']);
+      domain.push(['payment_state', '!=', 'paid']);
+      if (tipo === 'PIX') {
+        domain.push(['x_studio_itau_tipo_pagamento', 'like', 'PIX']);
+      } else if (tipo === 'BOLETO') {
+        domain.push(['x_studio_itau_tipo_pagamento', 'like', 'BOLETO']);
+      } else {
+        domain.push('|');
+        domain.push(['x_studio_itau_tipo_pagamento', 'like', 'PIX']);
+        domain.push(['x_studio_itau_tipo_pagamento', 'like', 'BOLETO']);
+      }
     }
 
     var invoiceIds = await odooExec(oc, odooHost, odooUid, 'account.move', 'search', [domain], { limit: 100, order: 'id desc' });
@@ -428,8 +434,10 @@ router.get('/pendentes', apiKeyAuth, async function(req, res) {
 
     var invoices = await odooExec(oc, odooHost, odooUid, 'account.move', 'read', [
       invoiceIds,
-      ['name', 'amount_total', 'x_studio_itau_tipo_pagamento', 'x_studio_itau_status_pagamento',
-       'x_studio_itau_pix_status', 'x_studio_itau_boleto_status', 'x_studio_itau_txid', 'x_studio_itau_nosso_numero']
+      ['name', 'payment_state', 'amount_total', 'amount_residual',
+       'x_studio_itau_tipo_pagamento', 'x_studio_itau_situacao', 'x_studio_itau_status_pagamento',
+       'x_studio_itau_pix_status', 'x_studio_itau_boleto_status', 'x_studio_itau_txid',
+       'x_studio_itau_nosso_numero', 'x_studio_itau_pix_copia_cola']
     ]);
 
     var lista = invoices.map(function(inv) {
@@ -437,10 +445,15 @@ router.get('/pendentes', apiKeyAuth, async function(req, res) {
         id: inv.id,
         nome: inv.name,
         valor: inv.amount_total,
+        saldo: inv.amount_residual,
+        payment_state: inv.payment_state,
         tipo: inv.x_studio_itau_tipo_pagamento || 'N/A',
+        situacao: inv.x_studio_itau_situacao || 'N/A',
         status_pagamento: inv.x_studio_itau_status_pagamento || 'N/A',
         pix_status: inv.x_studio_itau_pix_status || null,
         boleto_status: inv.x_studio_itau_boleto_status || null,
+        txid: inv.x_studio_itau_txid || null,
+        nosso_numero: inv.x_studio_itau_nosso_numero || null,
       };
     });
 
