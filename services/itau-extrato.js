@@ -18,7 +18,19 @@ const axios = require('axios');
 const https = require('https');
 const config = require('../config');
 
-var EXTRATO_BASE_URL = process.env.ITAU_EXTRATO_URL || 'https://api.itau.com.br';
+var EXTRATO_BASE_URL = process.env.ITAU_EXTRATO_URL || '';
+
+// Itaú Corporate API URLs (fallback chain)
+var EXTRATO_URLS = [
+  'https://api.itau.com.br',           // Primary corporate
+  'https://secure.api.itau',           // Secure API (same as PIX/boleto)
+  'https://sts.itau.com.br',           // STS gateway
+];
+
+if (!EXTRATO_BASE_URL) {
+  // Try env var first, then default
+  EXTRATO_BASE_URL = process.env.ITAU_EXTRATO_URL || EXTRATO_URLS[0];
+}
 
 // Token cache para extrato (reusa o SISPAG token)
 var _extratoTokenCache = { accessToken: null, expiresAt: 0 };
@@ -116,6 +128,11 @@ async function buscarExtrato(opts) {
   var data = response.data;
 
   console.log('[EXTRATO] Resposta recebida: ' + JSON.stringify(data).substring(0, 1000));
+
+  // Check for empty/invalid response
+  if (!data || (typeof data === 'object' && Object.keys(data).length === 0)) {
+    console.warn('[EXTRATO] Resposta vazia do Itau - possivel problema de autorizacao ou periodo sem movimentacao');
+  }
 
   // Normaliza transacoes (formato pode variar)
   var transacoes = [];
