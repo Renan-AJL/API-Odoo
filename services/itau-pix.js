@@ -8,6 +8,7 @@ const { callPix } = require('./itau-api');
 const config = require('../config');
 const logger = require('../utils/logger');
 const uuid = require('uuid');
+const { normalizeDevedor } = require('../utils/pix-devedor');
 
 /**
  * Cria cobranca PIX (PUT /v2/cob/{txid})
@@ -27,11 +28,7 @@ async function criarCobrancaPix(pixData) {
       modalidadeAlteracao: pixData.modalidadeAlteracao || null,
     },
     chave: pixData.chave || config.itau.pixChave,
-    devedor: pixData.devedor ? {
-      cpf: pixData.devedor.cpf || null,
-      cnpj: pixData.devedor.cnpj || null,
-      nome: pixData.devedor.nome,
-    } : undefined,
+    devedor: normalizeDevedor(pixData.devedor),
     solicitacaoPagador: pixData.solicitacaoPagador || false,
   };
 
@@ -43,6 +40,13 @@ async function criarCobrancaPix(pixData) {
   // Remove campos undefined/null (BACEN rejeita)
   if (payload.valor.modalidadeAlteracao === null) delete payload.valor.modalidadeAlteracao;
   if (payload.devedor === undefined) delete payload.devedor;
+
+  // Log do payload limpo para depuracao
+  if (payload.devedor) {
+    logger.info('[PIX-DEV] Payload devedor: ' + JSON.stringify(payload.devedor));
+  } else {
+    logger.info('[PIX-DEV] Payload sem devedor (cobranca sem identificacao)');
+  }
 
   try {
     var resultado = await callPix('PUT', 'v2/cob/' + txid, payload);

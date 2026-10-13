@@ -11,6 +11,7 @@ const boletoService = require('./itau-boleto');
 const pixService = require('./itau-pix');
 const mockService = require('./mock-itau');
 const config = require('../config');
+const { normalizeDevedor } = require('../utils/pix-devedor');
 
 const BANDEIRAS = ['VISA', 'MASTER', 'ELO', 'AMEX', 'HIPERCARD', 'HIPER'];
 
@@ -136,7 +137,7 @@ async function _pix(parsed, dados, resultado) {
   var pixDados = {
     valor: dados.fatura.valor_nominal,
     chave: dados.fatura.pix_chave || config.itau.pixChave,
-    devedor: dados.pagador,
+    devedor: normalizeDevedor(dados.pagador),
     expiracao: dados.fatura.expiracao || 3600,
     solicitacaoPagador: dados.fatura.name || dados.fatura.seu_numero || '',
   };
@@ -241,7 +242,7 @@ async function _composto(parsed, dados, resultado) {
     var pixDados = {
       valor: ve,
       chave: config.itau.pixChave,
-      devedor: dados.pagador,
+      devedor: normalizeDevedor(dados.pagador),
       expiracao: 3600,
       solicitacaoPagador: (dados.fatura.name || '') + ' - Entrada',
     };
