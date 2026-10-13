@@ -117,6 +117,7 @@ async function processPendingPix() {
 
       if (pixStatus === 'CONCLUIDA') {
         // PIX foi pago!
+        writeVals['x_studio_itau_situacao'] = 'PAGO';
         writeVals['x_studio_itau_status_pagamento'] = 'PAGO';
         writeVals['x_studio_itau_pix_data_pagamento'] = (pixResult.pix && pixResult.pix.horario)
           ? pixResult.pix.horario.substring(0, 19).replace('T', ' ')
@@ -149,6 +150,7 @@ async function processPendingPix() {
         } catch (msgErr) { /* ignore */ }
 
       } else if (pixStatus === 'EXPIRADA' || pixStatus === 'REMOVIDA_PELO_PSP') {
+        writeVals['x_studio_itau_situacao'] = 'EXPIRADO';
         writeVals['x_studio_itau_status_pagamento'] = 'EXPIRADO';
       }
       // ATIVA = ainda pendente, nao muda status_pagamento
@@ -253,6 +255,7 @@ async function processPendingBoletos() {
       // Mapear situação do Itaú para nosso status
       // Situações típicas: NORMAL, BAIXADO, CANCELADO, PROTESTADO, PAGO
       if (situacao === 'PAGO' || situacao === 'LIQUIDADO') {
+        writeVals['x_studio_itau_situacao'] = 'PAGO';
         writeVals['x_studio_itau_boleto_status'] = 'PAGO';
         writeVals['x_studio_itau_status_pagamento'] = 'PAGO';
         writeVals['x_studio_itau_boleto_data_pagamento'] = new Date().toISOString().substring(0, 10);
@@ -274,6 +277,7 @@ async function processPendingBoletos() {
         } catch (msgErr) { /* ignore */ }
 
       } else if (situacao === 'CANCELADO' || situacao === 'BAIXADO') {
+        writeVals['x_studio_itau_situacao'] = 'CANCELADO';
         writeVals['x_studio_itau_boleto_status'] = 'CANCELADO';
         writeVals['x_studio_itau_status_pagamento'] = 'CANCELADO';
       } else if (situacao) {
@@ -370,6 +374,7 @@ async function reconcileStatementPayments(transacoes) {
 
         // Atualizar status
         var writeVals = {
+          x_studio_itau_situacao: 'PAGO',
           x_studio_itau_status_pagamento: 'PAGO',
         };
 
