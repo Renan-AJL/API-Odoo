@@ -415,6 +415,26 @@ app.listen(PORT, () => {
   console.log('  Diário Banco: ' + (process.env.ODOO_BANK_JOURNAL_NAME || 'Diário Banco Itaú') + ' (ID: ' + (process.env.ODOO_BANK_JOURNAL_ID || 'auto') + ')');
   console.log('  Status Routes: /api/v1/itau/status/*');
 
+  // --- Auto-setup de campos Itau no Odoo ---
+  // Executa em background - nao bloqueia o server
+  if (config.odoo.enabled) {
+    setTimeout(function() {
+      var fieldSetup = require('./services/odoo-field-setup');
+      fieldSetup.setupItauFields().then(function(result) {
+        if (result.created > 0) {
+          console.log('  [FIELD-SETUP] ' + result.created + ' campo(s) Itau criado(s) no Odoo');
+          if (result.viewUpdated) {
+            console.log('  [FIELD-SETUP] Aba Itau adicionada ao form view');
+          }
+        } else if (result.skipped > 0) {
+          console.log('  [FIELD-SETUP] ' + result.skipped + ' campo(s) Itau ja existem no Odoo');
+        }
+      }).catch(function(err) {
+        console.error('  [FIELD-SETUP] Erro:', err.message);
+      });
+    }, 5000); // Run after 5s (after server is ready but before first poll)
+  }
+
   // Iniciar polling SIEG
   startSiegPolling();
 

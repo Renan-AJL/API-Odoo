@@ -22,13 +22,13 @@ var EXTRATO_BASE_URL = process.env.ITAU_EXTRATO_URL || '';
 
 // Itaú Corporate API URLs (fallback chain)
 var EXTRATO_URLS = [
-  'https://api.itau.com.br',           // Primary corporate
-  'https://secure.api.itau',           // Secure API (same as PIX/boleto)
-  'https://sts.itau.com.br',           // STS gateway
+  'https://secure.api.itau',            // Secure API (same as PIX/boleto) - primary
+  'https://api.itau.com.br',            // Corporate API
+  'https://sts.itau.com.br',            // STS gateway
 ];
 
 if (!EXTRATO_BASE_URL) {
-  // Try env var first, then default
+  // Try env var first, then default to secure API
   EXTRATO_BASE_URL = process.env.ITAU_EXTRATO_URL || EXTRATO_URLS[0];
 }
 
@@ -109,6 +109,7 @@ async function buscarExtrato(opts) {
   console.log('[EXTRATO] Buscando extrato: agencia=' + agencia + ' conta=' + conta + ' de ' + opts.dataInicial + ' ate ' + opts.dataFinal);
 
   var url = EXTRATO_BASE_URL + '/corporativo/v2/conta_corrente/extrato';
+
   var headers = {
     'Authorization': 'Bearer ' + accessToken,
     'Accept': 'application/json',
@@ -124,7 +125,39 @@ async function buscarExtrato(opts) {
     conta: conta,
   };
 
-  var response = await axios.get(url, { headers, httpsAgent, timeout: 30000, params });
+  console.log('[EXTRATO] URL:', url, '| params:', JSON.stringify(params));
+
+  var response;
+  var lastError = null;
+
+  // Try with primary URL first, then fallback
+  for (var u = 0; u < EXTRATO_URLS.length; u++) {
+    var tryUrl = (u === 0) ? url : EXTRATO_URLS[u] + '/corporativo/v2/conta_corrente/extrato';
+    try {
+      console.log('[EXTRATO] Tentando URL:', tryUrl);
+      response = await axios.get(tryUrl, { headers, httpsAgent, timeout: 30000, params });
+      break; // Success
+    } catch (tryErr) {
+      lastError = tryErr;
+      var status = tryErr.response ? tryErr.response.status : 0;
+      console.warn('[EXTRATO] URL ' + tryUrl + ' falhou: HTTP ' + status + ' - ' + tryErr.message);
+      if (status === 401 || status === 403) {
+        // Auth error - don't try other URLs with same token
+        break;
+      }
+      // 404 or network error - try next URL
+    }
+  }
+
+  if (!response) {
+    var errStatus = lastError && lastError.response ? lastError.response.status : 0;
+    var errMsg = lastError ? lastError.message : 'Unknown error';
+    if (errStatus === 404) {
+      console.warn('[EXTRATO] Endpoint extrato nao encontrado (404). A API de extrato pode nao estar habilitada para esta conta. Verifique com o Itau se o scope "extrato" esta liberado no seu Client ID.');
+    }
+    throw new Error('Extrato Itau falhou em todas as URLs: HTTP ' + errStatus + ' - ' + errMsg);
+  }
+
   var data = response.data;
 
   console.log('[EXTRATO] Resposta recebida: ' + JSON.stringify(data).substring(0, 1000));

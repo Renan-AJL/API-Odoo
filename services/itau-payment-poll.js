@@ -480,6 +480,162 @@ async function reconcileStatementPayments(transacoes) {
 }
 
 // ============================================================
+// FIELD DETECTION & SAFETY HELPERS
+// ============================================================
+
+/**
+ * detectFields - Probes Odoo ir.model.fields to check which x_studio_itau_* fields exist.
+ * Returns an object like { x_studio_itau_txid: true, x_studio_itau_pix_status: false, ... }
+ * Caches results for 5 minutes to avoid excessive API calls.
+ */
+var _fieldCheckCache = null;
+var _fieldCheckCacheTime = 0;
+var FIELD_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+var ALL_ITAU_FIELDS = [
+  'x_studio_itau_situacao',
+  'x_studio_itau_status_pagamento',
+  'x_studio_itau_tipo_pagamento',
+  'x_studio_itau_pix_status',
+  'x_studio_itau_pix_data_pagamento',
+  'x_studio_itau_pix_e2e',
+  'x_studio_itau_txid',
+  'x_studio_itau_pix_copia_cola',
+  'x_studio_itau_nosso_numero',
+  'x_studio_itau_boleto_status',
+  'x_studio_itau_boleto_data_pagamento',
+  'x_studio_itau_link_status',
+  'x_studio_itau_boletos_html',
+  'x_studio_itau_resposta_json',
+  'x_studio_boleto_cancelado',
+];
+
+async function detectFields(oc, host, uid) {
+  // Return cached result if still fresh
+  var now = Date.now();
+  if (_fieldCheckCache && (now - _fieldCheckCacheTime) < FIELD_CACHE_TTL) {
+    return _fieldCheckCache;
+  }
+
+  var result = {};
+  // Default: assume fields don't exist
+  for (var i = 0; i < ALL_ITAU_FIELDS.length; i++) {
+    result[ALL_ITAU_FIELDS[i]] = false;
+  }
+
+  try {
+    // Search for all itau fields on account.move
+    var fieldIds = await odooExec(oc, host, uid, 'ir.model.fields', 'search', [
+      [['model_id.model', '=', 'account.move'], ['name', 'like', 'itau']]]
+    );
+
+    if (fieldIds && fieldIds.length > 0) {
+      var fieldsData = await odooExec(oc, host, uid, 'ir.model.fields', 'read', [
+        fieldIds, { fields: ['name'] }
+      ]);
+      for (var f = 0; f < fieldsData.length; f++) {
+        var fname = fieldsData[f].name;
+        if (fname.indexOf('itau') >= 0 || fname.indexOf('boleto') >= 0) {
+          result[fname] = true;
+        }
+      }
+    }
+
+    // Also check x_studio_itau prefix specifically
+    var studioIds = await odooExec(oc, host, uid, 'ir.model.fields', 'search', [
+      [['model_id.model', '=', 'account.move'], ['name', 'like', 'x_studio_itau']]]
+    );
+
+    if (studioIds && studioIds.length > 0) {
+      var studioData = await odooExec(oc, host, uid, 'ir.model.fields', 'read', [
+        studioIds, { fields: ['name'] }
+      ]);
+      for (var s = 0; s < studioData.length; s++) {
+        result[studioData[s].name] = true;
+      }
+    }
+  } catch (err) {
+    console.error('[PAYMENT-POLL] Erro ao detectar campos (assumindo nenhum existe):', err.message);
+  }
+
+  // Cache result
+  _fieldCheckCache = result;
+  _fieldCheckCacheTime = now;
+
+  var existingCount = 0;
+  for (var k in result) { if (result[k]) existingCount++; }
+  console.log('[PAYMENT-POLL] detectFields: ' + existingCount + '/' + ALL_ITAU_FIELDS.length + ' campos itau existem no Odoo');
+
+  return result;
+}
+
+/**
+ * buildSafeDomain - Filters a search domain to only include conditions
+ * referencing fields that exist in Odoo. Also handles '|' operators.
+ */
+function buildSafeDomain(domain, fieldChecks) {
+  if (!fieldChecks) return domain;
+
+  var safeDomain = [];
+  var i = 0;
+  while (i < domain.length) {
+    var item = domain[i];
+    if (item === '|' || item === '&') {
+      // Logical operator - keep it
+      safeDomain.push(item);
+      i++;
+    } else if (Array.isArray(item) && item.length >= 3) {
+      // Field condition: [field_name, operator, value]
+      var fieldName = item[0];
+      // Standard Odoo fields are always safe
+      if (fieldName.indexOf('x_studio_') !== 0 || fieldChecks[fieldName]) {
+        safeDomain.push(item);
+      } else {
+        // Skip this condition and any preceding '|' that would make the domain invalid
+        // If we skip a condition after a '|', we need to also remove the '|'
+        if (safeDomain.length > 0 && safeDomain[safeDomain.length - 1] === '|') {
+          safeDomain.pop();
+        }
+      }
+      i++;
+    } else {
+      // Unknown format - keep it
+      safeDomain.push(item);
+      i++;
+    }
+  }
+
+  return safeDomain;
+}
+
+/**
+ * filterWriteVals - Filters a write-values dict to only include keys
+ * for fields that exist in Odoo.
+ */
+function filterWriteVals(writeVals, fieldChecks) {
+  if (!fieldChecks) return writeVals;
+
+  var safeVals = {};
+  for (var key in writeVals) {
+    // Standard Odoo fields are always safe
+    if (key.indexOf('x_studio_') !== 0 || fieldChecks[key]) {
+      safeVals[key] = writeVals[key];
+    } else {
+      console.log('[PAYMENT-POLL] Campo ausente no Odoo, pulando write: ' + key);
+    }
+  }
+  return safeVals;
+}
+
+/**
+ * Invalidate field cache (call after creating new fields)
+ */
+function invalidateFieldCache() {
+  _fieldCheckCache = null;
+  _fieldCheckCacheTime = 0;
+}
+
+// ============================================================
 // EXPORTS
 // ============================================================
 
@@ -487,4 +643,9 @@ module.exports = {
   processPendingPix: processPendingPix,
   processPendingBoletos: processPendingBoletos,
   reconcileStatementPayments: reconcileStatementPayments,
+  detectFields: detectFields,
+  buildSafeDomain: buildSafeDomain,
+  filterWriteVals: filterWriteVals,
+  invalidateFieldCache: invalidateFieldCache,
+  ALL_ITAU_FIELDS: ALL_ITAU_FIELDS,
 };
