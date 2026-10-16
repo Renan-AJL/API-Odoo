@@ -127,4 +127,37 @@ async function callPix(method, endpoint, payload) {
   }
 }
 
-module.exports = { callBolecode, callBolecodeGet, callBolecodePut, callPix };
+/**
+ * PATCH request ao Cash Management Itau (para baixa/cancelamento de boletos)
+ * Endpoint: PATCH /cash_management/v2/boletos/{idBoleto}/baixa
+ */
+async function callCashManagementPatch(accessToken, endpoint) {
+  const mtls = config.createMtlsConfig();
+  // Cash Management API usa dominio secure.api.itau/cash_management/v2
+  var cashMgmtBase = config.itau.cashManagementBaseUrl || 'https://secure.api.itau/cash_management/v2';
+  const url = cashMgmtBase + endpoint;
+  const httpsAgent = mtls.hasMtls ? new https.Agent({ cert: mtls.cert, key: mtls.key }) : undefined;
+
+  console.log('[ITAU-API] Cash Management PATCH', url);
+  const headers = {
+    'Authorization': 'Bearer ' + accessToken,
+    'Content-Type': 'application/json; charset=utf-8',
+    'Accept': 'application/json',
+    'x-itau-apikey': config.itau.clientId,
+    'x-itau-correlationID': String(Date.now()),
+    'x-itau-flowID': 'boleto-baixa',
+  };
+  try {
+    const response = await axios.patch(url, {}, { headers, httpsAgent, timeout: 30000 });
+    return response.data;
+  } catch (error) {
+    if (error.response) {
+      const msg = JSON.stringify(error.response.data);
+      console.error('[ITAU-API] ERRO CM PATCH ' + error.response.status + ':', msg);
+      throw new Error('CashMgmt PATCH ' + error.response.status + ': ' + msg);
+    }
+    throw new Error('CashMgmt conexao: ' + error.message);
+  }
+}
+
+module.exports = { callBolecode, callBolecodeGet, callBolecodePut, callPix, callCashManagementPatch };

@@ -8,7 +8,7 @@
  * =============================================
  */
 const { getAccessToken, invalidateToken } = require('./itau-auth');
-const { callBolecode, callBolecodeGet, callBolecodePut } = require('./itau-api');
+const { callBolecode, callBolecodeGet, callBolecodePut, callCashManagementPatch } = require('./itau-api');
 const config = require('../config');
 
 /**
@@ -302,6 +302,30 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
     throw new Error('Falha na autenticacao Itau: ' + err.message);
   }
 
+  // === METODO 1: Cash Management API (PATCH /boletos/{idBoleto}/baixa) ===
+  // idBoleto = Agencia(4) + ContaCorrente(7) + DAC(1) + Carteira(3) + NossoNumero(8)
+  // Conta <dash> DAC: e.g. 22338-9 -> 0223389 (7 chars) + 9 (DAC)
+  var agencia = (config.banco.agencia || '7764').padStart(4, '0');
+  var contaRaw = (config.banco.conta || '22338-9').replace(/-/g, ''); // "223389"
+  var dac = contaRaw.length > 5 ? contaRaw.slice(-1) : '9'; // Ultimo digito e o DAC
+  var contaPadded = contaRaw.slice(0, -1).padStart(6, '0'); // "022338"
+  var codConta = (contaPadded + dac).padStart(7, '0'); // "0223389"
+  var carteira = (config.banco.codigoCarteira || '109').padStart(3, '0');
+  var nn = String(nossoNumero).padStart(8, '0');
+  var idBoleto = agencia + codConta + dac + carteira + nn;
+  // Formato: 4+7+1+3+8 = 23 caracteres
+  console.log('[BOLETO] idBoleto:', idBoleto, '(ag=' + agencia + ' conta=' + codConta + ' dac=' + dac + ' cart=' + carteira + ' nn=' + nn + ')');
+
+  try {
+    var response = await callCashManagementPatch(accessToken, '/boletos/' + idBoleto + '/baixa');
+    console.log('[BOLETO] Cancelamento (CashMgmt PATCH) OK:', JSON.stringify(response));
+    return { sucesso: true, dados: response, metodo: 'cash_management_patch', idBoleto: idBoleto };
+  } catch (cmError) {
+    console.warn('[BOLETO] Cash Management PATCH falhou:', cmError.message);
+    console.log('[BOLETO] Tentando metodo alternativo (BoleCode PUT /cancelamento)...');
+  }
+
+  // === METODO 2 (fallback): BoleCode PUT /boletos_pix/cancelamento ===
   var payload = {
     beneficiario: {
       id_beneficiario: beneficiaryId || config.banco.idBeneficiario || '776400223389',
@@ -310,12 +334,12 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
     nosso_numero: String(nossoNumero),
   };
 
-  console.log('[BOLETO] Payload cancelamento:', JSON.stringify(payload));
+  console.log('[BOLETO] Payload cancelamento (fallback):', JSON.stringify(payload));
 
   try {
     var response = await callBolecodePut(accessToken, '/boletos_pix/cancelamento', payload);
-    console.log('[BOLETO] Cancelamento solicitado com sucesso:', JSON.stringify(response));
-    return { sucesso: true, dados: response };
+    console.log('[BOLETO] Cancelamento (BoleCode PUT) OK:', JSON.stringify(response));
+    return { sucesso: true, dados: response, metodo: 'bolecode_put' };
   } catch (error) {
     if (error.message && (error.message.includes('401') || error.message.includes('403'))) {
       console.log('[BOLETO] Token pode ter expirado, invalidando cache...');
@@ -324,7 +348,7 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
         accessToken = await getAccessToken();
         var response = await callBolecodePut(accessToken, '/boletos_pix/cancelamento', payload);
         console.log('[BOLETO] Cancelamento na 2a tentativa:', JSON.stringify(response));
-        return { sucesso: true, dados: response };
+        return { sucesso: true, dados: response, metodo: 'bolecode_put_retry' };
       } catch (retryError) {
         console.error('[BOLETO] Falha na 2a tentativa de cancelamento:', retryError.message);
         throw retryError;

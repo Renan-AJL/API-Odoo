@@ -34,6 +34,7 @@ const config = {
     bolecodeBaseUrl: process.env.ITAU_BOLECODE_URL || process.env.ITAU_PRODUCAO_URL || 'https://secure.api.itau/pix_recebimentos_conciliacoes/v2',
     pixBaseUrl: process.env.ITAU_PIX_URL || process.env.ITAU_PIX_BASE_URL || 'https://secure.api.itau/pix_recebimentos/',
     pixChave: process.env.ITAU_PIX_CHAVE || process.env.ITAU_PIX_KEY || '',
+    cashManagementBaseUrl: process.env.ITAU_CASH_MANAGEMENT_URL || 'https://secure.api.itau/cash_management/v2',
   },
 
   banco: {
