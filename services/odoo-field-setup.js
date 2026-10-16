@@ -188,24 +188,44 @@ async function setupItauFields() {
   var modelId = modelIds[0];
 
   // Detect ALL existing fields in one search_read call
+  // Domain: name in NOMES AND model in [account.move, account.bank.statement.line]
+  // Usa 'model' (char field direto) em vez de 'model_id.model' (Many2one traversal)
+  // que pode falhar em Odoo 19 SaaS por permissoes ou API changes
   var NOMES = FIELDS_TO_CREATE.map(function(f) { return f.name; });
   var existingFields = {};
+  var detectionOk = false;
   try {
     var existingData = await odooExec(oc, odooHost, odooUid, 'ir.model.fields', 'search_read',
-      [[['name', 'in', NOMES], ['model_id.model', 'in', ['account.move', 'account.bank.statement.line']]]],
-      { fields: ['name', 'model', 'state', 'field_description', 'ttype'] }
+      [[['name', 'in', NOMES], ['model', 'in', ['account.move', 'account.bank.statement.line']]]],
+      { fields: ['name', 'model', 'state'] }
     );
     if (existingData && existingData.length > 0) {
       for (var e = 0; e < existingData.length; e++) {
         existingFields[existingData[e].name] = existingData[e];
       }
     }
+    detectionOk = true;
   } catch (err) {
     console.error('[FIELD-SETUP] Erro ao detectar campos existentes via search_read:', err.message);
+    console.error('[FIELD-SETUP] NAO sera tentada criacao de campos — risco de "Field names must be unique"');
   }
 
   var existingCount = Object.keys(existingFields).length;
-  console.log('[FIELD-SETUP] ' + existingCount + ' campo(s) itau ja existem no Odoo');
+  console.log('[FIELD-SETUP] ' + existingCount + ' campo(s) itau ja existem no Odoo (deteccao ' + (detectionOk ? 'OK' : 'FALHOU') + ')');
+
+  // Se todos os 15 campos ja existem, pula criacao completamente
+  if (existingCount >= FIELDS_TO_CREATE.length) {
+    console.log('[FIELD-SETUP] Todos os ' + existingCount + ' campos ja existem. Nenhuma criacao necessaria.');
+    // Ainda tenta atualizar a view se necessario
+    var viewUpdated = await setupItauFormView(oc, odooHost, odooUid);
+    return { created: 0, skipped: existingCount, errors: 0, viewUpdated: viewUpdated };
+  }
+
+  // Se a deteccao falhou completamente, NAO tenta criar — risco de duplicata
+  if (!detectionOk) {
+    console.error('[FIELD-SETUP] Deteccao falhou. Abortando criacao para evitar erros de duplicata.');
+    return { created: 0, skipped: 0, errors: 1, viewUpdated: false };
+  }
 
   // Create missing fields
   var created = 0;

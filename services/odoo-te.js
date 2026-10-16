@@ -156,20 +156,59 @@ function executeKw(model, method, args, kwargs) {
 }
 
 // ============================================================
+// flattenIds — normaliza IDs para Odoo XML-RPC read()
+// Odoo exige args = [[id1, id2, ...], [field1, field2, ...]]
+// IDs podem chegar como: 111, [111], [[111]], [[111,"name"]], [111,222,...]
+// Retorna sempre flat array de inteiros: [111, 222, ...]
+// ============================================================
+function flattenIds(ids) {
+  if (!ids) return [];
+  // Single integer
+  if (typeof ids === 'number') return [ids];
+  // Not an array — try parseInt
+  if (!Array.isArray(ids)) {
+    var n = parseInt(ids, 10);
+    return isNaN(n) ? [] : [n];
+  }
+  // Flat array — check first element
+  if (ids.length === 0) return [];
+  var first = ids[0];
+  // [111, 222, ...] — flat int array
+  if (typeof first === 'number') return ids;
+  // ["111", ...] — flat string array
+  if (typeof first === 'string') return ids.map(function(x) { return parseInt(x, 10); }).filter(function(n) { return !isNaN(n); });
+  // [[111, "name"], ...] or [[111], ...] — nested (Many2one pair or nested array)
+  if (Array.isArray(first)) {
+    return ids.map(function(item) {
+      if (typeof item === 'number') return item;
+      if (Array.isArray(item) && item.length > 0) {
+        var inner = typeof item[0] === 'number' ? item[0] : parseInt(item[0], 10);
+        return isNaN(inner) ? null : inner;
+      }
+      var n = parseInt(item, 10);
+      return isNaN(n) ? null : n;
+    }).filter(function(x) { return x !== null && x !== undefined; });
+  }
+  return ids;
+}
+
+// ============================================================
 // Safe read/write — tenta com x_studio, fallback sem
 // ============================================================
 var _customFieldsCache = {};
 
 async function safeReadCustom(model, ids, nativeFields, customFields) {
+  var flatIds = flattenIds(ids);
+  if (!flatIds.length) return [];
   try {
-    return await executeKw(model, 'read', [ids, nativeFields.concat(customFields)]);
+    return await executeKw(model, 'read', [flatIds, nativeFields.concat(customFields)]);
   } catch (err) {
     if (err.message && (err.message.indexOf('Invalid field') !== -1 || err.message.indexOf('KeyError') !== -1)) {
       if (!_customFieldsCache[model]) {
         _customFieldsCache[model] = { available: false, checked: true };
         logger.warn('[ODOO-TE] Campos x_studio_* nao encontrados em ' + model + '. Usando campos nativos.');
       }
-      return await executeKw(model, 'read', [ids, nativeFields]);
+      return await executeKw(model, 'read', [flatIds, nativeFields]);
     }
     throw err;
   }
@@ -201,15 +240,16 @@ async function safeWriteCustom(model, ids, vals) {
 // Compatibilidade com delivery.js — wrappers read/searchRead/write/getStudioFields
 // ============================================================
 async function read(model, ids, fields) {
-  return await executeKw(model, 'read', [ids, fields]);
+  var flatIds = flattenIds(ids);
+  if (!flatIds.length) return [];
+  return await executeKw(model, 'read', [flatIds, fields]);
 }
 
 async function searchRead(model, domain, fields, limit, offset, order) {
-  var kwargs = { fields: fields, limit: limit || 0, offset: offset || 0 };
+  // Usa search_read nativo do Odoo — um unico XML-RPC call em vez de search+read
+  var kwargs = { fields: fields, limit: limit || 80, offset: offset || 0 };
   if (order) kwargs.order = order;
-  var ids = await executeKw(model, 'search', [domain], kwargs);
-  if (!ids || !ids.length) return [];
-  return await executeKw(model, 'read', [ids, fields]);
+  return await executeKw(model, 'search_read', [domain], kwargs);
 }
 
 async function write(model, ids, values) {
@@ -335,8 +375,9 @@ async function findSaleOrderByInvoice(invoiceId) {
   try {
     var invData = await executeKw('account.move', 'read', [[invoiceId], ['line_ids']]);
     var inv = invData && invData[0];
-    var lineIds = (inv && inv.line_ids) || [];
-    console.log('[ODOO-TE] Estrategia 3: ' + lineIds.length + ' linhas da fatura');
+    var rawLineIds = (inv && inv.line_ids) || [];
+    var lineIds = flattenIds(rawLineIds);
+    console.log('[ODOO-TE] Estrategia 3: ' + lineIds.length + ' linhas da fatura (raw=' + rawLineIds.length + ')');
     if (lineIds.length) {
       var lines = await executeKw('account.move.line', 'read', [lineIds, ['sale_line_ids']]);
       if (lines) {
@@ -394,13 +435,15 @@ async function readInvoiceFull(invoiceId) {
     var results = await safeReadCustom('account.move', [invoiceId], INVOICE_FIELDS, INVOICE_CUSTOM_FIELDS);
     if (results && results.length) {
       logger.info('[ODOO-TE] readInvoiceFull OK: id=' + results[0].id + ' name=' + results[0].name + ' state=' + results[0].state);
-    } else {
-      logger.warn('[ODOO-TE] readInvoiceFull: safeReadCustom retornou vazio para id=' + invoiceId);
+      return results[0];
     }
-    return results ? results[0] : null;
-  } catch (err) {
-    logger.error('[ODOO-TE] readInvoiceFull falhou: ' + err.message + ' | stack: ' + (err.stack || '').substring(0, 200));
+    // Resultado vazio = registro nao existe ou sem acesso
+    logger.warn('[ODOO-TE] readInvoiceFull: account.move id=' + invoiceId + ' nao encontrado ou sem acesso');
     return null;
+  } catch (err) {
+    // NAO engolir silenciosamente — repassar o erro para a rota
+    logger.error('[ODOO-TE] readInvoiceFull falhou: ' + err.message);
+    throw err;
   }
 }
 
@@ -413,10 +456,9 @@ async function getInvoiceLines(invoiceId) {
     var inv = invData && invData[0];
     if (!inv || !inv.line_ids || !inv.line_ids.length) return [];
 
-    // line_ids pode vir como [id, id, ...] ou [[id, name], ...]
-    var lineIds = inv.line_ids.map(function(item) {
-      return Array.isArray(item) ? item[0] : item;
-    });
+    // line_ids pode vir como [id, id, ...] ou [[id, name], ...] ou [[id], ...]
+    // flattenIds normaliza para flat array de inteiros
+    var lineIds = flattenIds(inv.line_ids);
 
     var lines = await executeKw('account.move.line', 'read', [lineIds, INVOICE_LINE_FIELDS]);
     if (!lines || !lines.length) return [];
@@ -460,7 +502,9 @@ async function getSaleOrderLines(saleOrderId) {
 async function getProducts(productIds) {
   if (!productIds || !productIds.length) return {};
   try {
-    var products = await executeKw('product.product', 'read', [productIds, PRODUCT_FIELDS]);
+    var flatIds = flattenIds(productIds);
+    if (!flatIds.length) return {};
+    var products = await executeKw('product.product', 'read', [flatIds, PRODUCT_FIELDS]);
     var map = {};
     if (products) products.forEach(function(p) { map[p.id] = p; });
     return map;
@@ -630,4 +674,5 @@ module.exports = {
   // Low-level
   executeKw: executeKw,
   safeWriteCustom: safeWriteCustom,
+  flattenIds: flattenIds,
 };

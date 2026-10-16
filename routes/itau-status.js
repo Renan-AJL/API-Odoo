@@ -643,4 +643,101 @@ router.get('/odoo-test', apiKeyAuth, async function(req, res) {
   }
 });
 
+// ============================================================
+// GET /api/v1/itau/status/boletos-hoje
+// Lista TODOS os boletos emitidos hoje (sem filtro payment_state)
+// Query: ?data=2026-10-17 (default: today)
+// ============================================================
+router.get('/boletos-hoje', apiKeyAuth, async function(req, res) {
+  var oc = config.odoo;
+  if (!oc || !oc.enabled || !oc.url) {
+    return res.status(503).json({ erro: 'Integracao Odoo desabilitada' });
+  }
+
+  var dataHoje = req.query.data || new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
+  try {
+    var authResult = await odooAuth(oc);
+    var odooUid = authResult.uid;
+    var odooHost = authResult.host;
+
+    // Busca faturas com tipo_pagamento BOLETO emitidas na data
+    var domain = [
+      ['move_type', '=', 'out_invoice'],
+      ['x_studio_itau_tipo_pagamento', 'like', 'BOLETO'],
+      ['invoice_date', '>=', dataHoje],
+      ['invoice_date', '<=', dataHoje],
+    ];
+
+    var invoiceIds = await odooExec(oc, odooHost, odooUid, 'account.move', 'search', [domain], { limit: 200, order: 'id desc' });
+
+    if (!invoiceIds || invoiceIds.length === 0) {
+      // Fallback: buscar por x_studio_itau_nosso_numero preenchido (boletos podem ter sido emitidos mas tipo_pagamento nao setado)
+      domain = [
+        ['move_type', '=', 'out_invoice'],
+        ['x_studio_itau_nosso_numero', '!=', false],
+        ['x_studio_itau_nosso_numero', '!=', ''],
+        ['invoice_date', '>=', dataHoje],
+        ['invoice_date', '<=', dataHoje],
+      ];
+      invoiceIds = await odooExec(oc, odooHost, odooUid, 'account.move', 'search', [domain], { limit: 200, order: 'id desc' });
+    }
+
+    if (!invoiceIds || invoiceIds.length === 0) {
+      // Fallback 2: buscar por situacao = emitido na data
+      domain = [
+        ['move_type', '=', 'out_invoice'],
+        ['x_studio_itau_situacao', '=', 'emitido'],
+        ['invoice_date', '>=', dataHoje],
+        ['invoice_date', '<=', dataHoje],
+      ];
+      invoiceIds = await odooExec(oc, odooHost, odooUid, 'account.move', 'search', [domain], { limit: 200, order: 'id desc' });
+    }
+
+    if (!invoiceIds || invoiceIds.length === 0) {
+      return res.json({ sucesso: true, boletos: [], total: 0, data: dataHoje, mensagem: 'Nenhum boleto encontrado nesta data' });
+    }
+
+    var fields = [
+      'id', 'name', 'move_type', 'state', 'payment_state', 'invoice_date',
+      'amount_total', 'amount_residual', 'partner_id',
+      'x_studio_itau_tipo_pagamento', 'x_studio_itau_situacao',
+      'x_studio_itau_status_pagamento', 'x_studio_itau_boleto_status',
+      'x_studio_itau_nosso_numero', 'x_studio_itau_txid',
+      'x_studio_itau_link_status', 'x_studio_boleto_cancelado',
+      'x_studio_itau_resposta_json',
+    ];
+
+    var invoices = await odooExec(oc, odooHost, odooUid, 'account.move', 'read', [
+      invoiceIds, fields
+    ]);
+
+    var lista = invoices.map(function(inv) {
+      return {
+        id: inv.id,
+        nome: inv.name,
+        state: inv.state,
+        payment_state: inv.payment_state,
+        data: inv.invoice_date,
+        valor: inv.amount_total,
+        saldo: inv.amount_residual,
+        parceiro: inv.partner_id ? (Array.isArray(inv.partner_id) ? inv.partner_id[1] : inv.partner_id) : '',
+        tipo: inv.x_studio_itau_tipo_pagamento || 'N/A',
+        situacao: inv.x_studio_itau_situacao || 'N/A',
+        status_pagamento: inv.x_studio_itau_status_pagamento || 'N/A',
+        boleto_status: inv.x_studio_itau_boleto_status || 'N/A',
+        nosso_numero: inv.x_studio_itau_nosso_numero || '',
+        txid: inv.x_studio_itau_txid || '',
+        cancelado: inv.x_studio_boleto_cancelado || false,
+      };
+    });
+
+    res.json({ sucesso: true, boletos: lista, total: lista.length, data: dataHoje });
+
+  } catch (err) {
+    console.error('[ITAU-STATUS] Erro ao listar boletos-hoje:', err.message);
+    res.status(500).json({ erro: 'Erro ao listar boletos: ' + err.message });
+  }
+});
+
 module.exports = router;
