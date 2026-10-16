@@ -1,0 +1,252 @@
+/home/z/my-project/itau-odoo/server.js:422:      var fieldSetup = require('./services/odoo-field-setup');
+/home/z/my-project/itau-odoo/server.js:423:      fieldSetup.setupItauFields().then(function(result) {
+/home/z/my-project/itau-odoo/server.js:425:          console.log('  [FIELD-SETUP] ' + result.created + ' campo(s) Itau criado(s) no Odoo');
+/home/z/my-project/itau-odoo/server.js:427:            console.log('  [FIELD-SETUP] Aba Itau adicionada ao form view');
+/home/z/my-project/itau-odoo/server.js:430:          console.log('  [FIELD-SETUP] ' + result.skipped + ' campo(s) Itau ja existem no Odoo');
+/home/z/my-project/itau-odoo/server.js:433:        console.error('  [FIELD-SETUP] Erro:', err.message);
+/home/z/my-project/itau-odoo/routes/delivery.js:590:        console.log('[TE-SEND-INVOICE] Solucao: acao do servidor deve enviar sale_order_id no body, ou criar x_studio_motorista na fatura.');
+/home/z/my-project/itau-odoo/routes/delivery.js:638:    // 6b. Motorista: le x_studio_motorista
+/home/z/my-project/itau-odoo/routes/delivery.js:645:      var motoristaRef = invoice.x_studio_motorista || (saleFull && saleFull.x_studio_motorista) || null;
+/home/z/my-project/itau-odoo/routes/delivery.js:646:      console.log('[TE-SEND-INVOICE] Motorista raw: ' + JSON.stringify(motoristaRef) + ' (tipo: ' + typeof motoristaRef + ')' + (invoice.x_studio_motorista ? ' [da fatura]' : (saleFull && saleFull.x_studio_motorista ? ' [da venda]' : '')));
+/home/z/my-project/itau-odoo/routes/delivery.js:686:        console.log('[TE-SEND-INVOICE] Nenhum motorista selecionado (fatura e venda sem x_studio_motorista)');
+/home/z/my-project/itau-odoo/routes/delivery.js:759:      // Grava card HTML na fatura (x_studio_status_de_entrega_te) — prepend, nao sobrescreve
+/home/z/my-project/itau-odoo/routes/delivery.js:927:// O campo x_studio_motorista e um selection com 17 opcoes (key/label)
+/home/z/my-project/itau-odoo/routes/admin.js:148:    var domain = [['move_type', '=', 'out_invoice'], ['x_studio_nfe_chave', '!=', false]];
+/home/z/my-project/itau-odoo/routes/admin.js:149:    if (st && st !== 'todos') domain.push(['x_studio_nfe_status', '=', st]);
+/home/z/my-project/itau-odoo/routes/admin.js:158:        'x_studio_nfe_status', 'x_studio_nfe_chave', 'x_studio_nfe_protocolo',
+/home/z/my-project/itau-odoo/routes/admin.js:166:        status: r.x_studio_nfe_status,
+/home/z/my-project/itau-odoo/routes/admin.js:167:        chave: r.x_studio_nfe_chave,
+/home/z/my-project/itau-odoo/routes/admin.js:168:        protocolo: r.x_studio_nfe_protocolo,
+/home/z/my-project/itau-odoo/routes/admin.js:1415:      "nosso_numero = record.x_studio_itau_nosso_numero or ''",
+/home/z/my-project/itau-odoo/routes/admin.js:1431:      "        record.x_studio_boleto_cancelado = True",
+/home/z/my-project/itau-odoo/routes/consultflex.js:6: *   Se cpfcnpj não informado no body, lê dos campos do sale.order (x_studio_cf_cpfcnpj, x_studio_cf_tipo_pessoa)
+/home/z/my-project/itau-odoo/routes/consultflex.js:109:          ['x_studio_cf_cpfcnpj', 'x_studio_cf_tipo_pessoa', 'x_studio_cf_tipo_operacao', 'partner_id']
+/home/z/my-project/itau-odoo/routes/consultflex.js:114:          cpfcnpj = rec.x_studio_cf_cpfcnpj || '';
+/home/z/my-project/itau-odoo/routes/consultflex.js:115:          tipoPessoa = rec.x_studio_cf_tipo_pessoa || '';
+/home/z/my-project/itau-odoo/routes/consultflex.js:116:          if (!tipoOperacao) tipoOperacao = rec.x_studio_cf_tipo_operacao || 'basico';
+/home/z/my-project/itau-odoo/routes/consultflex.js:151:          'x_studio_resposta_consultflex': html,
+/home/z/my-project/itau-odoo/routes/consultflex.js:158:             ['name', '=', 'x_studio_cf_status'],
+/home/z/my-project/itau-odoo/routes/consultflex.js:159:             ['name', '=', 'x_studio_cf_data_consulta']],
+/home/z/my-project/itau-odoo/routes/consultflex.js:163:            writeVals['x_studio_cf_status'] = 'concluido';
+/home/z/my-project/itau-odoo/routes/consultflex.js:164:            writeVals['x_studio_cf_data_consulta'] = nowStr;
+/home/z/my-project/itau-odoo/routes/webhook-te.js:58:          await odooTe.updatePickingTeData(picking.id, { x_studio_te_order_id: String(orderId) });
+/home/z/my-project/itau-odoo/routes/webhook-te.js:62:          await odooTe.updateSaleOrderTeData(saleOrder.id, { x_studio_te_order_id: String(orderId) });
+/home/z/my-project/itau-odoo/routes/itau-webhook.js:143:    var invoiceIds = await safeSearchByField(oc, odooHost, odooUid, 'x_studio_itau_txid', '=', txid);
+/home/z/my-project/itau-odoo/routes/itau-webhook.js:155:      'x_studio_itau_situacao': 'pago',
+/home/z/my-project/itau-odoo/routes/itau-webhook.js:156:      'x_studio_itau_pix_status': 'concluida',
+/home/z/my-project/itau-odoo/routes/itau-webhook.js:157:      'x_studio_itau_status_pagamento': 'pago',
+/home/z/my-project/itau-odoo/routes/itau-webhook.js:158:      'x_studio_itau_pix_data_pagamento': nowStr,
+/home/z/my-project/itau-odoo/routes/itau-webhook.js:159:      'x_studio_itau_pix_e2e': e2eId,
+/home/z/my-project/itau-odoo/routes/itau-webhook.js:225:    var invoiceIds = await safeSearchByField(oc, odooHost, odooUid, 'x_studio_itau_nosso_numero', 'like', nossoNumero);
+/home/z/my-project/itau-odoo/routes/itau-webhook.js:237:      'x_studio_itau_situacao': 'pago',
+/home/z/my-project/itau-odoo/routes/itau-webhook.js:238:      'x_studio_itau_boleto_status': 'pago',
+/home/z/my-project/itau-odoo/routes/itau-webhook.js:239:      'x_studio_itau_status_pagamento': 'pago',
+/home/z/my-project/itau-odoo/routes/itau-webhook.js:240:      'x_studio_itau_boleto_data_pagamento': todayStr,
+/home/z/my-project/itau-odoo/routes/itau-status.js:73:      'x_studio_itau_tipo_pagamento',
+/home/z/my-project/itau-odoo/routes/itau-status.js:74:      'x_studio_itau_situacao',
+/home/z/my-project/itau-odoo/routes/itau-status.js:75:      'x_studio_itau_status_pagamento',
+/home/z/my-project/itau-odoo/routes/itau-status.js:76:      'x_studio_itau_pix_status',
+/home/z/my-project/itau-odoo/routes/itau-status.js:77:      'x_studio_itau_pix_data_pagamento',
+/home/z/my-project/itau-odoo/routes/itau-status.js:78:      'x_studio_itau_pix_e2e',
+/home/z/my-project/itau-odoo/routes/itau-status.js:79:      'x_studio_itau_txid',
+/home/z/my-project/itau-odoo/routes/itau-status.js:80:      'x_studio_itau_pix_copia_cola',
+/home/z/my-project/itau-odoo/routes/itau-status.js:81:      'x_studio_itau_boleto_status',
+/home/z/my-project/itau-odoo/routes/itau-status.js:82:      'x_studio_itau_boleto_data_pagamento',
+/home/z/my-project/itau-odoo/routes/itau-status.js:83:      'x_studio_itau_nosso_numero',
+/home/z/my-project/itau-odoo/routes/itau-status.js:84:      'x_studio_itau_link_status',
+/home/z/my-project/itau-odoo/routes/itau-status.js:85:      'x_studio_boleto_cancelado',
+/home/z/my-project/itau-odoo/routes/itau-status.js:99:    var tipoPag = inv.x_studio_itau_tipo_pagamento || 'NÃO DEFINIDO';
+/home/z/my-project/itau-odoo/routes/itau-status.js:100:    var statusPag = inv.x_studio_itau_status_pagamento || 'N/A';
+/home/z/my-project/itau-odoo/routes/itau-status.js:112:        status: inv.x_studio_itau_pix_status || 'N/A',
+/home/z/my-project/itau-odoo/routes/itau-status.js:113:        data_pagamento: inv.x_studio_itau_pix_data_pagamento || null,
+/home/z/my-project/itau-odoo/routes/itau-status.js:114:        e2e_id: inv.x_studio_itau_pix_e2e || null,
+/home/z/my-project/itau-odoo/routes/itau-status.js:115:        txid: inv.x_studio_itau_txid || null,
+/home/z/my-project/itau-odoo/routes/itau-status.js:121:        status: inv.x_studio_itau_boleto_status || 'N/A',
+/home/z/my-project/itau-odoo/routes/itau-status.js:122:        data_pagamento: inv.x_studio_itau_boleto_data_pagamento || null,
+/home/z/my-project/itau-odoo/routes/itau-status.js:123:        nosso_numero: inv.x_studio_itau_nosso_numero || null,
+/home/z/my-project/itau-odoo/routes/itau-status.js:124:        cancelado: inv.x_studio_boleto_cancelado || false,
+/home/z/my-project/itau-odoo/routes/itau-status.js:419:        domain.push(['x_studio_itau_tipo_pagamento', 'like', 'PIX']);
+/home/z/my-project/itau-odoo/routes/itau-status.js:421:        domain.push(['x_studio_itau_tipo_pagamento', 'like', 'BOLETO']);
+/home/z/my-project/itau-odoo/routes/itau-status.js:424:        domain.push(['x_studio_itau_tipo_pagamento', 'like', 'PIX']);
+/home/z/my-project/itau-odoo/routes/itau-status.js:425:        domain.push(['x_studio_itau_tipo_pagamento', 'like', 'BOLETO']);
+/home/z/my-project/itau-odoo/routes/itau-status.js:438:       'x_studio_itau_tipo_pagamento', 'x_studio_itau_situacao', 'x_studio_itau_status_pagamento',
+/home/z/my-project/itau-odoo/routes/itau-status.js:439:       'x_studio_itau_pix_status', 'x_studio_itau_boleto_status', 'x_studio_itau_txid',
+/home/z/my-project/itau-odoo/routes/itau-status.js:440:       'x_studio_itau_nosso_numero', 'x_studio_itau_pix_copia_cola']
+/home/z/my-project/itau-odoo/routes/itau-status.js:450:        tipo: inv.x_studio_itau_tipo_pagamento || 'N/A',
+/home/z/my-project/itau-odoo/routes/itau-status.js:451:        situacao: inv.x_studio_itau_situacao || 'N/A',
+/home/z/my-project/itau-odoo/routes/itau-status.js:452:        status_pagamento: inv.x_studio_itau_status_pagamento || 'N/A',
+/home/z/my-project/itau-odoo/routes/itau-status.js:453:        pix_status: inv.x_studio_itau_pix_status || null,
+/home/z/my-project/itau-odoo/routes/itau-status.js:454:        boleto_status: inv.x_studio_itau_boleto_status || null,
+/home/z/my-project/itau-odoo/routes/itau-status.js:455:        txid: inv.x_studio_itau_txid || null,
+/home/z/my-project/itau-odoo/routes/itau-status.js:456:        nosso_numero: inv.x_studio_itau_nosso_numero || null,
+/home/z/my-project/itau-odoo/routes/itau-status.js:506:      'x_studio_itau_tipo_pagamento',
+/home/z/my-project/itau-odoo/routes/itau-status.js:507:      'x_studio_itau_situacao',
+/home/z/my-project/itau-odoo/routes/itau-status.js:508:      'x_studio_itau_status_pagamento',
+/home/z/my-project/itau-odoo/routes/itau-status.js:509:      'x_studio_itau_pix_status',
+/home/z/my-project/itau-odoo/routes/itau-status.js:510:      'x_studio_itau_pix_data_pagamento',
+/home/z/my-project/itau-odoo/routes/itau-status.js:511:      'x_studio_itau_pix_e2e',
+/home/z/my-project/itau-odoo/routes/itau-status.js:512:      'x_studio_itau_txid',
+/home/z/my-project/itau-odoo/routes/itau-status.js:513:      'x_studio_itau_pix_copia_cola',
+/home/z/my-project/itau-odoo/routes/itau-status.js:514:      'x_studio_itau_boleto_status',
+/home/z/my-project/itau-odoo/routes/itau-status.js:515:      'x_studio_itau_boleto_data_pagamento',
+/home/z/my-project/itau-odoo/routes/itau-status.js:516:      'x_studio_itau_nosso_numero',
+/home/z/my-project/itau-odoo/routes/itau-status.js:517:      'x_studio_itau_link_status',
+/home/z/my-project/itau-odoo/routes/itau-status.js:518:      'x_studio_itau_boletos_html',
+/home/z/my-project/itau-odoo/routes/itau-status.js:519:      'x_studio_boleto_cancelado',
+/home/z/my-project/itau-odoo/routes/itau-status.js:555:        tem_txid: !!(invoices[0].x_studio_itau_txid),
+/home/z/my-project/itau-odoo/routes/itau-status.js:556:        tem_tipo_pagamento: !!(invoices[0].x_studio_itau_tipo_pagamento),
+/home/z/my-project/itau-odoo/routes/itau-status.js:557:        tem_situacao: !!(invoices[0].x_studio_itau_situacao),
+/home/z/my-project/itau-odoo/routes/itau-status.js:559:        pode_ser_encontrado_no_poll: !!(invoices[0].x_studio_itau_txid && invoices[0].x_studio_itau_tipo_pagamento),
+/home/z/my-project/itau-odoo/routes/itau-status.js:586:    // Testar se campos x_studio existem (tentar ler 1 invoice)
+/home/z/my-project/itau-odoo/routes/itau-status.js:594:          ['x_studio_itau_pix_status', 'x_studio_itau_boleto_status', 'x_studio_itau_status_pagamento', 'x_studio_itau_txid', 'x_studio_itau_tipo_pagamento']
+/home/z/my-project/itau-odoo/routes/itau-status.js:596:        camposMsg = 'Campos x_studio_itau_* encontrados no modelo account.move';
+/home/z/my-project/itau-odoo/routes/itau-status.js:602:      camposMsg = 'Campos x_studio_itau_* NÃO encontrados: ' + fieldErr.message;
+/home/z/my-project/itau-odoo/routes/itau-api.js:683:    var fields = await odooRpc('account.move', 'read', [[parseInt(odooId)], ['x_studio_itau_resposta_json']]);
+/home/z/my-project/itau-odoo/routes/itau-api.js:685:    if (fields && fields[0] && fields[0].x_studio_itau_resposta_json) {
+/home/z/my-project/itau-odoo/routes/itau-api.js:686:      rawJson = fields[0].x_studio_itau_resposta_json;
+/home/z/my-project/itau-odoo/routes/itau-api.js:738:      await odooRpc('account.move', 'write', [[parseInt(odooId)], { 'x_studio_boleto_cancelado': true }]);
+/home/z/my-project/itau-odoo/routes/cep.js:202:        // IBGE da cidade — gravar no campo x_studio_ibge se existir
+/home/z/my-project/itau-odoo/routes/cep.js:206:              [['model_id.model', '=', 'res.partner'], ['name', '=', 'x_studio_ibge']],
+/home/z/my-project/itau-odoo/routes/cep.js:210:              writeVals['x_studio_ibge'] = resultado.ibge_cidade;
+/home/z/my-project/itau-odoo/routes/cep.js:421:    // IBGE — gravar no campo x_studio_ibge se existir
+/home/z/my-project/itau-odoo/routes/cep.js:425:          [['model_id.model', '=', 'res.partner'], ['name', '=', 'x_studio_ibge']],
+/home/z/my-project/itau-odoo/routes/cep.js:429:          writeVals['x_studio_ibge'] = resultado.ibge_cidade;
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:2: * services/odoo-field-setup.js - Auto-setup de campos Itau no Odoo
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:4: * Cria automaticamente todos os campos x_studio_itau_* no model account.move
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:11: *   x_studio_itau_situacao           - Status Itau (EMITIDO/PAGO/CANCELADO/EXPIRADO/ERRO)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:12: *   x_studio_itau_status_pagamento   - Status Pagamento (PENDENTE/PAGO/CANCELADO/EXPIRADO)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:13: *   x_studio_itau_tipo_pagamento     - Tipo Pagamento (PIX/BOLETO/CARTAO)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:14: *   x_studio_itau_pix_status         - PIX Status (ATIVA/CONCLUIDA/REMOVIDA_PELO_PSP/EXPIRADA)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:15: *   x_studio_itau_pix_data_pagamento - PIX Data Pagamento (datetime)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:16: *   x_studio_itau_pix_e2e            - PIX End-to-End ID (char)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:17: *   x_studio_itau_txid               - PIX TXID (char)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:18: *   x_studio_itau_pix_copia_cola     - PIX Copia e Cola (text)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:19: *   x_studio_itau_nosso_numero       - Nosso Numero (char)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:20: *   x_studio_itau_boleto_status      - Boleto Status (EM_ABERTO/PAGO/CANCELADO/EXPIRADO)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:21: *   x_studio_itau_boleto_data_pagamento - Boleto Data Pagamento (date)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:22: *   x_studio_itau_link_status        - Link/PDF URL (char)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:23: *   x_studio_itau_boletos_html       - HTML with QR Code (html)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:24: *   x_studio_itau_resposta_json      - Resposta JSON (text)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:25: *   x_studio_boleto_cancelado        - Boleto Cancelado (boolean)
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:64:    name: 'x_studio_itau_situacao',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:70:    name: 'x_studio_itau_status_pagamento',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:76:    name: 'x_studio_itau_tipo_pagamento',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:82:    name: 'x_studio_itau_pix_status',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:88:    name: 'x_studio_itau_pix_data_pagamento',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:93:    name: 'x_studio_itau_pix_e2e',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:98:    name: 'x_studio_itau_txid',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:103:    name: 'x_studio_itau_pix_copia_cola',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:108:    name: 'x_studio_itau_nosso_numero',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:113:    name: 'x_studio_itau_boleto_status',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:119:    name: 'x_studio_itau_boleto_data_pagamento',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:124:    name: 'x_studio_itau_link_status',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:129:    name: 'x_studio_itau_boletos_html',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:134:    name: 'x_studio_itau_resposta_json',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:139:    name: 'x_studio_boleto_cancelado',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:157:    console.log('[FIELD-SETUP] Odoo desabilitado, pulando setup de campos');
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:161:  console.log('[FIELD-SETUP] Iniciando verificacao/criacao de campos Itau...');
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:169:    console.error('[FIELD-SETUP] Erro auth Odoo:', err.message);
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:180:    console.error('[FIELD-SETUP] Erro ao buscar model account.move:', err.message);
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:185:    console.error('[FIELD-SETUP] Modelo account.move nao encontrado');
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:204:    console.error('[FIELD-SETUP] Erro ao detectar campos existentes via search_read:', err.message);
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:208:  console.log('[FIELD-SETUP] ' + existingCount + ' campo(s) itau ja existem no Odoo');
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:220:      console.log('[FIELD-SETUP]   ' + fieldName + ': JA EXISTE');
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:246:      console.log('[FIELD-SETUP]   ' + fieldName + ': CRIADO (id=' + fieldId + ')');
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:251:        console.log('[FIELD-SETUP]   ' + fieldName + ': JA EXISTE (criacao recusada pelo Odoo)');
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:254:        console.error('[FIELD-SETUP]   ' + fieldName + ': ERRO - ' + err.message);
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:274:  console.log('[FIELD-SETUP] Resultado: ' + created + ' criados, ' + skipped + ' existentes, ' + errors + ' erros, view=' + (viewUpdated ? 'OK' : 'NAO'));
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:288:  console.log('[FIELD-SETUP] Verificando form view account.move...');
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:306:      console.log('[FIELD-SETUP] Nenhum form view account.move encontrado');
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:318:      console.log('[FIELD-SETUP] View herdada Itau ja existe (id=' + existingInheritIds[0] + ')');
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:329:      '          <field name="x_studio_itau_situacao"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:330:      '          <field name="x_studio_itau_status_pagamento"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:331:      '          <field name="x_studio_itau_tipo_pagamento"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:334:      '          <field name="x_studio_itau_txid"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:335:      '          <field name="x_studio_itau_pix_status"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:336:      '          <field name="x_studio_itau_pix_data_pagamento"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:337:      '          <field name="x_studio_itau_pix_e2e"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:338:      '          <field name="x_studio_itau_pix_copia_cola"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:343:      '          <field name="x_studio_itau_nosso_numero"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:344:      '          <field name="x_studio_itau_boleto_status"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:345:      '          <field name="x_studio_itau_boleto_data_pagamento"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:346:      '          <field name="x_studio_boleto_cancelado"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:349:      '          <field name="x_studio_itau_link_status"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:350:      '          <field name="x_studio_itau_boletos_html"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:351:      '          <field name="x_studio_itau_resposta_json"/>',
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:370:    console.log('[FIELD-SETUP] View herdada Itau criada (id=' + newViewId + ')');
+/home/z/my-project/itau-odoo/services/odoo-field-setup.js:374:    console.error('[FIELD-SETUP] Erro ao configurar form view:', err.message);
+/home/z/my-project/itau-odoo/services/consultflex-poll.js:4: * Polls Odoo sale.orders with x_studio_cf_status = 'pendente',
+/home/z/my-project/itau-odoo/services/consultflex-poll.js:65:      [['x_studio_cf_status', '=', 'pendente']],
+/home/z/my-project/itau-odoo/services/consultflex-poll.js:66:    ], { limit: MAX_PER_POLL, fields: ['x_studio_cf_cpfcnpj', 'x_studio_cf_tipo_pessoa', 'x_studio_cf_tipo_operacao', 'partner_id'] });
+/home/z/my-project/itau-odoo/services/consultflex-poll.js:83:    var cpfcnpj = (order.x_studio_cf_cpfcnpj || '').replace(/\D/g, '');
+/home/z/my-project/itau-odoo/services/consultflex-poll.js:84:    var tipoPessoa = order.x_studio_cf_tipo_pessoa || '';
+/home/z/my-project/itau-odoo/services/consultflex-poll.js:85:    var tipoOperacao = order.x_studio_cf_tipo_operacao || 'basico'; // 'basico' ou 'credito_total'
+/home/z/my-project/itau-odoo/services/consultflex-poll.js:109:            'x_studio_cf_status': 'erro',
+/home/z/my-project/itau-odoo/services/consultflex-poll.js:110:            'x_studio_resposta_consultflex': '<p style="color:red;font-weight:bold">Erro: CPF/CNPJ nao encontrado no pedido nem no parceiro.</p>'
+/home/z/my-project/itau-odoo/services/consultflex-poll.js:124:        'x_studio_cf_status': 'concluido',
+/home/z/my-project/itau-odoo/services/consultflex-poll.js:125:        'x_studio_resposta_consultflex': html,
+/home/z/my-project/itau-odoo/services/consultflex-poll.js:131:        writeVals['x_studio_cf_data_consulta'] = nowStr;
+/home/z/my-project/itau-odoo/services/consultflex-poll.js:143:            'x_studio_cf_status': 'erro',
+/home/z/my-project/itau-odoo/services/consultflex-poll.js:144:            'x_studio_resposta_consultflex': '<p style="color:red;font-weight:bold">Erro: ' + (cfErr.message || 'Erro desconhecido') + '</p>'
+/home/z/my-project/itau-odoo/services/odoo-push.js:9: * - Grava campos x_studio_* na fatura (situacao, tipo_pagamento, pix, nn, link)
+/home/z/my-project/itau-odoo/services/odoo-push.js:204:    // === GRAVAR CAMPOS x_studio_* NA FATURA ===
+/home/z/my-project/itau-odoo/services/odoo-push.js:220:      // x_studio_itau_situacao
+/home/z/my-project/itau-odoo/services/odoo-push.js:222:        camposWrite['x_studio_itau_situacao'] = 'emitido';
+/home/z/my-project/itau-odoo/services/odoo-push.js:224:        camposWrite['x_studio_itau_situacao'] = 'erro';
+/home/z/my-project/itau-odoo/services/odoo-push.js:227:      // x_studio_itau_tipo_pagamento
+/home/z/my-project/itau-odoo/services/odoo-push.js:228:      camposWrite['x_studio_itau_tipo_pagamento'] = 'BOLETO';
+/home/z/my-project/itau-odoo/services/odoo-push.js:230:      // x_studio_itau_pix_copia_cola
+/home/z/my-project/itau-odoo/services/odoo-push.js:232:        camposWrite['x_studio_itau_pix_copia_cola'] = pixList.join(' | ');
+/home/z/my-project/itau-odoo/services/odoo-push.js:235:      // x_studio_itau_nosso_numero
+/home/z/my-project/itau-odoo/services/odoo-push.js:237:        camposWrite['x_studio_itau_nosso_numero'] = nnList.join(' | ');
+/home/z/my-project/itau-odoo/services/odoo-push.js:240:      // x_studio_itau_link_status
+/home/z/my-project/itau-odoo/services/odoo-push.js:242:        camposWrite['x_studio_itau_link_status'] = linkList[0]; // Link do primeiro boleto
+/home/z/my-project/itau-odoo/services/odoo-push.js:247:        console.log('[ODOO-PUSH] Gravando campos x_studio_*:', keysWrite.join(', '));
+/home/z/my-project/itau-odoo/services/odoo-push.js:250:          console.log('[ODOO-PUSH] Campos x_studio_* gravados com sucesso na fatura', recordId);
+/home/z/my-project/itau-odoo/services/odoo-push.js:271:      console.error('[ODOO-PUSH] Erro ao gravar campos x_studio_*:', fieldsErr.message);
+/home/z/my-project/itau-odoo/services/odoo-push.js:286: * - Grava campos x_studio_* na fatura (tipo_pagamento, pix, html com QR code)
+/home/z/my-project/itau-odoo/services/odoo-push.js:354:    textFields['x_studio_itau_situacao'] = 'emitido';
+/home/z/my-project/itau-odoo/services/odoo-push.js:355:    textFields['x_studio_itau_tipo_pagamento'] = 'PIX';
+/home/z/my-project/itau-odoo/services/odoo-push.js:357:      textFields['x_studio_itau_txid'] = txid;
+/home/z/my-project/itau-odoo/services/odoo-push.js:361:      textFields['x_studio_itau_pix_copia_cola'] = pixCopiaCola;
+/home/z/my-project/itau-odoo/services/odoo-push.js:364:      textFields['x_studio_itau_boletos_html'] = htmlPix;
+/home/z/my-project/itau-odoo/services/nfe-cancelar-odoo.js:61:    [[Number(moveId)], ['name', 'state', 'x_studio_nfe_chave', 'x_studio_nfe_protocolo',
+/home/z/my-project/itau-odoo/services/nfe-cancelar-odoo.js:62:                        'x_studio_nfe_status', 'company_id']]);
+/home/z/my-project/itau-odoo/services/nfe-cancelar-odoo.js:66:  var chave     = (move.x_studio_nfe_chave || '').replace(/\D/g, '');
+/home/z/my-project/itau-odoo/services/nfe-cancelar-odoo.js:67:  var protocolo = String(move.x_studio_nfe_protocolo || '').trim();
+/home/z/my-project/itau-odoo/services/nfe-cancelar-odoo.js:68:  var status    = move.x_studio_nfe_status || '';
+/home/z/my-project/itau-odoo/services/nfe-cancelar-odoo.js:92:      x_studio_nfe_status: statusNovo,
+/home/z/my-project/itau-odoo/services/nfe-cancelar-odoo.js:93:      x_studio_nfe_protocolo: resultado.nProt || move.x_studio_nfe_protocolo,
+/home/z/my-project/itau-odoo/services/mapper-te.js:142:  var docNumber = (partner.x_studio_te_cnpj_cpf || partner.cnpj_cpf || partner.vat || '').replace(/\D/g, '');
+/home/z/my-project/itau-odoo/services/mapper-te.js:145:  var phone = formatPhone(partner.x_studio_te_telefone || partner.phone || '');
+/home/z/my-project/itau-odoo/services/mapper-te.js:147:  var rua = partner.x_studio_te_logradouro || partner.street || '';
+/home/z/my-project/itau-odoo/services/mapper-te.js:148:  var numero = partner.x_studio_te_numero || (partner.number ? String(partner.number) : '');
+/home/z/my-project/itau-odoo/services/mapper-te.js:149:  var complemento = partner.x_studio_te_complemento || partner.street2 || '';
+/home/z/my-project/itau-odoo/services/mapper-te.js:150:  var bairro = partner.x_studio_te_bairro || partner.district || '';
+/home/z/my-project/itau-odoo/services/mapper-te.js:151:  var cidade = partner.x_studio_te_municipio || partner.city || '';
+/home/z/my-project/itau-odoo/services/mapper-te.js:152:  var cep = (partner.x_studio_te_cep || partner.zip || '').replace(/\D/g, '');
+/home/z/my-project/itau-odoo/services/mapper-te.js:157:  var state = partner.x_studio_te_uf || extractState(partner.state_id);
+/home/z/my-project/itau-odoo/services/mapper-te.js:160:    Name: partner.x_studio_te_razao_social || partner.name || '',
+/home/z/my-project/itau-odoo/services/mapper-te.js:173:    Email: partner.x_studio_te_email || partner.email || '',
+/home/z/my-project/itau-odoo/services/mapper-te.js:176:    Latitude: partner.x_studio_te_latitude || null,
+/home/z/my-project/itau-odoo/services/mapper-te.js:177:    Longitude: partner.x_studio_te_longitude || null,
+/home/z/my-project/itau-odoo/services/mapper-te.js:311:  // Fallback para peso/volume de campos x_studio se nao calculou das linhas
+/home/z/my-project/itau-odoo/services/mapper-te.js:313:    totalWeight = parseFloat(picking.x_studio_te_peso_total) || (saleOrder && parseFloat(saleOrder.x_studio_te_peso_total)) || 0;
+/home/z/my-project/itau-odoo/services/mapper-te.js:316:    totalQty = parseInt(picking.x_studio_te_qtd_volumes) || (saleOrder && parseInt(saleOrder.x_studio_te_qtd_volumes)) || 1;
+/home/z/my-project/itau-odoo/services/mapper-te.js:325:  // Data de entrega: campo x_studio ou scheduled_date + 1 dia
+/home/z/my-project/itau-odoo/services/mapper-te.js:326:  var deliveryDate = picking.x_studio_te_data_entrega || (saleOrder && saleOrder.x_studio_te_data_entrega) || '';
+/home/z/my-project/itau-odoo/services/mapper-te.js:333:  var observation = picking.note || picking.x_studio_te_observacao || '';
+/home/z/my-project/itau-odoo/services/mapper-te.js:407:  if (teResponse.OrderID) data.x_studio_te_order_id = String(teResponse.OrderID);
+/home/z/my-project/itau-odoo/services/mapper-te.js:408:  if (teResponse.TrackingCode) data.x_studio_te_rastreio = teResponse.TrackingCode;
+/home/z/my-project/itau-odoo/services/mapper-te.js:418:  if (webhookData.OrderID) data.x_studio_te_order_id = String(webhookData.OrderID);
+/home/z/my-project/itau-odoo/services/mapper-te.js:423:      data.x_studio_te_situacao = lastStatus.Status;
+/home/z/my-project/itau-odoo/services/mapper-te.js:426:      data.x_studio_te_situacao_desc = lastStatus.StatusDescription;
+/home/z/my-project/itau-odoo/services/mapper-te.js:433:      data.x_studio_te_observacao = lastOcc.Observation;
+/home/z/my-project/itau-odoo/services/mapper-te.js:436:      data.x_studio_te_observacao = (data.x_studio_te_observacao ? data.x_studio_te_observacao + ' - ' : '') + lastOcc.OccurrenceName;
+/home/z/my-project/itau-odoo/services/odoo-te.js:14:    teCustomerId:   'x_studio_id_cliente_te',
+/home/z/my-project/itau-odoo/services/odoo-te.js:15:    teSendSms:      'x_studio_enviar_sms',
+/home/z/my-project/itau-odoo/services/odoo-te.js:16:    teSendEmail:    'x_studio_enviar_email',
+/home/z/my-project/itau-odoo/services/odoo-te.js:19:    teSync:         'x_studio_te_sync',
+/home/z/my-project/itau-odoo/services/odoo-te.js:20:    teOrderId:      'x_studio_te_order_id',
+
+[Showing results with pagination = limit: 250]
