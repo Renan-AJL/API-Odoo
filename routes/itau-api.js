@@ -188,6 +188,13 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
       return res.json({ success: false, message: 'Forma de pagamento nao suportada para boleto: ' + formaPag });
     }
 
+    // === ODOO-SIDE DEDUP: se a fatura ja tem boleto, NAO emitir de novo ===
+    var odooExisting = await checkOdooBoletoExists(faturaName, faturaId);
+    if (odooExisting) {
+      console.log('[API/PAGAR] ODOO-DEDUP: Fatura', faturaName, '(ID=' + faturaId + ') ja tem boleto NN=' + odooExisting.nosso_numero + ' — PULANDO');
+      return res.json({ success: true, dedup: true, message: 'Boleto ja existe para esta fatura', nosso_numero: odooExisting.nosso_numero, fatura_id: faturaId });
+    }
+
     var basePayload = {
       cpfCnpjPagador: pag.cpf_cnpj || d.pagador_cpf || '',
       nomePagador: pag.nome || d.pagador_nome || '',
@@ -308,6 +315,64 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
 var _boletoLocks = {};   // faturaId/faturaName -> Promise (in-flight)
 var _boletoCache = {};   // faturaId/faturaName -> { timestamp, response } (resultado recente)
 var BOLETO_LOCK_TTL = 60000;  // 60s - tempo maximo de lock
+
+// === ODOO-SIDE DEDUP (definitivo — sobrevive a restart do Render) ===
+// Checa no Odoo se a fatura ja tem x_studio_itau_nosso_numero preenchido.
+// Se sim, NAO emite novo boleto — evita triplicacao.
+var xmlrpcDedup = require('xmlrpc');
+async function checkOdooBoletoExists(faturaName, faturaId) {
+  var oc = config.odoo;
+  if (!oc || !oc.enabled || !oc.url) return null; // sem Odoo, nao pode checar
+  try {
+    var base = oc.url.replace(/\/+$/, '');
+    var host = base.replace('https://', '').replace('http://', '');
+    var common = xmlrpcDedup.createSecureClient({ host: host, path: '/xmlrpc/2/common', port: 443 });
+    var models = xmlrpcDedup.createSecureClient({ host: host, path: '/xmlrpc/2/object', port: 443 });
+
+    var uid = await new Promise(function(ok, fail) {
+      common.methodCall('authenticate', [oc.db, oc.user, oc.password, {}], function(e, r) {
+        if (e || !r) fail(e || new Error('auth failed')); else ok(r);
+      });
+    });
+
+    // Search by name or ID
+    var domain;
+    if (faturaId && faturaId > 0) {
+      domain = [['id', '=', faturaId]];
+    } else if (faturaName) {
+      domain = [['name', '=', faturaName], ['move_type', '=', 'out_invoice']];
+    } else {
+      return null;
+    }
+
+    var ids = await new Promise(function(ok, fail) {
+      models.methodCall('execute_kw', [oc.db, uid, oc.password, 'account.move', 'search', [domain], {limit: 1}], function(e, r) {
+        if (e) fail(e); else ok(r);
+      });
+    });
+
+    if (!ids || !ids.length) return null;
+
+    var records = await new Promise(function(ok, fail) {
+      models.methodCall('execute_kw', [oc.db, uid, oc.password, 'account.move', 'read', [ids, ['x_studio_itau_nosso_numero', 'x_studio_boleto_cancelado']]], function(e, r) {
+        if (e) fail(e); else ok(r);
+      });
+    });
+
+    if (records && records[0]) {
+      var nn = records[0].x_studio_itau_nosso_numero || '';
+      var canceled = records[0].x_studio_boleto_cancelado || false;
+      if (nn && !canceled) {
+        console.log('[ODOO-DEDUP] Fatura ' + (faturaName || faturaId) + ' JA TEM boleto: NN=' + nn + ' — PULANDO emissao');
+        return { nosso_numero: nn, id: records[0].id };
+      }
+    }
+    return null; // no existing boleto
+  } catch (err) {
+    console.warn('[ODOO-DEDUP] Erro ao checar Odoo (nao bloqueia emissao):', err.message);
+    return null;
+  }
+}
 var BOLETO_CACHE_TTL = 120000; // 120s - reusa resultado se Odoo reenviar
 
 /**
@@ -325,6 +390,16 @@ router.post('/gerar', async function(req, res) {
     var isPix = formaPag.trim().toUpperCase().indexOf('PIX') === 0;
     if (!isPix && fatName) {
       var boletoLockKey = fatName;
+
+      // === ODOO-SIDE DEDUP (definitivo — funciona mesmo apos restart do Render) ===
+      var odooExisting = await checkOdooBoletoExists(fatName, 0);
+      if (odooExisting) {
+        console.log('[API/GERAR] ODOO-DEDUP: Fatura', fatName, 'ja tem boleto NN=' + odooExisting.nosso_numero + ' — PULANDO');
+        var dedupResp = 'OK|0\nDEDUP|NN=' + odooExisting.nosso_numero;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        return res.send(dedupResp);
+      }
+
       // Se tem resultado cacheado (mesma fatura, menos de 120s atras), reusa
       if (_boletoCache[boletoLockKey]) {
         var cached = _boletoCache[boletoLockKey];
