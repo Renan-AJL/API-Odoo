@@ -140,8 +140,15 @@ function executeKw(model, method, args, kwargs) {
       var conn = getConn();
       var params = [conn.db, uid, conn.password, model, method, args || []];
       if (kwargs) params.push(kwargs);
-      conn.models.methodCall('execute_kw', params, function(err, result) {
-        if (err) { reject(new Error(model + '.' + method + ': ' + (err.message || JSON.stringify(err)))); }
+      // Debug log para metodos read/search (nao logar write/create com dados sensiveis)
+      if (method === 'read' || method === 'search' || method === 'search_read') {
+        logger.info('[ODOO-TE] executeKw: ' + model + '.' + method + ' args=' + JSON.stringify(args).substring(0, 200));
+      }
+      conn.models.methodCall('execute_kw', params, function(err8, result) {
+        if (err8) {
+          logger.error('[ODOO-TE] executeKw ERRO: ' + model + '.' + method + ': ' + (err8.message || JSON.stringify(err8)).substring(0, 300));
+          reject(new Error(model + '.' + method + ': ' + (err8.message || JSON.stringify(err8))));
+        }
         else { resolve(result); }
       });
     }).catch(reject);
@@ -383,10 +390,16 @@ async function updateInvoiceStatusHtml(invoiceId, html) {
 // ============================================================
 async function readInvoiceFull(invoiceId) {
   try {
+    logger.info('[ODOO-TE] readInvoiceFull: lendo account.move id=' + invoiceId);
     var results = await safeReadCustom('account.move', [invoiceId], INVOICE_FIELDS, INVOICE_CUSTOM_FIELDS);
+    if (results && results.length) {
+      logger.info('[ODOO-TE] readInvoiceFull OK: id=' + results[0].id + ' name=' + results[0].name + ' state=' + results[0].state);
+    } else {
+      logger.warn('[ODOO-TE] readInvoiceFull: safeReadCustom retornou vazio para id=' + invoiceId);
+    }
     return results ? results[0] : null;
   } catch (err) {
-    logger.warn('[ODOO-TE] readInvoiceFull falhou: ' + err.message);
+    logger.error('[ODOO-TE] readInvoiceFull falhou: ' + err.message + ' | stack: ' + (err.stack || '').substring(0, 200));
     return null;
   }
 }
