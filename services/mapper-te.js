@@ -347,7 +347,7 @@ function odooToTeDelivery(ctx) {
   } else {
     driver = {
       PhoneCountry: '55',
-      PhoneNumber: '99999999999',
+      PhoneNumber: '',
       DefineDriverAfter: 1,
     };
     logger.info('[MAPPER] Driver -> AUTO (TE atribui): DefineDriverAfter=1');
