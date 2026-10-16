@@ -686,6 +686,7 @@ router.post('/send-invoice', async (req, res) => {
     if (delivery.Documents && delivery.Documents.length) {
       chatterMsg += '<br/>NF: ' + (delivery.Documents[0].DocumentNumber || '');
     }
+    chatterMsg += '<br/>Motorista: ' + (teDriver ? '<b>' + motoristaName + '</b> (atribuido)' : motoristaName + ' (auto-atribuicao TE)');
     if (!saleOrder) {
       chatterMsg += '<br/><i>Sem sale.order vinculada — fluxo direto fatura</i>';
     }
