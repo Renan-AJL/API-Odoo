@@ -28,3 +28,33 @@
 - **Modificado**: crm_lead.py - writes independentes + diff-guard + retry
 - **Deploy**: Pushed to origin/main, Render deploy active (HTTP 200)
 - **Resultado esperado**: maioria dos write-backs vira no-op (diff-guard), raros writes reais passam a se auto-curar em colisao (retry), erros SerializationFailure cessam
+---
+Task ID: 1
+Agent: main
+Task: Fix TE send-invoice endpoint — Defect 1 (readInvoiceFull malformed XML-RPC) and Defect 2 (FIELD-SETUP broken detection)
+
+Work Log:
+- Explored codebase: found TE flow files in /home/z/my-project/itau-odoo/ (services/odoo-te.js, services/odoo-field-setup.js, routes/delivery.js, routes/webhook-te.js)
+- Analyzed all XML-RPC read/search_read calls in TE flow
+- Defect 1 Fix: Added flattenIds() helper to normalize IDs (handles int, [int], [[int]], [[int,"name"]], [int,int,...])
+- Defect 1 Fix: Updated read() wrapper to use flattenIds(ids)
+- Defect 1 Fix: Updated safeReadCustom() to use flattenIds(ids)
+- Defect 1 Fix: Changed searchRead() to use native Odoo search_read (single call) instead of search+read
+- Defect 1 Fix: Fixed findSaleOrderByInvoice estrategia 3: lineIds now uses flattenIds(rawLineIds)
+- Defect 1 Fix: Fixed getInvoiceLines: lineIds now uses flattenIds(inv.line_ids)
+- Defect 1 Fix: Fixed getProducts: uses flattenIds(productIds) for defensive safety
+- Defect 1 Fix: Changed delivery.js motorista read from direct executeKw to odooTe.read() wrapper
+- Defect 2 Fix: Changed FIELD-SETUP domain from model_id.model to model (char field direto)
+- Defect 2 Fix: Simplified kwargs fields to ['name', 'model', 'state'] per spec
+- Defect 2 Fix: Added detectionOk flag — if search_read fails, aborts creation to avoid duplicate errors
+- Defect 2 Fix: Added early return if all 15 fields exist (skips creation entirely)
+- Verified draft invoice handling already in place (409 response)
+- Verified nonexistent invoice handling already in place (404 response)
+- Verified ir.attachment uses 'raw' (not 'datas') in all files
+- All syntax checks passed (node -c)
+
+Stage Summary:
+- services/odoo-te.js: flattenIds() added, read/safeReadCustom/searchRead/getProducts/getInvoiceLines/findSaleOrderByInvoice all fixed
+- services/odoo-field-setup.js: domain changed to model (not model_id.model), detection failure aborts creation, early return when all fields exist
+- routes/delivery.js: motorista partner read uses odooTe.read() wrapper
+- All 15 x_studio_itau_* fields already exist — FIELD-SETUP will now detect them correctly and skip creation
