@@ -303,18 +303,19 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
   }
 
   // === METODO 1: Cash Management API (PATCH /boletos/{idBoleto}/baixa) ===
-  // idBoleto = Agencia(4) + ContaCorrente(7) + DAC(1) + Carteira(3) + NossoNumero(8)
-  // Conta <dash> DAC: e.g. 22338-9 -> 0223389 (7 chars) + 9 (DAC)
+  // idBoleto = Agencia(4) + ContaCorrenteComDAC(7) + Carteira(3) + NossoNumero(8) = 22 chars
+  // Conta <dash> DAC: e.g. 22338-9 -> contaCorrente=022338 + DAC=9 -> codConta=0223389
   var agencia = (config.banco.agencia || '7764').padStart(4, '0');
   var contaRaw = (config.banco.conta || '22338-9').replace(/-/g, ''); // "223389"
   var dac = contaRaw.length > 5 ? contaRaw.slice(-1) : '9'; // Ultimo digito e o DAC
   var contaPadded = contaRaw.slice(0, -1).padStart(6, '0'); // "022338"
-  var codConta = (contaPadded + dac).padStart(7, '0'); // "0223389"
+  var codConta = (contaPadded + dac).padStart(7, '0'); // "0223389" (7 chars, DAC ja incluido)
   var carteira = (config.banco.codigoCarteira || '109').padStart(3, '0');
   var nn = String(nossoNumero).padStart(8, '0');
-  var idBoleto = agencia + codConta + dac + carteira + nn;
-  // Formato: 4+7+1+3+8 = 23 caracteres
-  console.log('[BOLETO] idBoleto:', idBoleto, '(ag=' + agencia + ' conta=' + codConta + ' dac=' + dac + ' cart=' + carteira + ' nn=' + nn + ')');
+  // FIX: DAC ja esta em codConta (ultimo digito) — nao somar de novo
+  var idBoleto = agencia + codConta + carteira + nn;
+  // Formato: 4+7+3+8 = 22 caracteres
+  console.log('[BOLETO] idBoleto:', idBoleto, '(ag=' + agencia + ' conta=' + codConta + ' cart=' + carteira + ' nn=' + nn + ' len=' + idBoleto.length + ')');
 
   try {
     var response = await callCashManagementPatch(accessToken, '/boletos/' + idBoleto + '/baixa');
