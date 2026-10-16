@@ -630,9 +630,31 @@ router.post('/send-invoice', async (req, res) => {
     // 6. Le dados da empresa (remetente)
     const company = await odooTe.getCompany();
 
-    // 6b. Motorista: TE atribui automaticamente (DefineDriverAfter=1)
+    // 6b. Motorista: OBRIGATORIO — campo x_studio_motorista_te na invoice
     let motoristaName = null;
     let teDriver = null;
+
+    // Le o campo selection x_studio_motorista_te da fatura
+    const motoristaKey = invoice.x_studio_motorista_te || null;
+    if (!motoristaKey) {
+      console.warn('[TE-SEND-INVOICE] Fatura ' + invId + ' SEM motorista selecionado (x_studio_motorista_te vazio). Abortando envio.');
+      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - BLOQUEADO</b><br/>Fatura sem motorista selecionado no campo <i>Motorista TE</i>. Selecione um motorista antes de enviar.');
+      return res.status(400).json({ success: false, error: 'Fatura sem motorista selecionado. Selecione um motorista no campo Motorista TE antes de enviar ao TudoEntregue.' });
+    }
+    console.log('[TE-SEND-INVOICE] Motorista selecionado: ' + motoristaKey);
+
+    // Busca dados do motorista no TE (telefone para o Driver block)
+    motoristaName = motoristaKey;
+    try {
+      teDriver = await teClient.findDriverByName(motoristaKey);
+      if (teDriver) {
+        console.log('[TE-SEND-INVOICE] Driver encontrado no TE: Phone=' + teDriver.PhoneNumber);
+      } else {
+        console.warn('[TE-SEND-INVOICE] Motorista "' + motoristaKey + '" NAO encontrado no TE. Usando auto-atribuicao (DefineDriverAfter=1).');
+      }
+    } catch (err) {
+      console.warn('[TE-SEND-INVOICE] Erro ao buscar driver no TE: ' + err.message + '. Usando auto-atribuicao.');
+    }
 
     // 7. Mapeia para TE (picking sera sintetico pelo mapper se null)
     const delivery = Mapper.odooToTeDelivery({
@@ -644,8 +666,8 @@ router.post('/send-invoice', async (req, res) => {
       companyCnpj: config.empresa.cnpj,
       orderLines: orderLines,
       productsMap: productsMap,
-      motoristaName: null,
-      teDriver: null,
+      motoristaName: motoristaName,
+      teDriver: teDriver,
     });
     if (!delivery) {
       return res.status(500).json({ success: false, error: 'Falha no mapeamento dos dados' });

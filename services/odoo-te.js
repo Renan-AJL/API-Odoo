@@ -44,6 +44,7 @@ var FIELDS = {
     teOrderId:      'x_studio_te_order_id',
     teTrackingCode: 'x_studio_te_tracking_code',
     teSituation:    'x_studio_te_situacao',
+    teMotorista:    'x_studio_motorista_te',
   },
 };
 
@@ -91,7 +92,7 @@ var PICKING_CUSTOM_FIELDS = [
   'x_studio_motorista',
 ];
 var INVOICE_FIELDS = ['id', 'name', 'state', 'move_type', 'partner_id', 'invoice_date', 'amount_total', 'payment_state'];
-var INVOICE_CUSTOM_FIELDS = ['x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_status_de_entrega_te', 'x_studio_motorista'];
+var INVOICE_CUSTOM_FIELDS = ['x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_status_de_entrega_te', 'x_studio_motorista', 'x_studio_motorista_te'];
 var INVOICE_LINE_FIELDS = ['id', 'name', 'product_id', 'quantity', 'price_unit', 'price_subtotal'];
 
 var OPTIONAL_FIELDS = {

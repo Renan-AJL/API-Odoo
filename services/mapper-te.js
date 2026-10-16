@@ -336,13 +336,22 @@ function odooToTeDelivery(ctx) {
     observation += (observation ? ' | ' : '') + 'Valor: R$ ' + Number(amountTotal).toFixed(2).replace('.', ',');
   }
 
-  // Driver: TE atribui automaticamente (DefineDriverAfter=1)
-  var driver = {
-    PhoneCountry: '55',
-    PhoneNumber: '99999999999',
-    DefineDriverAfter: 1,
-  };
-  logger.info('[MAPPER] Driver -> AUTO (TE atribui): DefineDriverAfter=1');
+  // Driver: se teDriver fornecido (motorista real), usa dados reais; senao TE atribui automaticamente
+  var driver;
+  if (teDriver && teDriver.PhoneNumber) {
+    driver = {
+      PhoneCountry: teDriver.PhoneCountry || '55',
+      PhoneNumber: teDriver.PhoneNumber,
+    };
+    logger.info('[MAPPER] Driver -> REAL: ' + motoristaName + ' (Phone=' + teDriver.PhoneNumber + ')');
+  } else {
+    driver = {
+      PhoneCountry: '55',
+      PhoneNumber: '99999999999',
+      DefineDriverAfter: 1,
+    };
+    logger.info('[MAPPER] Driver -> AUTO (TE atribui): DefineDriverAfter=1');
+  }
 
   var delivery = {
     Customer: {
