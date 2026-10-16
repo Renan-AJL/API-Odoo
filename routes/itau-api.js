@@ -632,10 +632,11 @@ router.post('/cancelar', apiKeyAuth, async function(req, res) {
     }
     console.log('[API/CANCELAR] Cancelando boleto NN:', nn);
     var resultado = await cancelarBoleto(nn);
-    res.json({ success: true, message: 'Boleto cancelado com sucesso', dados: resultado.dados });
+    res.json({ success: true, message: 'Boleto cancelado com sucesso', dados: resultado.dados, metodo: resultado.metodo, idBoleto: resultado.idBoleto || undefined });
   } catch (err) {
     console.error('[API/CANCELAR] ERRO:', err.message);
-    res.status(500).json({ success: false, message: 'Erro ao cancelar boleto: ' + err.message });
+    // Retorna detalhes do erro para diagnostico
+    res.status(500).json({ success: false, message: 'Erro ao cancelar boleto: ' + err.message, hint: 'Cash Management API pode requerer credenciais separadas (clientId/cert) distintas do BoleCode/PIX. Verifique com o Itau se o escopo cash_management esta habilitado no seu registro.' });
   }
 });
 
