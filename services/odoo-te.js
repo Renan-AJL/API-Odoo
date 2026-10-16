@@ -155,14 +155,14 @@ var _customFieldsCache = {};
 
 async function safeReadCustom(model, ids, nativeFields, customFields) {
   try {
-    return await executeKw(model, 'read', [[ids, nativeFields.concat(customFields)]]);
+    return await executeKw(model, 'read', [ids, nativeFields.concat(customFields)]);
   } catch (err) {
     if (err.message && (err.message.indexOf('Invalid field') !== -1 || err.message.indexOf('KeyError') !== -1)) {
       if (!_customFieldsCache[model]) {
         _customFieldsCache[model] = { available: false, checked: true };
         logger.warn('[ODOO-TE] Campos x_studio_* nao encontrados em ' + model + '. Usando campos nativos.');
       }
-      return await executeKw(model, 'read', [[ids, nativeFields]]);
+      return await executeKw(model, 'read', [ids, nativeFields]);
     }
     throw err;
   }
@@ -194,7 +194,7 @@ async function safeWriteCustom(model, ids, vals) {
 // Compatibilidade com delivery.js — wrappers read/searchRead/write/getStudioFields
 // ============================================================
 async function read(model, ids, fields) {
-  return await executeKw(model, 'read', [[ids, fields]]);
+  return await executeKw(model, 'read', [ids, fields]);
 }
 
 async function searchRead(model, domain, fields, limit, offset, order) {
@@ -202,7 +202,7 @@ async function searchRead(model, domain, fields, limit, offset, order) {
   if (order) kwargs.order = order;
   var ids = await executeKw(model, 'search', [domain], kwargs);
   if (!ids || !ids.length) return [];
-  return await executeKw(model, 'read', [[ids, fields]]);
+  return await executeKw(model, 'read', [ids, fields]);
 }
 
 async function write(model, ids, values) {
@@ -232,7 +232,7 @@ async function readSaleOrderFull(orderId) {
 async function updateSaleOrderStatusHtml(orderId, html) {
   // Le o HTML atual e faz prepend do novo card (nao apaga historico)
   try {
-    var cur = await executeKw('sale.order', 'read', [[[orderId], ['x_studio_status_de_entrega_te']]]);
+    var cur = await executeKw('sale.order', 'read', [[orderId], ['x_studio_status_de_entrega_te']]);
     var existing = (cur && cur[0] && cur[0].x_studio_status_de_entrega_te) || '';
   } catch (e) { var existing = ''; }
   var combined = html;
@@ -276,7 +276,7 @@ async function readPicking(pickingId) {
 
 async function findDeliveryPicking(saleOrderId) {
   var ids = await executeKw('stock.picking', 'search', [
-    ['sale_id', '=', saleOrderId], ['picking_type_code', '=', 'outgoing'],
+    [['sale_id', '=', saleOrderId], ['picking_type_code', '=', 'outgoing']]
   ], { limit: 1 });
   if (!ids || !ids.length) return null;
   var pickings = await safeReadCustom('stock.picking', ids, PICKING_FIELDS, PICKING_CUSTOM_FIELDS);
@@ -305,7 +305,7 @@ async function findSaleOrderByInvoice(invoiceId) {
   try {
     var saleIds = await executeKw('sale.order', 'search', [['invoice_ids', 'in', [invoiceId]]]);
     if (saleIds && saleIds.length) {
-      var orders = await executeKw('sale.order', 'read', [[saleIds, ['id', 'name']]]);
+      var orders = await executeKw('sale.order', 'read', [saleIds, ['id', 'name']]);
       if (orders && orders[0]) { console.log('[ODOO-TE] Estrategia 1 (invoice_ids) encontrou: ' + orders[0].name); return orders[0]; }
     }
     console.log('[ODOO-TE] Estrategia 1 (invoice_ids): sem resultados');
@@ -313,12 +313,12 @@ async function findSaleOrderByInvoice(invoiceId) {
 
   // Estrategia 2: sale_order_ids da fatura (campo computado)
   try {
-    var invData = await executeKw('account.move', 'read', [[[invoiceId], ['id', 'partner_id', 'sale_order_ids']]]);
+    var invData = await executeKw('account.move', 'read', [[invoiceId], ['id', 'partner_id', 'sale_order_ids']]);
     var inv = invData && invData[0];
     console.log('[ODOO-TE] Fatura lida: id=' + (inv ? inv.id : 'null') + ', partner=' + JSON.stringify(inv ? inv.partner_id : null) + ', sale_order_ids=' + JSON.stringify(inv ? inv.sale_order_ids : null));
     if (inv && inv.sale_order_ids && inv.sale_order_ids.length) {
       var soId = Array.isArray(inv.sale_order_ids[0]) ? inv.sale_order_ids[0][0] : inv.sale_order_ids[0];
-      var orders = await executeKw('sale.order', 'read', [[[soId], ['id', 'name']]]);
+      var orders = await executeKw('sale.order', 'read', [[soId], ['id', 'name']]);
       if (orders && orders[0]) { console.log('[ODOO-TE] Estrategia 2 (sale_order_ids) encontrou: ' + orders[0].name); return orders[0]; }
     }
     console.log('[ODOO-TE] Estrategia 2 (sale_order_ids): sem resultados');
@@ -326,21 +326,21 @@ async function findSaleOrderByInvoice(invoiceId) {
 
   // Estrategia 3: account.move.line -> sale_line_ids -> order_id
   try {
-    var invData = await executeKw('account.move', 'read', [[[invoiceId], ['line_ids']]]);
+    var invData = await executeKw('account.move', 'read', [[invoiceId], ['line_ids']]);
     var inv = invData && invData[0];
     var lineIds = (inv && inv.line_ids) || [];
     console.log('[ODOO-TE] Estrategia 3: ' + lineIds.length + ' linhas da fatura');
     if (lineIds.length) {
-      var lines = await executeKw('account.move.line', 'read', [[lineIds, ['sale_line_ids']]]);
+      var lines = await executeKw('account.move.line', 'read', [lineIds, ['sale_line_ids']]);
       if (lines) {
         for (var i = 0; i < lines.length; i++) {
           var sli = lines[i].sale_line_ids;
           if (sli && sli.length) {
             var saleLineId = Array.isArray(sli[0]) ? sli[0][0] : sli[0];
-            var saleLines = await executeKw('sale.order.line', 'read', [[[saleLineId], ['order_id']]]);
+            var saleLines = await executeKw('sale.order.line', 'read', [[saleLineId], ['order_id']]);
             if (saleLines && saleLines[0] && saleLines[0].order_id) {
               var orderId = Array.isArray(saleLines[0].order_id) ? saleLines[0].order_id[0] : saleLines[0].order_id;
-              var orders = await executeKw('sale.order', 'read', [[[orderId], ['id', 'name']]]);
+              var orders = await executeKw('sale.order', 'read', [[orderId], ['id', 'name']]);
               if (orders && orders[0]) { console.log('[ODOO-TE] Estrategia 3 (lines) encontrou: ' + orders[0].name); return orders[0]; }
             }
           }
@@ -368,7 +368,7 @@ async function markInvoiceSynced(invoiceIds, teOrderId) {
 async function updateInvoiceStatusHtml(invoiceId, html) {
   // Le o HTML atual e faz prepend do novo card (nao apaga historico)
   try {
-    var cur = await executeKw('account.move', 'read', [[[invoiceId], ['x_studio_status_de_entrega_te']]]);
+    var cur = await executeKw('account.move', 'read', [[invoiceId], ['x_studio_status_de_entrega_te']]);
     var existing = (cur && cur[0] && cur[0].x_studio_status_de_entrega_te) || '';
   } catch (e) { var existing = ''; }
   var combined = html;
@@ -396,7 +396,7 @@ async function getInvoiceLines(invoiceId) {
     // Evita account.move.line.search — Odoo 19.2 SaaS tem override de
     // search_fetch com _get_recon_limit_from_domain que rejeita certos dominios.
     // Em vez disso, le line_ids direto da fatura.
-    var invData = await executeKw('account.move', 'read', [[[invoiceId], ['line_ids']]]);
+    var invData = await executeKw('account.move', 'read', [[invoiceId], ['line_ids']]);
     var inv = invData && invData[0];
     if (!inv || !inv.line_ids || !inv.line_ids.length) return [];
 
@@ -405,7 +405,7 @@ async function getInvoiceLines(invoiceId) {
       return Array.isArray(item) ? item[0] : item;
     });
 
-    var lines = await executeKw('account.move.line', 'read', [[lineIds, INVOICE_LINE_FIELDS]]);
+    var lines = await executeKw('account.move.line', 'read', [lineIds, INVOICE_LINE_FIELDS]);
     if (!lines || !lines.length) return [];
 
     // Filtra apenas linhas com produto (product_id != false)
@@ -437,7 +437,7 @@ async function getSaleOrderLines(saleOrderId) {
   try {
     var ids = await executeKw('sale.order.line', 'search', [['order_id', '=', saleOrderId]]);
     if (!ids || !ids.length) return [];
-    return await executeKw('sale.order.line', 'read', [[ids, ORDER_LINE_FIELDS]]);
+    return await executeKw('sale.order.line', 'read', [ids, ORDER_LINE_FIELDS]);
   } catch (err) {
     logger.warn('[ODOO-TE] Erro lendo sale.order.line: ' + err.message);
     return [];
@@ -447,7 +447,7 @@ async function getSaleOrderLines(saleOrderId) {
 async function getProducts(productIds) {
   if (!productIds || !productIds.length) return {};
   try {
-    var products = await executeKw('product.product', 'read', [[productIds, PRODUCT_FIELDS]]);
+    var products = await executeKw('product.product', 'read', [productIds, PRODUCT_FIELDS]);
     var map = {};
     if (products) products.forEach(function(p) { map[p.id] = p; });
     return map;
@@ -466,11 +466,11 @@ async function getCompany() {
     if (!ids || !ids.length) return null;
     // Tenta com campos opcionais primeiro
     try {
-      return (await executeKw('res.company', 'read', [[ids, ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id',
-                 'phone', 'email', 'partner_id', 'vat', 'district', 'number']]]))[0] || null;
+      return (await executeKw('res.company', 'read', [ids, ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id',
+                 'phone', 'email', 'partner_id', 'vat', 'district', 'number']]))[0] || null;
     } catch (err) {
       // Fallback: campos nativos garantidos
-      return (await executeKw('res.company', 'read', [[ids, ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id', 'phone', 'email', 'partner_id', 'vat']]]))[0] || null;
+      return (await executeKw('res.company', 'read', [ids, ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id', 'phone', 'email', 'partner_id', 'vat']]))[0] || null;
     }
   } catch (err) {
     logger.warn('[ODOO-TE] Erro lendo res.company: ' + err.message);

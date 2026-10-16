@@ -549,7 +549,12 @@ router.post('/send-invoice', async (req, res) => {
     if (!invoice) {
       return res.status(404).json({ success: false, error: 'Fatura ' + invId + ' nao encontrada' });
     }
-    console.log('[TE-SEND-INVOICE] Fatura: ' + invoice.name + ' (id=' + invoice.id + ', partner=' + JSON.stringify(invoice.partner_id) + ')');
+    console.log('[TE-SEND-INVOICE] Fatura: ' + invoice.name + ' (id=' + invoice.id + ', state=' + invoice.state + ', partner=' + JSON.stringify(invoice.partner_id) + ')');
+
+    // Rejeita fatura em rascunho — TE exige fatura postada (state=posted, move_type=out_invoice)
+    if (invoice.state === 'draft') {
+      return res.status(409).json({ success: false, error: 'Fatura ' + invId + ' esta em rascunho (draft). Poste a fatura antes de enviar ao TE.' });
+    }
 
     // 2. Le o partner da fatura (usa getPartner com safeReadCustom — fallback automatico)
     const partnerId = invoice.partner_id ? (Array.isArray(invoice.partner_id) ? invoice.partner_id[0] : invoice.partner_id) : null;
@@ -648,7 +653,7 @@ router.post('/send-invoice', async (req, res) => {
           console.log('[TE-SEND-INVOICE] Motorista many2one: ID=' + motoristaId + ' Nome=' + motoristaNome);
           // Tenta ler telefone do partner
           try {
-            var motoristaPartner = await odooTe.executeKw('res.partner', 'read', [[[motoristaId], ['name', 'phone', 'mobile']]]);
+            var motoristaPartner = await odooTe.executeKw('res.partner', 'read', [[motoristaId], ['name', 'phone', 'mobile']]);
             if (motoristaPartner && motoristaPartner[0]) {
               driverPhone = motoristaPartner[0].phone || motoristaPartner[0].mobile || null;
               console.log('[TE-SEND-INVOICE] Phone do partner: ' + (driverPhone || 'N/A'));

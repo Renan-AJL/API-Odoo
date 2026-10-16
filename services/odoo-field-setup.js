@@ -187,48 +187,21 @@ async function setupItauFields() {
   }
   var modelId = modelIds[0];
 
-  // List existing itau fields
+  // Detect ALL existing fields in one search_read call
+  var NOMES = FIELDS_TO_CREATE.map(function(f) { return f.name; });
   var existingFields = {};
   try {
-    var existingIds = await odooExec(oc, odooHost, odooUid, 'ir.model.fields', 'search', [
-      [['model_id.model', '=', 'account.move'], ['name', 'like', 'itau']]
-    ]);
-    if (existingIds && existingIds.length > 0) {
-      var existingData = await odooExec(oc, odooHost, odooUid, 'ir.model.fields', 'read', [
-        existingIds, { fields: ['name', 'field_description', 'ttype'] }
-      ]);
+    var existingData = await odooExec(oc, odooHost, odooUid, 'ir.model.fields', 'search_read',
+      [[['name', 'in', NOMES], ['model_id.model', 'in', ['account.move', 'account.bank.statement.line']]]],
+      { fields: ['name', 'model', 'state', 'field_description', 'ttype'] }
+    );
+    if (existingData && existingData.length > 0) {
       for (var e = 0; e < existingData.length; e++) {
         existingFields[existingData[e].name] = existingData[e];
       }
     }
-
-    // Also check x_studio_itau prefix
-    var studioIds = await odooExec(oc, odooHost, odooUid, 'ir.model.fields', 'search', [
-      [['model_id.model', '=', 'account.move'], ['name', 'like', 'x_studio_itau']]
-    ]);
-    if (studioIds && studioIds.length > 0) {
-      var studioData = await odooExec(oc, odooHost, odooUid, 'ir.model.fields', 'read', [
-        studioIds, { fields: ['name', 'field_description', 'ttype'] }
-      ]);
-      for (var s = 0; s < studioData.length; s++) {
-        existingFields[studioData[s].name] = studioData[s];
-      }
-    }
-
-    // Check x_studio_boleto
-    var boletoIds = await odooExec(oc, odooHost, odooUid, 'ir.model.fields', 'search', [
-      [['model_id.model', '=', 'account.move'], ['name', '=', 'x_studio_boleto_cancelado']]
-    ]);
-    if (boletoIds && boletoIds.length > 0) {
-      var boletoData = await odooExec(oc, odooHost, odooUid, 'ir.model.fields', 'read', [
-        boletoIds, { fields: ['name', 'field_description', 'ttype'] }
-      ]);
-      for (var b = 0; b < boletoData.length; b++) {
-        existingFields[boletoData[b].name] = boletoData[b];
-      }
-    }
   } catch (err) {
-    console.error('[FIELD-SETUP] Erro ao listar campos existentes:', err.message);
+    console.error('[FIELD-SETUP] Erro ao detectar campos existentes via search_read:', err.message);
   }
 
   var existingCount = Object.keys(existingFields).length;
@@ -273,8 +246,14 @@ async function setupItauFields() {
       console.log('[FIELD-SETUP]   ' + fieldName + ': CRIADO (id=' + fieldId + ')');
       created++;
     } catch (err) {
-      console.error('[FIELD-SETUP]   ' + fieldName + ': ERRO - ' + err.message);
-      errors++;
+      // Se o campo ja existe (Field names must be unique), conta como skipped
+      if (err.message && err.message.indexOf('unique') !== -1) {
+        console.log('[FIELD-SETUP]   ' + fieldName + ': JA EXISTE (criacao recusada pelo Odoo)');
+        skipped++;
+      } else {
+        console.error('[FIELD-SETUP]   ' + fieldName + ': ERRO - ' + err.message);
+        errors++;
+      }
     }
   }
 
@@ -310,17 +289,17 @@ async function setupItauFormView(oc, host, uid) {
 
   try {
     // Find the main account.move form view
-    var viewIds = await odooExec(oc, host, uid, 'ir.ui.view', 'search', [
-      [['model', '=', 'account.move'], ['type', '=', 'form'], ['inherit_id', '=', false]],
+    var viewIds = await odooExec(oc, host, uid, 'ir.ui.view', 'search',
+      [[['model', '=', 'account.move'], ['type', '=', 'form'], ['inherit_id', '=', false]]],
       { limit: 1 }
-    ]);
+    );
 
     if (!viewIds || viewIds.length === 0) {
       // Try finding any account.move form view
-      viewIds = await odooExec(oc, host, uid, 'ir.ui.view', 'search', [
-        [['model', '=', 'account.move'], ['type', '=', 'form']],
+      viewIds = await odooExec(oc, host, uid, 'ir.ui.view', 'search',
+        [[['model', '=', 'account.move'], ['type', '=', 'form']]],
         { limit: 1 }
-      ]);
+      );
     }
 
     if (!viewIds || viewIds.length === 0) {
@@ -331,9 +310,9 @@ async function setupItauFormView(oc, host, uid) {
     var mainViewId = viewIds[0];
 
     // Check if we already have an inherited view with itau fields
-    var existingInheritIds = await odooExec(oc, host, uid, 'ir.ui.view', 'search', [
-      [['model', '=', 'account.move'], ['type', '=', 'form'], ['name', 'like', 'Itau']]
-    ]);
+    var existingInheritIds = await odooExec(oc, host, uid, 'ir.ui.view', 'search',
+      [[['model', '=', 'account.move'], ['type', '=', 'form'], ['name', 'like', 'Itau']]]
+    );
 
     if (existingInheritIds && existingInheritIds.length > 0) {
       console.log('[FIELD-SETUP] View herdada Itau ja existe (id=' + existingInheritIds[0] + ')');
