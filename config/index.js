@@ -34,6 +34,7 @@ const config = {
     bolecodeBaseUrl: process.env.ITAU_BOLECODE_URL || process.env.ITAU_PRODUCAO_URL || 'https://secure.api.itau/pix_recebimentos_conciliacoes/v2',
     pixBaseUrl: process.env.ITAU_PIX_URL || process.env.ITAU_PIX_BASE_URL || 'https://secure.api.itau/pix_recebimentos/',
     pixChave: process.env.ITAU_PIX_CHAVE || process.env.ITAU_PIX_KEY || '',
+    cashManagementBaseUrl: process.env.ITAU_CASH_MANAGEMENT_URL || 'https://secure.api.itau/cash_management/v2',
   },
 
   banco: {
@@ -117,14 +118,27 @@ const config = {
   sieg: {
     clientId: process.env.SIEG_CLIENT_ID || '',
     clientSecret: process.env.SIEG_CLIENT_SECRET || '',
+    oauthToken: process.env.SIEG_OAUTH_TOKEN || '',
+    apiKey: process.env.SIEG_API_KEY || '',
+    callbackUrl: process.env.SIEG_CALLBACK_URL || '',
     tpAmb: process.env.SIEG_TP_AMB || '2', // 1=producao, 2=homologacao
   },
+  BASE_URL: process.env.BASE_URL || '',
 
   // --- CNP Ja ---
   cnpjaApiBase: cnpjaApiBase,
   cnpjaApiToken: cnpjaApiToken,
   cnpjaUsingCommercial: !!cnpjaApiToken,
   cnpjaTimeout: parseInt(process.env.CNPJA_TIMEOUT, 10) || 15000,
+
+  // --- ConsultFlex (Analise de Credito) ---
+  consultflex: {
+    apiKey: process.env.CONSULTFLEX_API_KEY || '',
+    apiUrl: process.env.CONSULTFLEX_API_URL || 'https://api.consultflex.com.br/json/service.aspx',
+  },
+
+  // --- CEP Webhook (segredo exclusivo para automacao Python do Odoo) ---
+  cepWebhookSecret: process.env.CEP_WEBHOOK_SECRET || '',
 };
 
 // Warnings

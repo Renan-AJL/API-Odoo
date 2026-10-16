@@ -141,12 +141,56 @@ function executeKw(model, method, args, kwargs) {
       var conn = getConn();
       var params = [conn.db, uid, conn.password, model, method, args || []];
       if (kwargs) params.push(kwargs);
-      conn.models.methodCall('execute_kw', params, function(err, result) {
-        if (err) { reject(new Error(model + '.' + method + ': ' + (err.message || JSON.stringify(err)))); }
+      // Debug log para metodos read/search (nao logar write/create com dados sensiveis)
+      if (method === 'read' || method === 'search' || method === 'search_read') {
+        logger.info('[ODOO-TE] executeKw: ' + model + '.' + method + ' args=' + JSON.stringify(args).substring(0, 200));
+      }
+      conn.models.methodCall('execute_kw', params, function(err8, result) {
+        if (err8) {
+          logger.error('[ODOO-TE] executeKw ERRO: ' + model + '.' + method + ': ' + (err8.message || JSON.stringify(err8)).substring(0, 300));
+          reject(new Error(model + '.' + method + ': ' + (err8.message || JSON.stringify(err8))));
+        }
         else { resolve(result); }
       });
     }).catch(reject);
   });
+}
+
+// ============================================================
+// flattenIds — normaliza IDs para Odoo XML-RPC read()
+// Odoo exige args = [[id1, id2, ...], [field1, field2, ...]]
+// IDs podem chegar como: 111, [111], [[111]], [[111,"name"]], [111,222,...]
+// Retorna sempre flat array de inteiros: [111, 222, ...]
+// ============================================================
+function flattenIds(ids) {
+  if (!ids) return [];
+  // Single integer
+  if (typeof ids === 'number') return [ids];
+  // Not an array — try parseInt
+  if (!Array.isArray(ids)) {
+    var n = parseInt(ids, 10);
+    return isNaN(n) ? [] : [n];
+  }
+  // Flat array — check first element
+  if (ids.length === 0) return [];
+  var first = ids[0];
+  // [111, 222, ...] — flat int array
+  if (typeof first === 'number') return ids;
+  // ["111", ...] — flat string array
+  if (typeof first === 'string') return ids.map(function(x) { return parseInt(x, 10); }).filter(function(n) { return !isNaN(n); });
+  // [[111, "name"], ...] or [[111], ...] — nested (Many2one pair or nested array)
+  if (Array.isArray(first)) {
+    return ids.map(function(item) {
+      if (typeof item === 'number') return item;
+      if (Array.isArray(item) && item.length > 0) {
+        var inner = typeof item[0] === 'number' ? item[0] : parseInt(item[0], 10);
+        return isNaN(inner) ? null : inner;
+      }
+      var n = parseInt(item, 10);
+      return isNaN(n) ? null : n;
+    }).filter(function(x) { return x !== null && x !== undefined; });
+  }
+  return ids;
 }
 
 // ============================================================
@@ -155,15 +199,17 @@ function executeKw(model, method, args, kwargs) {
 var _customFieldsCache = {};
 
 async function safeReadCustom(model, ids, nativeFields, customFields) {
+  var flatIds = flattenIds(ids);
+  if (!flatIds.length) return [];
   try {
-    return await executeKw(model, 'read', [ids], { fields: nativeFields.concat(customFields) });
+    return await executeKw(model, 'read', [flatIds, nativeFields.concat(customFields)]);
   } catch (err) {
     if (err.message && (err.message.indexOf('Invalid field') !== -1 || err.message.indexOf('KeyError') !== -1)) {
       if (!_customFieldsCache[model]) {
         _customFieldsCache[model] = { available: false, checked: true };
         logger.warn('[ODOO-TE] Campos x_studio_* nao encontrados em ' + model + '. Usando campos nativos.');
       }
-      return await executeKw(model, 'read', [ids], { fields: nativeFields });
+      return await executeKw(model, 'read', [flatIds, nativeFields]);
     }
     throw err;
   }
@@ -195,15 +241,16 @@ async function safeWriteCustom(model, ids, vals) {
 // Compatibilidade com delivery.js — wrappers read/searchRead/write/getStudioFields
 // ============================================================
 async function read(model, ids, fields) {
-  return await executeKw(model, 'read', [ids], { fields: fields });
+  var flatIds = flattenIds(ids);
+  if (!flatIds.length) return [];
+  return await executeKw(model, 'read', [flatIds, fields]);
 }
 
 async function searchRead(model, domain, fields, limit, offset, order) {
-  var kwargs = { fields: fields, limit: limit || 0, offset: offset || 0 };
+  // Usa search_read nativo do Odoo — um unico XML-RPC call em vez de search+read
+  var kwargs = { fields: fields, limit: limit || 80, offset: offset || 0 };
   if (order) kwargs.order = order;
-  var ids = await executeKw(model, 'search', [domain], kwargs);
-  if (!ids || !ids.length) return [];
-  return await executeKw(model, 'read', [ids], { fields: fields });
+  return await executeKw(model, 'search_read', [domain], kwargs);
 }
 
 async function write(model, ids, values) {
@@ -233,7 +280,7 @@ async function readSaleOrderFull(orderId) {
 async function updateSaleOrderStatusHtml(orderId, html) {
   // Le o HTML atual e faz prepend do novo card (nao apaga historico)
   try {
-    var cur = await executeKw('sale.order', 'read', [[orderId]], { fields: ['x_studio_status_de_entrega_te'] });
+    var cur = await executeKw('sale.order', 'read', [[orderId], ['x_studio_status_de_entrega_te']]);
     var existing = (cur && cur[0] && cur[0].x_studio_status_de_entrega_te) || '';
   } catch (e) { var existing = ''; }
   var combined = html;
@@ -277,7 +324,7 @@ async function readPicking(pickingId) {
 
 async function findDeliveryPicking(saleOrderId) {
   var ids = await executeKw('stock.picking', 'search', [
-    ['sale_id', '=', saleOrderId], ['picking_type_code', '=', 'outgoing'],
+    [['sale_id', '=', saleOrderId], ['picking_type_code', '=', 'outgoing']]
   ], { limit: 1 });
   if (!ids || !ids.length) return null;
   var pickings = await safeReadCustom('stock.picking', ids, PICKING_FIELDS, PICKING_CUSTOM_FIELDS);
@@ -306,7 +353,7 @@ async function findSaleOrderByInvoice(invoiceId) {
   try {
     var saleIds = await executeKw('sale.order', 'search', [['invoice_ids', 'in', [invoiceId]]]);
     if (saleIds && saleIds.length) {
-      var orders = await executeKw('sale.order', 'read', [saleIds], { fields: ['id', 'name'] });
+      var orders = await executeKw('sale.order', 'read', [saleIds, ['id', 'name']]);
       if (orders && orders[0]) { console.log('[ODOO-TE] Estrategia 1 (invoice_ids) encontrou: ' + orders[0].name); return orders[0]; }
     }
     console.log('[ODOO-TE] Estrategia 1 (invoice_ids): sem resultados');
@@ -314,12 +361,12 @@ async function findSaleOrderByInvoice(invoiceId) {
 
   // Estrategia 2: sale_order_ids da fatura (campo computado)
   try {
-    var invData = await executeKw('account.move', 'read', [[invoiceId]], { fields: ['id', 'partner_id', 'sale_order_ids'] });
+    var invData = await executeKw('account.move', 'read', [[invoiceId], ['id', 'partner_id', 'sale_order_ids']]);
     var inv = invData && invData[0];
     console.log('[ODOO-TE] Fatura lida: id=' + (inv ? inv.id : 'null') + ', partner=' + JSON.stringify(inv ? inv.partner_id : null) + ', sale_order_ids=' + JSON.stringify(inv ? inv.sale_order_ids : null));
     if (inv && inv.sale_order_ids && inv.sale_order_ids.length) {
       var soId = Array.isArray(inv.sale_order_ids[0]) ? inv.sale_order_ids[0][0] : inv.sale_order_ids[0];
-      var orders = await executeKw('sale.order', 'read', [[soId]], { fields: ['id', 'name'] });
+      var orders = await executeKw('sale.order', 'read', [[soId], ['id', 'name']]);
       if (orders && orders[0]) { console.log('[ODOO-TE] Estrategia 2 (sale_order_ids) encontrou: ' + orders[0].name); return orders[0]; }
     }
     console.log('[ODOO-TE] Estrategia 2 (sale_order_ids): sem resultados');
@@ -327,21 +374,22 @@ async function findSaleOrderByInvoice(invoiceId) {
 
   // Estrategia 3: account.move.line -> sale_line_ids -> order_id
   try {
-    var invData = await executeKw('account.move', 'read', [[invoiceId]], { fields: ['line_ids'] });
+    var invData = await executeKw('account.move', 'read', [[invoiceId], ['line_ids']]);
     var inv = invData && invData[0];
-    var lineIds = (inv && inv.line_ids) || [];
-    console.log('[ODOO-TE] Estrategia 3: ' + lineIds.length + ' linhas da fatura');
+    var rawLineIds = (inv && inv.line_ids) || [];
+    var lineIds = flattenIds(rawLineIds);
+    console.log('[ODOO-TE] Estrategia 3: ' + lineIds.length + ' linhas da fatura (raw=' + rawLineIds.length + ')');
     if (lineIds.length) {
-      var lines = await executeKw('account.move.line', 'read', [lineIds], { fields: ['sale_line_ids'] });
+      var lines = await executeKw('account.move.line', 'read', [lineIds, ['sale_line_ids']]);
       if (lines) {
         for (var i = 0; i < lines.length; i++) {
           var sli = lines[i].sale_line_ids;
           if (sli && sli.length) {
             var saleLineId = Array.isArray(sli[0]) ? sli[0][0] : sli[0];
-            var saleLines = await executeKw('sale.order.line', 'read', [[saleLineId]], { fields: ['order_id'] });
+            var saleLines = await executeKw('sale.order.line', 'read', [[saleLineId], ['order_id']]);
             if (saleLines && saleLines[0] && saleLines[0].order_id) {
               var orderId = Array.isArray(saleLines[0].order_id) ? saleLines[0].order_id[0] : saleLines[0].order_id;
-              var orders = await executeKw('sale.order', 'read', [[orderId]], { fields: ['id', 'name'] });
+              var orders = await executeKw('sale.order', 'read', [[orderId], ['id', 'name']]);
               if (orders && orders[0]) { console.log('[ODOO-TE] Estrategia 3 (lines) encontrou: ' + orders[0].name); return orders[0]; }
             }
           }
@@ -369,7 +417,7 @@ async function markInvoiceSynced(invoiceIds, teOrderId) {
 async function updateInvoiceStatusHtml(invoiceId, html) {
   // Le o HTML atual e faz prepend do novo card (nao apaga historico)
   try {
-    var cur = await executeKw('account.move', 'read', [[invoiceId]], { fields: ['x_studio_status_de_entrega_te'] });
+    var cur = await executeKw('account.move', 'read', [[invoiceId], ['x_studio_status_de_entrega_te']]);
     var existing = (cur && cur[0] && cur[0].x_studio_status_de_entrega_te) || '';
   } catch (e) { var existing = ''; }
   var combined = html;
@@ -384,11 +432,19 @@ async function updateInvoiceStatusHtml(invoiceId, html) {
 // ============================================================
 async function readInvoiceFull(invoiceId) {
   try {
+    logger.info('[ODOO-TE] readInvoiceFull: lendo account.move id=' + invoiceId);
     var results = await safeReadCustom('account.move', [invoiceId], INVOICE_FIELDS, INVOICE_CUSTOM_FIELDS);
-    return results ? results[0] : null;
-  } catch (err) {
-    logger.warn('[ODOO-TE] readInvoiceFull falhou: ' + err.message);
+    if (results && results.length) {
+      logger.info('[ODOO-TE] readInvoiceFull OK: id=' + results[0].id + ' name=' + results[0].name + ' state=' + results[0].state);
+      return results[0];
+    }
+    // Resultado vazio = registro nao existe ou sem acesso
+    logger.warn('[ODOO-TE] readInvoiceFull: account.move id=' + invoiceId + ' nao encontrado ou sem acesso');
     return null;
+  } catch (err) {
+    // NAO engolir silenciosamente — repassar o erro para a rota
+    logger.error('[ODOO-TE] readInvoiceFull falhou: ' + err.message);
+    throw err;
   }
 }
 
@@ -397,16 +453,15 @@ async function getInvoiceLines(invoiceId) {
     // Evita account.move.line.search — Odoo 19.2 SaaS tem override de
     // search_fetch com _get_recon_limit_from_domain que rejeita certos dominios.
     // Em vez disso, le line_ids direto da fatura.
-    var invData = await executeKw('account.move', 'read', [[invoiceId]], { fields: ['line_ids'] });
+    var invData = await executeKw('account.move', 'read', [[invoiceId], ['line_ids']]);
     var inv = invData && invData[0];
     if (!inv || !inv.line_ids || !inv.line_ids.length) return [];
 
-    // line_ids pode vir como [id, id, ...] ou [[id, name], ...]
-    var lineIds = inv.line_ids.map(function(item) {
-      return Array.isArray(item) ? item[0] : item;
-    });
+    // line_ids pode vir como [id, id, ...] ou [[id, name], ...] ou [[id], ...]
+    // flattenIds normaliza para flat array de inteiros
+    var lineIds = flattenIds(inv.line_ids);
 
-    var lines = await executeKw('account.move.line', 'read', [lineIds], { fields: INVOICE_LINE_FIELDS });
+    var lines = await executeKw('account.move.line', 'read', [lineIds, INVOICE_LINE_FIELDS]);
     if (!lines || !lines.length) return [];
 
     // Filtra apenas linhas com produto (product_id != false)
@@ -438,7 +493,7 @@ async function getSaleOrderLines(saleOrderId) {
   try {
     var ids = await executeKw('sale.order.line', 'search', [['order_id', '=', saleOrderId]]);
     if (!ids || !ids.length) return [];
-    return await executeKw('sale.order.line', 'read', [ids], { fields: ORDER_LINE_FIELDS });
+    return await executeKw('sale.order.line', 'read', [ids, ORDER_LINE_FIELDS]);
   } catch (err) {
     logger.warn('[ODOO-TE] Erro lendo sale.order.line: ' + err.message);
     return [];
@@ -448,7 +503,9 @@ async function getSaleOrderLines(saleOrderId) {
 async function getProducts(productIds) {
   if (!productIds || !productIds.length) return {};
   try {
-    var products = await executeKw('product.product', 'read', [productIds], { fields: PRODUCT_FIELDS });
+    var flatIds = flattenIds(productIds);
+    if (!flatIds.length) return {};
+    var products = await executeKw('product.product', 'read', [flatIds, PRODUCT_FIELDS]);
     var map = {};
     if (products) products.forEach(function(p) { map[p.id] = p; });
     return map;
@@ -467,15 +524,11 @@ async function getCompany() {
     if (!ids || !ids.length) return null;
     // Tenta com campos opcionais primeiro
     try {
-      return (await executeKw('res.company', 'read', [ids], {
-        fields: ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id',
-                 'phone', 'email', 'partner_id', 'vat', 'district', 'number'],
-      }))[0] || null;
+      return (await executeKw('res.company', 'read', [ids, ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id',
+                 'phone', 'email', 'partner_id', 'vat', 'district', 'number']]))[0] || null;
     } catch (err) {
       // Fallback: campos nativos garantidos
-      return (await executeKw('res.company', 'read', [ids], {
-        fields: ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id', 'phone', 'email', 'partner_id', 'vat'],
-      }))[0] || null;
+      return (await executeKw('res.company', 'read', [ids, ['name', 'street', 'street2', 'city', 'state_id', 'zip', 'country_id', 'phone', 'email', 'partner_id', 'vat']]))[0] || null;
     }
   } catch (err) {
     logger.warn('[ODOO-TE] Erro lendo res.company: ' + err.message);
@@ -536,7 +589,7 @@ async function findPickingByTeId(teOrderId) {
     var pickings = await safeReadCustom('stock.picking', ids, PICKING_FIELDS, PICKING_CUSTOM_FIELDS);
     return pickings ? pickings[0] : null;
   } catch (err) {
-    if (err.message && err.message.indexOf('Invalid field') !== -1) return null;
+    if (err.message && (err.message.indexOf('Invalid field') !== -1 || err.message.indexOf('invalid item in domain') !== -1)) return null;
     throw err;
   }
 }
@@ -547,7 +600,7 @@ async function findSaleOrderByTeId(teOrderId) {
     var orders = await safeReadCustom('sale.order', ids, SALE_ORDER_FIELDS, SALE_ORDER_CUSTOM_FIELDS);
     return orders ? orders[0] : null;
   } catch (err) {
-    if (err.message && err.message.indexOf('Invalid field') !== -1) return null;
+    if (err.message && (err.message.indexOf('Invalid field') !== -1 || err.message.indexOf('invalid item in domain') !== -1)) return null;
     throw err;
   }
 }
@@ -622,4 +675,5 @@ module.exports = {
   // Low-level
   executeKw: executeKw,
   safeWriteCustom: safeWriteCustom,
+  flattenIds: flattenIds,
 };

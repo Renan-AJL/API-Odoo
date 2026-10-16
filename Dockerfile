@@ -3,6 +3,9 @@ FROM node:20-alpine
 LABEL maintainer="odoo-middleware-unified"
 WORKDIR /app
 
+# openssl: necessario para ler PFX/A1 com PBES2-AES (ICP-Brasil recente)
+RUN apk add --no-cache openssl
+
 COPY package*.json ./
 RUN npm install --omit=dev
 

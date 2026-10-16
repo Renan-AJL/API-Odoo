@@ -8,12 +8,14 @@
 const express = require('express');
 const router = express.Router();
 const { apiKeyAuth } = require('../middleware/auth');
-const { emitirBoleto, parseFormaPagamento } = require('../services/itau-boleto');
+const { emitirBoleto, parseFormaPagamento, cancelarBoleto } = require('../services/itau-boleto');
 const { storeBoleto, generatePdf, generatePdfFromFields } = require('../services/pdf-boleto');
 const { pushBoletosToOdoo, pushPixToOdoo } = require('../services/odoo-push');
 const { criarLinkPagamento } = require('../services/itau-link-pagamento');
 const { criarCobrancaPix, consultarCobrancaPix } = require('../services/itau-pix');
 const { buildDevedorFromDoc } = require('../utils/pix-devedor');
+const { buscarExtratoNormalizado } = require('../services/itau-extrato');
+const { criarExtrato } = require('../services/odoo-bank-statement');
 const config = require('../config');
 const bwipjs = require('bwip-js');
 
@@ -186,6 +188,13 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
       return res.json({ success: false, message: 'Forma de pagamento nao suportada para boleto: ' + formaPag });
     }
 
+    // === ODOO-SIDE DEDUP: se a fatura ja tem boleto, NAO emitir de novo ===
+    var odooExisting = await checkOdooBoletoExists(faturaName, faturaId);
+    if (odooExisting) {
+      console.log('[API/PAGAR] ODOO-DEDUP: Fatura', faturaName, '(ID=' + faturaId + ') ja tem boleto NN=' + odooExisting.nosso_numero + ' — PULANDO');
+      return res.json({ success: true, dedup: true, message: 'Boleto ja existe para esta fatura', nosso_numero: odooExisting.nosso_numero, fatura_id: faturaId });
+    }
+
     var basePayload = {
       cpfCnpjPagador: pag.cpf_cnpj || d.pagador_cpf || '',
       nomePagador: pag.nome || d.pagador_nome || '',
@@ -301,8 +310,74 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
   }
 });
 
+// === Lock anti-concorrencia BOLETO ===
+// Impede que o Odoo dispare multiplas requisicoes de boleto simultaneas pra mesma fatura
+var _boletoLocks = {};   // faturaId/faturaName -> Promise (in-flight)
+var _boletoCache = {};   // faturaId/faturaName -> { timestamp, response } (resultado recente)
+var BOLETO_LOCK_TTL = 60000;  // 60s - tempo maximo de lock
+
+// === ODOO-SIDE DEDUP (definitivo — sobrevive a restart do Render) ===
+// Checa no Odoo se a fatura ja tem x_studio_itau_nosso_numero preenchido.
+// Se sim, NAO emite novo boleto — evita triplicacao.
+var xmlrpcDedup = require('xmlrpc');
+async function checkOdooBoletoExists(faturaName, faturaId) {
+  var oc = config.odoo;
+  if (!oc || !oc.enabled || !oc.url) return null; // sem Odoo, nao pode checar
+  try {
+    var base = oc.url.replace(/\/+$/, '');
+    var host = base.replace('https://', '').replace('http://', '');
+    var common = xmlrpcDedup.createSecureClient({ host: host, path: '/xmlrpc/2/common', port: 443 });
+    var models = xmlrpcDedup.createSecureClient({ host: host, path: '/xmlrpc/2/object', port: 443 });
+
+    var uid = await new Promise(function(ok, fail) {
+      common.methodCall('authenticate', [oc.db, oc.user, oc.password, {}], function(e, r) {
+        if (e || !r) fail(e || new Error('auth failed')); else ok(r);
+      });
+    });
+
+    // Search by name or ID
+    var domain;
+    if (faturaId && faturaId > 0) {
+      domain = [['id', '=', faturaId]];
+    } else if (faturaName) {
+      domain = [['name', '=', faturaName], ['move_type', '=', 'out_invoice']];
+    } else {
+      return null;
+    }
+
+    var ids = await new Promise(function(ok, fail) {
+      models.methodCall('execute_kw', [oc.db, uid, oc.password, 'account.move', 'search', [domain], {limit: 1}], function(e, r) {
+        if (e) fail(e); else ok(r);
+      });
+    });
+
+    if (!ids || !ids.length) return null;
+
+    var records = await new Promise(function(ok, fail) {
+      models.methodCall('execute_kw', [oc.db, uid, oc.password, 'account.move', 'read', [ids, ['x_studio_itau_nosso_numero', 'x_studio_boleto_cancelado']]], function(e, r) {
+        if (e) fail(e); else ok(r);
+      });
+    });
+
+    if (records && records[0]) {
+      var nn = records[0].x_studio_itau_nosso_numero || '';
+      var canceled = records[0].x_studio_boleto_cancelado || false;
+      if (nn && !canceled) {
+        console.log('[ODOO-DEDUP] Fatura ' + (faturaName || faturaId) + ' JA TEM boleto: NN=' + nn + ' — PULANDO emissao');
+        return { nosso_numero: nn, id: records[0].id };
+      }
+    }
+    return null; // no existing boleto
+  } catch (err) {
+    console.warn('[ODOO-DEDUP] Erro ao checar Odoo (nao bloqueia emissao):', err.message);
+    return null;
+  }
+}
+var BOLETO_CACHE_TTL = 120000; // 120s - reusa resultado se Odoo reenviar
+
 /**
  * POST /api/v1/itau/gerar - Simplificado para Odoo Server Actions
+ * COM dedup/lock: se a mesma fatura ja tem boleto emitido recentemente, reusa o resultado
  */
 router.post('/gerar', async function(req, res) {
   try {
@@ -310,12 +385,57 @@ router.post('/gerar', async function(req, res) {
     var fatName = req.body.fatura_name || '';
     var fatValor = parseFloat(req.body.fatura_valor) || 0;
     var fatVenc = req.body.fatura_vencimento || '';
+
+    // === DEDUPLICACAO BOLETO: verificar se ja tem requisicao em curso ou resultado recente ===
+    var isPix = formaPag.trim().toUpperCase().indexOf('PIX') === 0;
+    if (!isPix && fatName) {
+      var boletoLockKey = fatName;
+
+      // === ODOO-SIDE DEDUP (definitivo — funciona mesmo apos restart do Render) ===
+      var odooExisting = await checkOdooBoletoExists(fatName, 0);
+      if (odooExisting) {
+        console.log('[API/GERAR] ODOO-DEDUP: Fatura', fatName, 'ja tem boleto NN=' + odooExisting.nosso_numero + ' — PULANDO');
+        var dedupResp = 'OK|0\nDEDUP|NN=' + odooExisting.nosso_numero;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        return res.send(dedupResp);
+      }
+
+      // Se tem resultado cacheado (mesma fatura, menos de 120s atras), reusa
+      if (_boletoCache[boletoLockKey]) {
+        var cached = _boletoCache[boletoLockKey];
+        var age = Date.now() - cached.timestamp;
+        if (age < BOLETO_CACHE_TTL) {
+          console.log('[API/GERAR] REUSANDO boleto cacheado (' + (age / 1000).toFixed(1) + 's atras) para', boletoLockKey);
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          return res.send(cached.response);
+        }
+        delete _boletoCache[boletoLockKey];
+      }
+      // Se tem requisicao em curso, espera ela terminar
+      if (_boletoLocks[boletoLockKey]) {
+        console.log('[API/GERAR] AGUARDANDO lock boleto existente para', boletoLockKey);
+        try {
+          var cachedResult = await _boletoLocks[boletoLockKey];
+          console.log('[API/GERAR] Lock boleto liberado, retornando resultado da requisicao original');
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          return res.send(cachedResult);
+        } catch (lockErr) {
+          console.log('[API/GERAR] Requisicao boleto original falhou, tentando novamente...');
+        }
+      }
+    }
     var pagNome = req.body.pagador_nome || '';
     var pagCpf = req.body.pagador_cpf || '';
     var pagStreet = req.body.pagador_street || '';
     var pagCity = req.body.pagador_city || '';
     var pagState = req.body.pagador_state || '';
     var pagZip = req.body.pagador_zip || '';
+
+    // Criar lock boleto (para dedup)
+    var _boletoLockResolve;
+    if (!isPix && fatName) {
+      _boletoLocks[boletoLockKey] = new Promise(function(resolve) { _boletoLockResolve = resolve; });
+    }
 
     // === PIX ===
     if (formaPag.trim().toUpperCase().indexOf('PIX') === 0) {
@@ -409,10 +529,23 @@ router.post('/gerar', async function(req, res) {
       );
     }
 
+    var responseText = lines.join('\n');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.send(lines.join('\n'));
+    res.send(responseText);
+
+    // Cache boleto result para dedup (evita triplicacao se Odoo reenviar)
+    if (!isPix && fatName && boletoLockKey) {
+      _boletoCache[boletoLockKey] = { timestamp: Date.now(), response: responseText };
+      if (_boletoLockResolve) _boletoLockResolve(responseText);
+      delete _boletoLocks[boletoLockKey];
+    }
   } catch (e) {
     console.error('[API/GERAR] ERRO:', e.message);
+    // Libera lock em caso de erro
+    if (!isPix && fatName && boletoLockKey) {
+      if (_boletoLockResolve) _boletoLockResolve('ERRO|' + e.message);
+      delete _boletoLocks[boletoLockKey];
+    }
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.send('ERRO|' + e.message);
   }
@@ -557,24 +690,7 @@ async function handlePix(req, res, d) {
       (pixCopiaCola ? '<div style="font-size:10px; color:#999; word-break:break-all; max-width:400px; margin:0 auto; line-height:1.4;">' + pixCopiaCola + '</div>' : '') +
       '</div>';
 
-    // Push PIX para Odoo (grava campos x_studio_*)
-    var pushResult = { pushed: false, reason: 'not_called' };
-    try {
-      pushResult = await pushPixToOdoo({
-        faturaId: faturaId,
-        faturaName: faturaName,
-        valor: valorTotal.toFixed(2).replace('.', ','),
-        pix: {
-          txid: pixResult.txid || '',
-          pix_copia_cola: pixCopiaCola,
-          qrcode_base64: qrcodeBase64,
-          html_pix: htmlPix,
-        },
-      });
-    } catch (pushErr) {
-      pushResult = { pushed: false, reason: pushErr.message };
-    }
-
+    // Montar responseData ANTES do push (responde pro Odoo imediatamente)
     var responseData = {
       success: true,
       data: {
@@ -593,7 +709,7 @@ async function handlePix(req, res, d) {
           qrcode_base64: qrcodeBase64,
           html_pix: htmlPix,
         }],
-        odoo_push: pushResult.pushed ? 'OK' : 'falhou_' + (pushResult.reason || 'unknown'),
+        odoo_push: 'pending',
       },
     };
 
@@ -602,6 +718,7 @@ async function handlePix(req, res, d) {
     delete _pixLocks[lockKey];
     lockResolve(responseData);
 
+    // Responde pro Odoo IMEDIATAMENTE (o modulo Odoo grava os campos)
     res.json(responseData);
   } catch (err) {
     console.error('[API/PIX] ERRO:', err.message);
@@ -634,6 +751,135 @@ router.get('/pix/status/:txid', async function(req, res) {
   }
 });
 
+// === CANCELAR BOLETO ===
+// POST /api/v1/itau/cancelar
+// Body: { nosso_numero: string }
+// Cancela um boleto no Itau (baixa por cancelamento)
+router.post('/cancelar', apiKeyAuth, async function(req, res) {
+  try {
+    var nn = req.body.nosso_numero || '';
+    if (!nn) {
+      return res.status(400).json({ success: false, message: 'nosso_numero obrigatorio' });
+    }
+    console.log('[API/CANCELAR] Cancelando boleto NN:', nn);
+    var resultado = await cancelarBoleto(nn);
+    res.json({ success: true, message: 'Boleto cancelado com sucesso', dados: resultado.dados, metodo: resultado.metodo, idBoleto: resultado.idBoleto || undefined });
+  } catch (err) {
+    console.error('[API/CANCELAR] ERRO:', err.message);
+    // Retorna detalhes do erro para diagnostico
+    res.status(500).json({ success: false, message: 'Erro ao cancelar boleto: ' + err.message, hint: 'Cash Management API pode requerer credenciais separadas (clientId/cert) distintas do BoleCode/PIX. Verifique com o Itau se o escopo cash_management esta habilitado no seu registro.' });
+  }
+});
+
+// GET /api/v1/itau/cancelar/web?odoo_id=XXX
+// Le resposta_json do Odoo, cancela boletos no Itau, posta resultado no chatter e redireciona de volta
+router.get('/cancelar/web', async function(req, res) {
+  var odooId = req.query.odoo_id || '';
+  var oc = config.odoo;
+  var returnUrl = (oc && oc.url ? oc.url.replace(/\/+$/, '') : '') + '/web#id=' + odooId + '&model=account.move&view_type=form';
+
+  function odooRpc(model, method, args, kwargs) {
+    var xmlrpc = require('xmlrpc');
+    var base = oc.url.replace(/\/+$/, '');
+    var host = base.replace('https://', '');
+    var commonCli = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/common', port: 443 });
+    var modelsCli = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/object', port: 443 });
+    return new Promise(function(ok, fail) {
+      commonCli.methodCall('authenticate', [oc.db, oc.user, oc.password, {}], function(e, uid) {
+        if (e || !uid) return fail(e || new Error('auth failed'));
+        var params = [oc.db, uid, oc.password, model, method, args || []];
+        if (kwargs) params.push(kwargs);
+        modelsCli.methodCall('execute_kw', params, function(e2, r) {
+          if (e2) fail(e2); else ok(r);
+        });
+      });
+    });
+  }
+
+  function postChatter(recordId, bodyHtml) {
+    return odooRpc('mail.message', 'create', [{
+      model: 'account.move',
+      res_id: parseInt(recordId),
+      body: bodyHtml,
+      message_type: 'comment',
+    }]);
+  }
+
+  if (!odooId || !oc || !oc.enabled || !oc.url || !oc.db || !oc.user || !oc.password) {
+    return res.redirect(returnUrl);
+  }
+
+  try {
+    var nossoNumeros = [];
+    console.log('[CANCELAR-WEB] Lendo resposta_json da fatura ID:', odooId);
+    var fields = await odooRpc('account.move', 'read', [[parseInt(odooId)], ['x_studio_itau_resposta_json']]);
+    var rawJson = '';
+    if (fields && fields[0] && fields[0].x_studio_itau_resposta_json) {
+      rawJson = fields[0].x_studio_itau_resposta_json;
+    }
+    if (!rawJson) {
+      await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Fatura nao possui dados de boleto.</span>');
+      return res.redirect(returnUrl);
+    }
+
+    var jsonStr = rawJson.replace(/'/g, '"').replace(/True/g, 'true').replace(/False/g, 'false').replace(/None/g, 'null');
+    var data = JSON.parse(jsonStr);
+    var pagamentos = data.pagamentos || [];
+    if (pagamentos.length === 0) {
+      await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Nenhum pagamento encontrado.</span>');
+      return res.redirect(returnUrl);
+    }
+    for (var i = 0; i < pagamentos.length; i++) {
+      if (pagamentos[i].nosso_numero) nossoNumeros.push(pagamentos[i].nosso_numero);
+    }
+    if (nossoNumeros.length === 0) {
+      await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Nenhum nosso numero encontrado.</span>');
+      return res.redirect(returnUrl);
+    }
+
+    console.log('[CANCELAR-WEB] Cancelando', nossoNumeros.length, 'boleto(s):', nossoNumeros.join(', '));
+    var resultados = [];
+    for (var i = 0; i < nossoNumeros.length; i++) {
+      try {
+        await cancelarBoleto(nossoNumeros[i]);
+        resultados.push({ nn: nossoNumeros[i], ok: true });
+      } catch (err) {
+        resultados.push({ nn: nossoNumeros[i], ok: false, erro: err.message });
+      }
+    }
+
+    var sucesso = resultados.filter(function(r) { return r.ok; }).length;
+    var falha = resultados.filter(function(r) { return !r.ok; }).length;
+    var chatBody = '<b>Cancelar Boleto</b><br/>';
+    if (falha === 0) {
+      chatBody += '<span style="color:green">' + sucesso + ' boleto(s) cancelado(s) com sucesso no Itau.</span>';
+    } else if (sucesso === 0) {
+      chatBody += '<span style="color:red">Falha ao cancelar todos os boletos:</span><br/>';
+      for (var i = 0; i < resultados.length; i++) chatBody += 'NN ' + resultados[i].nn + ': ' + resultados[i].erro + '<br/>';
+    } else {
+      chatBody += '<span style="color:orange">' + sucesso + ' cancelado(s), ' + falha + ' falha(s):</span><br/>';
+      for (var i = 0; i < resultados.length; i++) {
+        if (!resultados[i].ok) chatBody += 'NN ' + resultados[i].nn + ': ' + resultados[i].erro + '<br/>';
+      }
+    }
+    chatBody += '<br/><small>NN: ' + nossoNumeros.join(', ') + '</small>';
+
+    await postChatter(odooId, chatBody);
+
+    try {
+      await odooRpc('account.move', 'write', [[parseInt(odooId)], { 'x_studio_boleto_cancelado': true }]);
+    } catch (wErr) {
+      console.warn('[CANCELAR-WEB] Aviso:', wErr.message);
+    }
+
+    res.redirect(returnUrl);
+  } catch (err) {
+    console.error('[CANCELAR-WEB] ERRO:', err.message);
+    try { await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Erro: ' + err.message + '</span>'); } catch(e) {}
+    res.redirect(returnUrl);
+  }
+});
+
 // === CHECKOUT DE CARTAO ===
 var checkoutPage = require('../views/checkout-page');
 var linkPagService = require('../services/itau-link-pagamento');
@@ -661,6 +907,88 @@ router.post('/checkout/:orderId/pay', async function(req, res) {
       returnMessage: err.message,
       detail: err.detail,
     });
+  }
+});
+
+// ============================================================
+// EXTRATO BANCARIO — Importacao para Odoo
+// ============================================================
+
+// POST /api/v1/itau/extrato/importar
+// Body: { data_inicial?: "YYYY-MM-DD", data_final?: "YYYY-MM-DD" }
+// Se nao informar, busca ontem (D-1)
+router.post('/extrato/importar', async function(req, res) {
+  try {
+    var ontem = new Date(Date.now() - 24 * 3600000);
+    var di = req.body.data_inicial || ontem.toISOString().substring(0, 10);
+    var df = req.body.data_final || di;
+
+    console.log('[EXTRATO-IMPORT] Buscando extrato: ' + di + ' ate ' + df);
+    var transacoes = await buscarExtratoNormalizado(di, df);
+
+    if (!transacoes.length) {
+      return res.json({ success: true, message: 'Extrato vazio (' + di + ' a ' + df + ')', transacoes: 0 });
+    }
+
+    // Cria o extrato no Odoo
+    var resultado = await criarExtrato(df, transacoes);
+
+    res.json({
+      success: true,
+      message: transacoes.length + ' transacoes importadas para o diario ' + resultado.journalName,
+      transacoes: transacoes.length,
+      saldo: resultado.balance,
+      statement_id: resultado.statementId,
+    });
+  } catch (err) {
+    console.error('[EXTRATO-IMPORT] ERRO:', err.message);
+    res.status(500).json({ success: false, message: 'Erro ao importar extrato: ' + err.message });
+  }
+});
+
+// GET /api/v1/itau/extrato/preview
+// Preview do extrato (nao cria no Odoo)
+router.get('/extrato/preview', async function(req, res) {
+  try {
+    var di = req.query.data_inicial || new Date(Date.now() - 24 * 3600000).toISOString().substring(0, 10);
+    var df = req.query.data_final || di;
+
+    var transacoes = await buscarExtratoNormalizado(di, df);
+    res.json({ success: true, data_inicial: di, data_final: df, transacoes: transacoes });
+  } catch (err) {
+    console.error('[EXTRATO-PREVIEW] ERRO:', err.message);
+    res.status(500).json({ success: false, message: 'Erro ao buscar extrato: ' + err.message });
+  }
+});
+
+// GET /api/v1/itau/extrato/cron — Chamada diaria automatica
+// Protegido por secret separado (CRON_SECRET)
+router.get('/extrato/cron', async function(req, res) {
+  var cronSecret = process.env.ODOO_BANK_STATEMENT_IMPORT_CRON_SECRET || '';
+  if (!cronSecret || req.query.secret !== cronSecret) {
+    return res.status(403).json({ success: false, message: 'Secret invalido' });
+  }
+
+  try {
+    var ontem = new Date(Date.now() - 24 * 3600000);
+    var di = ontem.toISOString().substring(0, 10);
+    var df = di;
+
+    console.log('[EXTRATO-CRON] Execucao automatica diaria: ' + di);
+    var transacoes = await buscarExtratoNormalizado(di, df);
+
+    if (!transacoes.length) {
+      console.log('[EXTRATO-CRON] Nenhuma transacao em ' + di);
+      return res.json({ success: true, message: 'Extrato vazio', transacoes: 0 });
+    }
+
+    var resultado = await criarExtrato(df, transacoes);
+    console.log('[EXTRATO-CRON] Extrato criado: ' + resultado.statementId + ' (' + transacoes.length + ' linhas)');
+
+    res.json({ success: true, transacoes: transacoes.length, statement_id: resultado.statementId, saldo: resultado.balance });
+  } catch (err) {
+    console.error('[EXTRATO-CRON] ERRO:', err.message);
+    res.status(500).json({ success: false, message: 'Erro cron extrato: ' + err.message });
   }
 });
 

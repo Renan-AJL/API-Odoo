@@ -40,7 +40,8 @@ async function getAccessToken() {
 
     if (response.data && response.data.access_token) {
       tokenCache.accessToken = response.data.access_token;
-      tokenCache.expiresAt = now + ((response.data.expires_in || 1800) * 1000) - 300000;
+      var ttlMs = (response.data.expires_in || 1800) * 1000;
+      tokenCache.expiresAt = now + Math.max(ttlMs - 300000, ttlMs * 0.2);
       console.log('[ITAU-AUTH] Token obtido com sucesso!');
       return response.data.access_token;
     } else {

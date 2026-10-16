@@ -240,7 +240,7 @@ function buildDocuments(invoice, orderLines, productsMap) {
 /**
  * Mapeia picking Odoo + partner + saleOrder + invoice + company para OrderViewModel do TE
  *
- * @param {Object} ctx - { picking, partner, saleOrder, invoice, company, companyCnpj, orderLines, productsMap, motoristaName, teDriver }
+ * @param {Object} ctx - { picking, partner, saleOrder, invoice, company, companyCnpj, orderLines, productsMap, driverPhone }
  */
 function odooToTeDelivery(ctx) {
   var picking = ctx.picking;
@@ -251,8 +251,8 @@ function odooToTeDelivery(ctx) {
   var companyCnpj = ctx.companyCnpj;
   var orderLines = ctx.orderLines || [];
   var productsMap = ctx.productsMap;
-  var motoristaName = ctx.motoristaName || null;  // Nome do motorista do Odoo
-  var teDriver = ctx.teDriver || null;              // { PhoneCountry, PhoneNumber } do TE
+  var teDriver = ctx.teDriver || null;  // Dados do motorista encontrado no TE
+  var motoristaName = ctx.motoristaName || null;  // Nome do motorista selecionado
 
   if (!partner) return null;
 
@@ -342,8 +342,9 @@ function odooToTeDelivery(ctx) {
     driver = {
       PhoneCountry: teDriver.PhoneCountry || '55',
       PhoneNumber: teDriver.PhoneNumber,
+      DefineDriverAfter: 0,
     };
-    logger.info('[MAPPER] Driver -> REAL: ' + motoristaName + ' (Phone=' + teDriver.PhoneNumber + ')');
+    logger.info('[MAPPER] Driver -> REAL: ' + motoristaName + ' (Phone=' + teDriver.PhoneNumber + ', DefineDriverAfter=0)');
   } else {
     driver = {
       PhoneCountry: '55',
