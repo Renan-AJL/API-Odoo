@@ -973,4 +973,130 @@ router.get('/drivers', async (req, res) => {
   }
 });
 
+// ============================================================
+// POST /api/v1/te/setup-motorista-field — Configura campo x_studio_motorista
+// na fatura (account.move) como Selection com motoristas do TE
+// ============================================================
+router.post('/setup-motorista-field', apiKeyAuth, async (req, res) => {
+  try {
+    const drivers = await teClient.getDrivers();
+    const driverNames = Object.keys(drivers || {});
+    if (!driverNames.length) {
+      return res.status(400).json({ success: false, error: 'Nenhum motorista encontrado no TE' });
+    }
+
+    var xmlrpc = require('xmlrpc');
+    var oc = config.odoo;
+    var base = oc.url.replace(/\/+$/, '');
+    var host = base.replace('https://', '');
+
+    function odooExec(model, method, args, kwargs) {
+      return new Promise(function(ok, fail) {
+        var common = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/common', port: 443 });
+        common.methodCall('authenticate', [oc.db, oc.user, oc.password, {}], function(e, uid) {
+          if (e || !uid) return fail(e || new Error('auth failed'));
+          var params = [oc.db, uid, oc.password, model, method, args || []];
+          if (kwargs) params.push(kwargs);
+          var models = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/object', port: 443 });
+          models.methodCall('execute_kw', params, function(e2, r) {
+            if (e2) return fail(e2);
+            ok(r);
+          });
+        });
+      });
+    }
+
+    var modelIds = await odooExec('ir.model', 'search', [[['model', '=', 'account.move']]]);
+    if (!modelIds || !modelIds.length) {
+      return res.status(500).json({ success: false, error: 'Model account.move nao encontrado' });
+    }
+    var modelId = modelIds[0];
+
+    var fieldIds = await odooExec('ir.model.fields', 'search', [
+      [['name', '=', 'x_studio_motorista'], ['model_id', '=', modelId]]
+    ]);
+
+    var selectionParts = driverNames.map(function(n) { return "('" + n.toLowerCase() + "','" + n + "')"; });
+    var selectionStr = selectionParts.join(',');
+
+    if (fieldIds && fieldIds.length) {
+      try {
+        await odooExec('ir.model.fields', 'write', [
+          [fieldIds[0]],
+          { ttype: 'selection', selection: selectionStr }
+        ]);
+        console.log('[TE] Campo x_studio_motorista atualizado para Selection com ' + driverNames.length + ' motoristas');
+      } catch (writeErr) {
+        console.warn('[TE] Nao conseguiu alterar tipo do campo:', writeErr.message);
+      }
+    } else {
+      try {
+        await odooExec('ir.model.fields', 'create', [{
+          name: 'x_studio_motorista',
+          field_description: 'Motorista (TE)',
+          ttype: 'selection',
+          selection: selectionStr,
+          model_id: modelId,
+          store: true,
+        }]);
+        console.log('[TE] Campo x_studio_motorista criado como Selection');
+      } catch (createErr) {
+        console.warn('[TE] Nao conseguiu criar campo:', createErr.message);
+      }
+    }
+
+    // Adicionar campo ao form view da fatura
+    var viewIds = await odooExec('ir.ui.view', 'search', [
+      [['model', '=', 'account.move'], ['type', '=', 'form'], ['inherit_id', '=', false]],
+      { limit: 1 }
+    ]);
+    if (viewIds && viewIds.length) {
+      var existingInherit = await odooExec('ir.ui.view', 'search', [
+        [['model', '=', 'account.move'], ['type', '=', 'form'], ['name', 'like', 'motorista']]
+      ]);
+      if (!existingInherit || !existingInherit.length) {
+        var motoristaArch = [
+          '<data>',
+          '  <xpath expr="//page[last()]" position="after">',
+          '    <page string="Entrega" name="entrega_tab">',
+          '      <group>',
+          '        <group string="TudoEntregue">',
+          '          <field name="x_studio_motorista"/>',
+          '          <field name="x_studio_te_order_id" readonly="1"/>',
+          '          <field name="x_studio_status_de_entrega_te" readonly="1"/>',
+          '        </group>',
+          '      </group>',
+          '    </page>',
+          '  </xpath>',
+          '</data>',
+        ].join('\n');
+
+        try {
+          await odooExec('ir.ui.view', 'create', [{
+            name: 'account.move.form.motorista.te',
+            model: 'account.move',
+            type: 'form',
+            inherit_id: viewIds[0],
+            arch_base: motoristaArch,
+            active: true,
+          }]);
+          console.log('[TE] View herdada com campo motorista criada na fatura');
+        } catch (viewErr) {
+          console.warn('[TE] Nao conseguiu criar view herdada:', viewErr.message);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Campo x_studio_motorista configurado na fatura com ' + driverNames.length + ' motoristas',
+      motoristas: driverNames,
+    });
+
+  } catch (err) {
+    console.error('[TE] Erro ao configurar campo motorista:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

@@ -303,8 +303,16 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
   }
 });
 
+// === Lock anti-concorrencia BOLETO ===
+// Impede que o Odoo dispare multiplas requisicoes de boleto simultaneas pra mesma fatura
+var _boletoLocks = {};   // faturaId/faturaName -> Promise (in-flight)
+var _boletoCache = {};   // faturaId/faturaName -> { timestamp, response } (resultado recente)
+var BOLETO_LOCK_TTL = 60000;  // 60s - tempo maximo de lock
+var BOLETO_CACHE_TTL = 120000; // 120s - reusa resultado se Odoo reenviar
+
 /**
  * POST /api/v1/itau/gerar - Simplificado para Odoo Server Actions
+ * COM dedup/lock: se a mesma fatura ja tem boleto emitido recentemente, reusa o resultado
  */
 router.post('/gerar', async function(req, res) {
   try {
@@ -312,12 +320,47 @@ router.post('/gerar', async function(req, res) {
     var fatName = req.body.fatura_name || '';
     var fatValor = parseFloat(req.body.fatura_valor) || 0;
     var fatVenc = req.body.fatura_vencimento || '';
+
+    // === DEDUPLICACAO BOLETO: verificar se ja tem requisicao em curso ou resultado recente ===
+    var isPix = formaPag.trim().toUpperCase().indexOf('PIX') === 0;
+    if (!isPix && fatName) {
+      var boletoLockKey = fatName;
+      // Se tem resultado cacheado (mesma fatura, menos de 120s atras), reusa
+      if (_boletoCache[boletoLockKey]) {
+        var cached = _boletoCache[boletoLockKey];
+        var age = Date.now() - cached.timestamp;
+        if (age < BOLETO_CACHE_TTL) {
+          console.log('[API/GERAR] REUSANDO boleto cacheado (' + (age / 1000).toFixed(1) + 's atras) para', boletoLockKey);
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          return res.send(cached.response);
+        }
+        delete _boletoCache[boletoLockKey];
+      }
+      // Se tem requisicao em curso, espera ela terminar
+      if (_boletoLocks[boletoLockKey]) {
+        console.log('[API/GERAR] AGUARDANDO lock boleto existente para', boletoLockKey);
+        try {
+          var cachedResult = await _boletoLocks[boletoLockKey];
+          console.log('[API/GERAR] Lock boleto liberado, retornando resultado da requisicao original');
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          return res.send(cachedResult);
+        } catch (lockErr) {
+          console.log('[API/GERAR] Requisicao boleto original falhou, tentando novamente...');
+        }
+      }
+    }
     var pagNome = req.body.pagador_nome || '';
     var pagCpf = req.body.pagador_cpf || '';
     var pagStreet = req.body.pagador_street || '';
     var pagCity = req.body.pagador_city || '';
     var pagState = req.body.pagador_state || '';
     var pagZip = req.body.pagador_zip || '';
+
+    // Criar lock boleto (para dedup)
+    var _boletoLockResolve;
+    if (!isPix && fatName) {
+      _boletoLocks[boletoLockKey] = new Promise(function(resolve) { _boletoLockResolve = resolve; });
+    }
 
     // === PIX ===
     if (formaPag.trim().toUpperCase().indexOf('PIX') === 0) {
@@ -411,10 +454,23 @@ router.post('/gerar', async function(req, res) {
       );
     }
 
+    var responseText = lines.join('\n');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.send(lines.join('\n'));
+    res.send(responseText);
+
+    // Cache boleto result para dedup (evita triplicacao se Odoo reenviar)
+    if (!isPix && fatName && boletoLockKey) {
+      _boletoCache[boletoLockKey] = { timestamp: Date.now(), response: responseText };
+      if (_boletoLockResolve) _boletoLockResolve(responseText);
+      delete _boletoLocks[boletoLockKey];
+    }
   } catch (e) {
     console.error('[API/GERAR] ERRO:', e.message);
+    // Libera lock em caso de erro
+    if (!isPix && fatName && boletoLockKey) {
+      if (_boletoLockResolve) _boletoLockResolve('ERRO|' + e.message);
+      delete _boletoLocks[boletoLockKey];
+    }
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.send('ERRO|' + e.message);
   }
