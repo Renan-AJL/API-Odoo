@@ -318,7 +318,10 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
   console.log('[BOLETO] idBoleto:', idBoleto, '(ag=' + agencia + ' conta=' + codConta + ' cart=' + carteira + ' nn=' + nn + ' len=' + idBoleto.length + ')');
 
   try {
-    var response = await callCashManagementPatch(accessToken, '/boletos/' + idBoleto + '/baixa');
+    var baixaPayload = {
+      motivo_baixa: 'CANCELAMENTO',
+    };
+    var response = await callCashManagementPatch(accessToken, '/boletos/' + idBoleto + '/baixa', baixaPayload);
     console.log('[BOLETO] Cancelamento (CashMgmt PATCH) OK:', JSON.stringify(response));
     return { sucesso: true, dados: response, metodo: 'cash_management_patch', idBoleto: idBoleto };
   } catch (cmError) {
