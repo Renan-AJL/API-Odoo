@@ -140,6 +140,12 @@ var FIELDS_TO_CREATE = [
     field_description: 'Boleto Cancelado',
     ttype: 'boolean',
   },
+  {
+    name: 'x_studio_motorista',
+    field_description: 'Motorista TudoEntregue',
+    ttype: 'selection',
+    selection: "[('haime','HAIME'),('huothon','HUOTHON'),('roberto','ROBERTO'),('marcos','MARCOS'),('welington','WELINGTON'),('welington2','WELINGTON2'),('leonardo_active','LEONARDO | ACTIVE'),('paulo','PAULO'),('adriano','ADRIANO'),('strada_pinhais','STRADA PINHAIS'),('luis_antonio','LUIS ANTONIO'),('emerson','EMERSON'),('roberto_matriz','ROBERTO MATRIZ'),('lucas_mateus','LUCAS MATEUS'),('marcos2','MARCOS2'),('jean','JEAN'),('luis','LUIS'),('felix','FELIX'),('wellington','WELLINGTON'),('gean','GEAN'),('luis_pitti','LUIS PITTI'),('rafael','RAFAEL'),('lucas','LUCAS'),('cleiton','CLEITON')]",
+  },
 ];
 
 // ============================================================
@@ -370,6 +376,9 @@ async function setupItauFormView(oc, host, uid) {
       '          <field name="x_studio_itau_boletos_html"/>',
       '          <field name="x_studio_itau_resposta_json"/>',
       '        </group>',
+      '      </group>',
+      '      <group string="Entrega">',
+      '        <field name="x_studio_motorista"/>',
       '      </group>',
       '    </page>',
       '  </xpath>',
