@@ -196,7 +196,7 @@ async function main() {
       '# Dados do pagador',
       'partner = order.partner_id',
       'pagador_nome = partner.name or ""',
-      'pagador_cpf = (partner.cnpj_cpf if hasattr(partner, "cnpj_cpf") else (partner.vat or "")) or ""',
+      'pagador_cpf = (partner.vat or "") or ""',
       '',
       '# Montar payload',
       'payload = json.dumps({',
