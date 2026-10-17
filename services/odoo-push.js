@@ -748,6 +748,14 @@ async function pushPixToSaleOrder(params) {
     var soName = (soData && soData[0] && soData[0].name) || 'SO' + soId;
     console.log('[ODOO-PUSH-PIX-SO] Pedido encontrado:', soName, '(ID:', soId, ')');
 
+    // Campos x_studio_itau_* do sale.order (tambem existem)
+    var SO_ITAU_TIPO      = 'x_studio_itau_tipo_pagamento';
+    var SO_ITAU_SITUACAO  = 'x_studio_itau_situacao';
+    var SO_ITAU_TXID      = 'x_studio_itau_txid';
+    var SO_ITAU_PIX_STATUS = 'x_studio_itau_pix_status';
+    var SO_ITAU_PIX_CC    = 'x_studio_itau_pix_copia_cola';
+    var SO_ITAU_BOLETOS_HTML = 'x_studio_itau_boletos_html';
+
     // Gravar campos no sale.order
     var writeVals = {};
     if (pixCopiaCola) {
@@ -755,6 +763,19 @@ async function pushPixToSaleOrder(params) {
     }
     if (htmlPix) {
       writeVals[SO_FIELD_HTML] = htmlPix;
+    }
+    // Campos x_studio_itau_* (status e controle)
+    writeVals[SO_ITAU_TIPO] = 'pix';
+    writeVals[SO_ITAU_SITUACAO] = 'emitido';
+    writeVals[SO_ITAU_PIX_STATUS] = 'ativa';
+    if (txid) {
+      writeVals[SO_ITAU_TXID] = txid;
+    }
+    if (pixCopiaCola) {
+      writeVals[SO_ITAU_PIX_CC] = pixCopiaCola;
+    }
+    if (htmlPix) {
+      writeVals[SO_ITAU_BOLETOS_HTML] = htmlPix;
     }
 
     if (Object.keys(writeVals).length > 0) {
