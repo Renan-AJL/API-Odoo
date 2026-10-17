@@ -144,3 +144,25 @@ Stage Summary:
 - Boleto HTML também pode ser gravado no sale.order quando Finance emite
 - Arquivos modificados: scripts/setup-pix-sales.js, services/odoo-push.js, routes/itau-api.js
 - Arquivo criado: scripts/update-pix-actions.js
+
+---
+Task ID: 4b
+Agent: main
+Task: Executar setup-pix-sales.js e update-pix-actions.js em produção + atualizar pushPixToSaleOrder com campos x_studio_itau_*
+
+Work Log:
+- Rodou setup-pix-sales.js com API key (sem --dry-run)
+- Confirmou 87 campos x_studio_* em sale.order, incluindo 6 x_studio_itau_* já existentes
+- Confirmou campos PIX: x_studio_related_field_2jf_1k4uaua7n (html) e x_studio_boletos_pix (html)
+- Server Action "Gerar PIX" já existe (id=1483)
+- Automated Action "PIX: Travar forma de pagamento" já existe (id=94)
+- Automated Action "PIX: Bloquear cancelar/voltar rascunho" já existe (id=95)
+- Rodou update-pix-actions.js para atualizar código do Server Action e Automated Actions
+- Server Action atualizado: agora grava x_studio_itau_tipo_pagamento, x_studio_itau_situacao, x_studio_itau_txid, x_studio_itau_pix_status, x_studio_itau_pix_copia_cola, x_studio_itau_boletos_html
+- Atualizou pushPixToSaleOrder() em odoo-push.js para também gravar nos campos x_studio_itau_*
+- Commit e push: a3f789f
+
+Stage Summary:
+- Setup PIX sales 100% completo no Odoo (campos + Server Action + Automated Actions)
+- Middleware (odoo-push.js) agora grava campos x_studio_itau_* no sale.order automaticamente
+- Deploy acionado via push para main (Render auto-deploy)
