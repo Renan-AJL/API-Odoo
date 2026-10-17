@@ -273,7 +273,25 @@ async function pushBoletosToOdoo(pushData) {
     }
 
     console.log('[ODOO-PUSH] === PUSH COMPLETO: ' + totalAttachments + '/' + boletos.length + ' PDFs na fatura ' + faturaNameSafe + ' (ID: ' + recordId + ') ===');
-    return { pushed: totalAttachments > 0, attachments: totalAttachments, record_id: recordId };
+
+    // === PUSH BOLETOS PARA O PEDIDO DE VENDA ===
+    // Quando o Financeiro emite boleto, anexar tambem no chatter do pedido
+    var soResult = { pushed: false };
+    if (totalAttachments > 0) {
+      try {
+        soResult = await pushBoletosToSaleOrder({
+          client: client, db: odooConfig.db, uid: uid, password: odooConfig.password,
+          invoiceId: recordId, boletos: boletos, pdfsBase64: pdfsBase64, faturaName: faturaName,
+        });
+        if (soResult.pushed) {
+          console.log('[ODOO-PUSH] Boleto(s) tambem anexado(s) no pedido de venda:', soResult.sale_order_name);
+        }
+      } catch (soErr) {
+        console.warn('[ODOO-PUSH] Nao conseguiu anexar no pedido de venda:', soErr.message);
+      }
+    }
+
+    return { pushed: totalAttachments > 0, attachments: totalAttachments, record_id: recordId, sale_order_push: soResult };
 
   } catch (err) {
     console.error('[ODOO-PUSH] ERRO FATAL:', err.message);
@@ -419,4 +437,209 @@ async function pushPixToOdoo(pushData) {
   }
 }
 
-module.exports = { pushBoletosToOdoo, pushPixToOdoo };
+/**
+ * Busca o sale.order vinculado a uma invoice e anexa boleto/NF no chatter dele
+ * Chamado apos pushBoletosToOdoo() para espelhar os PDFs no pedido de venda
+ * @param {Object} params: { client, db, uid, password, invoiceId, boletos, pdfsBase64, faturaName }
+ */
+async function pushBoletosToSaleOrder(params) {
+  var client = params.client;
+  var db = params.db;
+  var uid = params.uid;
+  var password = params.password;
+  var invoiceId = params.invoiceId;
+  var boletos = params.boletos || [];
+  var pdfsBase64 = params.pdfsBase64 || [];
+  var faturaName = params.faturaName || '';
+
+  console.log('[ODOO-PUSH-SO] Buscando sale.order da fatura', invoiceId);
+
+  try {
+    // Buscar sale.order vinculado a esta invoice
+    // Metodo 1: via invoice_line_ids -> sale_line_ids -> order_id
+    // Metodo 2: search sale.order where invoice_ids contains invoiceId
+    var soIds = await executeKw(client, db, uid, password, 'sale.order', 'search', [[['invoice_ids', 'in', [invoiceId]]]], { limit: 5 });
+
+    if (!soIds || soIds.length === 0) {
+      // Fallback: tentar via invoice_origin (campo texto com nome do pedido)
+      console.log('[ODOO-PUSH-SO] Nenhum SO via invoice_ids, tentando invoice_origin...');
+      var invData = await executeKw(client, db, uid, password, 'account.move', 'read', [[invoiceId], ['invoice_origin']]);
+      var origin = (invData && invData[0] && invData[0].invoice_origin) || '';
+      if (origin) {
+        console.log('[ODOO-PUSH-SO] invoice_origin:', origin);
+        soIds = await executeKw(client, db, uid, password, 'sale.order', 'search', [[['name', 'ilike', origin]]], { limit: 5 });
+      }
+    }
+
+    if (!soIds || soIds.length === 0) {
+      console.warn('[ODOO-PUSH-SO] Nenhum pedido de venda vinculado a fatura', invoiceId);
+      return { pushed: false, reason: 'no_sale_order' };
+    }
+
+    // Usar o primeiro SO encontrado
+    var soId = soIds[0];
+    var soData = await executeKw(client, db, uid, password, 'sale.order', 'read', [[soId], ['name']]);
+    var soName = (soData && soData[0] && soData[0].name) || 'SO' + soId;
+    console.log('[ODOO-PUSH-SO] Pedido encontrado:', soName, '(ID:', soId, ')');
+
+    var faturaNameSafe = faturaName ? faturaName.replace(/[^a-zA-Z0-9\-_]/g, '_') : 'Fatura';
+    var soAttachments = 0;
+
+    for (var i = 0; i < boletos.length; i++) {
+      var bol = boletos[i];
+      var pdfB64 = pdfsBase64[i];
+      if (!pdfB64) continue;
+
+      var nn = bol.nosso_numero || '';
+      var vd = bol.valor_titulo || '0,00';
+      var vc = bol.data_vencimento || '';
+      var p = bol.parcela || 1;
+      var t = bol.total_parcelas || 1;
+
+      var filename;
+      if (t > 1) {
+        filename = 'Boleto_' + faturaNameSafe + '_P' + p + 'de' + t + '_' + nn + '.pdf';
+      } else {
+        filename = 'Boleto_' + faturaNameSafe + '_' + nn + '.pdf';
+      }
+
+      try {
+        // Criar attachment no sale.order
+        var attachId = await executeKw(client, db, uid, password, 'ir.attachment', 'create', [{
+          name: filename,
+          raw: pdfB64,
+          res_model: 'sale.order',
+          res_id: soId,
+          mimetype: 'application/pdf',
+        }]);
+        console.log('[ODOO-PUSH-SO]   Attachment OK:', filename, 'ID:', attachId);
+
+        // Nota interna no chatter do pedido
+        var htmlBody = '<b>' + (t > 1 ? 'Boleto Parcela ' + p + '/' + t : 'Boleto') + '</b> — Fatura: ' + (faturaName || 'N/A') + '<br/>';
+        htmlBody += 'Nosso Número: ' + nn + '<br/>';
+        htmlBody += 'Valor: R$ ' + vd + '<br/>';
+        htmlBody += 'Vencimento: ' + vc + '<br/>';
+
+        await executeKw(client, db, uid, password, 'mail.message', 'create', [{
+          model: 'sale.order',
+          res_id: soId,
+          body: htmlBody,
+          message_type: 'comment',
+          subtype_xmlid: 'mail.mt_note',
+          attachment_ids: [[6, 0, [attachId]]],
+        }]);
+        console.log('[ODOO-PUSH-SO]   Nota interna OK - boleto', (i + 1));
+        soAttachments++;
+
+      } catch (err) {
+        console.error('[ODOO-PUSH-SO]   ERRO boleto', (i + 1) + ':', err.message);
+      }
+    }
+
+    console.log('[ODOO-PUSH-SO] === PUSH COMPLETO: ' + soAttachments + '/' + boletos.length + ' PDFs no pedido ' + soName + ' ===');
+    return { pushed: soAttachments > 0, attachments: soAttachments, sale_order_id: soId, sale_order_name: soName };
+
+  } catch (err) {
+    console.error('[ODOO-PUSH-SO] ERRO:', err.message);
+    return { pushed: false, reason: err.message };
+  }
+}
+
+/**
+ * Copia attachments de boleto/NF da invoice para o sale.order vinculado
+ * Usado pelo script retroativo para pedidos que ja tinham boletos
+ * @param {Object} params: { client, db, uid, password, invoiceId }
+ */
+async function copyInvoiceAttachmentsToSaleOrder(params) {
+  var client = params.client;
+  var db = params.db;
+  var uid = params.uid;
+  var password = params.password;
+  var invoiceId = params.invoiceId;
+
+  try {
+    // Buscar SO vinculado
+    var soIds = await executeKw(client, db, uid, password, 'sale.order', 'search', [[['invoice_ids', 'in', [invoiceId]]]], { limit: 5 });
+    if (!soIds || soIds.length === 0) {
+      var invData = await executeKw(client, db, uid, password, 'account.move', 'read', [[invoiceId], ['invoice_origin', 'name']]);
+      var origin = (invData && invData[0] && invData[0].invoice_origin) || '';
+      if (origin) {
+        soIds = await executeKw(client, db, uid, password, 'sale.order', 'search', [[['name', 'ilike', origin]]], { limit: 5 });
+      }
+    }
+    if (!soIds || soIds.length === 0) return { pushed: false, reason: 'no_sale_order' };
+
+    var soId = soIds[0];
+
+    // Buscar attachments de boleto na invoice
+    var attachIds = await executeKw(client, db, uid, password, 'ir.attachment', 'search', [[
+      ['res_model', '=', 'account.move'],
+      ['res_id', '=', invoiceId],
+      ['name', 'ilike', 'Boleto'],
+      ['mimetype', '=', 'application/pdf'],
+    ]]);
+
+    if (!attachIds || attachIds.length === 0) {
+      console.log('[ODOO-COPY-SO] Fatura', invoiceId, ': sem attachments de boleto');
+      return { pushed: false, reason: 'no_boleto_attachments' };
+    }
+
+    // Ler dados dos attachments
+    var attachments = await executeKw(client, db, uid, password, 'ir.attachment', 'read', [attachIds, ['name', 'raw', 'mimetype']]);
+
+    // Verificar quais ja existem no SO (evitar duplicar)
+    var soExisting = await executeKw(client, db, uid, password, 'ir.attachment', 'search', [[
+      ['res_model', '=', 'sale.order'],
+      ['res_id', '=', soId],
+      ['name', 'ilike', 'Boleto'],
+    ]]);
+    var soExistingNames = [];
+    if (soExisting && soExisting.length > 0) {
+      var soExistingData = await executeKw(client, db, uid, password, 'ir.attachment', 'read', [soExisting, ['name']]);
+      soExistingNames = soExistingData.map(function(a) { return a.name; });
+    }
+
+    var copied = 0;
+    for (var i = 0; i < attachments.length; i++) {
+      var att = attachments[i];
+      // Pular se ja existe no SO
+      if (soExistingNames.indexOf(att.name) >= 0) {
+        console.log('[ODOO-COPY-SO]   Ja existe no SO:', att.name, '- pulando');
+        continue;
+      }
+
+      // Criar copia no sale.order
+      try {
+        var newAttId = await executeKw(client, db, uid, password, 'ir.attachment', 'create', [{
+          name: att.name,
+          raw: att.raw,
+          res_model: 'sale.order',
+          res_id: soId,
+          mimetype: att.mimetype || 'application/pdf',
+        }]);
+
+        // Postar chatter note
+        await executeKw(client, db, uid, password, 'mail.message', 'create', [{
+          model: 'sale.order',
+          res_id: soId,
+          body: '<b>Boleto</b> (cópia da fatura ID ' + invoiceId + ')<br/>Arquivo: ' + att.name,
+          message_type: 'comment',
+          subtype_xmlid: 'mail.mt_note',
+          attachment_ids: [[6, 0, [newAttId]]],
+        }]);
+        copied++;
+        console.log('[ODOO-COPY-SO]   Copiado:', att.name, '→ SO', soId);
+      } catch (copyErr) {
+        console.error('[ODOO-COPY-SO]   ERRO ao copiar', att.name + ':', copyErr.message);
+      }
+    }
+
+    return { pushed: copied > 0, copied: copied, sale_order_id: soId };
+
+  } catch (err) {
+    console.error('[ODOO-COPY-SO] ERRO:', err.message);
+    return { pushed: false, reason: err.message };
+  }
+}
+
+module.exports = { pushBoletosToOdoo, pushPixToOdoo, pushBoletosToSaleOrder, copyInvoiceAttachmentsToSaleOrder };
