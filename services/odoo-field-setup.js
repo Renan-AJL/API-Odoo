@@ -1,11 +1,17 @@
 /**
  * services/odoo-field-setup.js - Auto-setup de campos Itau no Odoo
  * ============================================================
+ * ⚠️ ATENÇÃO: Este módulo está DESABILITADO no server.js!
+ * NÃO reativar — os campos e a aba Itaú já foram criados no Odoo Studio.
+ * Reativar causa CRIAÇÃO DE ABAS DUPLICADAS no Odoo.
+ *
+ * Se precisar rodar manualmente:
+ *   node -e "require('./services/odoo-field-setup').setupItauFields().then(r=>console.log(r))"
+ *
  * Cria automaticamente todos os campos x_studio_itau_* no model account.move
  * E adiciona os campos ao form view na aba "Itau".
  *
- * Executado automaticamente na inicializacao do servidor.
- * Idempotente - seguro executar multiplas vezes.
+ * Idempotente - seguro executar multiplas vezes (se todos campos já existirem, pula).
  *
  * Campos criados:
  *   x_studio_itau_situacao           - Status Itau (EMITIDO/PAGO/CANCELADO/EXPIRADO/ERRO)

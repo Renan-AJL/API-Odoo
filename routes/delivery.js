@@ -943,10 +943,18 @@ router.get('/drivers', async (req, res) => {
 });
 
 // ============================================================
-// POST /api/v1/te/setup-motorista-field — Configura campo x_studio_motorista
-// na fatura (account.move) como Selection com motoristas do TE
+// POST /api/v1/te/setup-motorista-field — DESABILITADO
+// NÃO criar campos/abas novas no Odoo — já existem via Studio.
+// Se precisar reativar, remover o early return abaixo.
 // ============================================================
 router.post('/setup-motorista-field', apiKeyAuth, async (req, res) => {
+  // DESABILITADO: Os campos e abas já existem no Odoo Studio.
+  // Não criar novos — causa abas duplicadas.
+  return res.status(403).json({
+    success: false,
+    error: 'Endpoint desabilitado. Campos e aba já existem no Odoo Studio. Não criar novos.',
+    hint: 'Se precisar reativar, remova o early return em routes/delivery.js',
+  });
   try {
     const drivers = await teClient.getDrivers();
     const driverNames = Object.keys(drivers || {});

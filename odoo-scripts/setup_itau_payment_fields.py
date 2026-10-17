@@ -2,6 +2,13 @@
 """
 Setup Odoo fields for Itau Payment Status tracking
 ===================================================
+⚠️ ATENÇÃO: NÃO rodar este script se os campos já existem no Odoo Studio!
+Os campos e a aba Itaú já foram criados manualmente via Studio.
+Rodar este script pode criar campos duplicados ou abas extras.
+
+Se precisar verificar se campos existem, use:
+  python3 diagnose_itau_fields.py <ODOO_API_KEY>
+
 Creates ALL x_studio_* fields on account.move for Itau integration.
 This script is idempotent - safe to run multiple times.
 

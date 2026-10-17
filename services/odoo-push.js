@@ -242,6 +242,45 @@ async function pushBoletosToOdoo(pushData) {
         camposWrite['x_studio_itau_link_status'] = linkList[0]; // Link do primeiro boleto
       }
 
+      // x_studio_itau_boletos_html — HTML com dados do boleto para exibir na aba Itaú
+      // Igual ao PIX: gera HTML com linha digitável, PIX copia e cola, QR code
+      if (totalAttachments > 0) {
+        var boletosHtmlParts = [];
+        for (var bi = 0; bi < boletos.length; bi++) {
+          var b = boletos[bi];
+          var bParcela = b.parcela || 1;
+          var bTotal = b.total_parcelas || 1;
+          var bTitulo = (bTotal > 1) ? 'Boleto Parcela ' + bParcela + '/' + bTotal : 'Boleto';
+          var bValor = b.valor_titulo || '0,00';
+          var bVenc = b.data_vencimento || '';
+          var bNN = b.nosso_numero || '';
+          var bLD = b.linha_digitavel || '';
+          var bPix = b.pix_copia_cola || '';
+          var bQR = b.qrcode_base64 || '';
+
+          var bHtml = '<div style="text-align:center; font-family:Arial,sans-serif; padding:10px; margin-bottom:16px; border:1px solid #ddd; border-radius:8px;">';
+          bHtml += '<div style="font-size:18px; font-weight:bold; color:#333; margin-bottom:8px;">' + bTitulo + '</div>';
+          bHtml += '<div style="font-size:14px; color:#666; margin-bottom:4px;">' + (faturaName || '') + '</div>';
+          bHtml += '<div style="font-size:14px; color:#666; margin-bottom:8px;">Valor: R$ ' + bValor + (bVenc ? ' | Venc: ' + bVenc : '') + '</div>';
+          if (bNN) {
+            bHtml += '<div style="font-size:11px; color:#555; margin-bottom:4px;">Nosso Número: ' + bNN + '</div>';
+          }
+          if (bLD) {
+            bHtml += '<div style="font-size:11px; color:#555; margin-bottom:8px; word-break:break-all;">Linha Digitável: ' + bLD + '</div>';
+          }
+          if (bQR) {
+            var qrSrc = bQR.indexOf('data:') === 0 ? bQR : 'data:image/png;base64,' + bQR;
+            bHtml += '<img src="' + qrSrc + '" style="width:180px; height:180px; margin:0 auto 8px auto; display:block;" />';
+          }
+          if (bPix) {
+            bHtml += '<div style="font-size:9px; color:#999; word-break:break-all; max-width:380px; margin:0 auto; line-height:1.3; border:1px dashed #ccc; padding:6px; border-radius:4px;">' + bPix + '</div>';
+          }
+          bHtml += '</div>';
+          boletosHtmlParts.push(bHtml);
+        }
+        camposWrite['x_studio_itau_boletos_html'] = boletosHtmlParts.join('');
+      }
+
       var keysWrite = Object.keys(camposWrite);
       if (keysWrite.length > 0) {
         console.log('[ODOO-PUSH] Gravando campos x_studio_*:', keysWrite.join(', '));

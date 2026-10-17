@@ -416,8 +416,10 @@ app.listen(PORT, () => {
   console.log('  Status Routes: /api/v1/itau/status/*');
 
   // --- Auto-setup de campos Itau no Odoo ---
-  // Executa em background - nao bloqueia o server
-  if (config.odoo.enabled) {
+  // DESABILITADO: Os campos e a aba Itaú já foram criados no Odoo Studio.
+  // NÃO reativar — cria abas/campos duplicados no Odoo.
+  // Se precisar, rodar manualmente: node -e "require('./services/odoo-field-setup').setupItauFields().then(r=>console.log(r))"
+  if (false && config.odoo.enabled) {
     setTimeout(function() {
       var fieldSetup = require('./services/odoo-field-setup');
       fieldSetup.setupItauFields().then(function(result) {

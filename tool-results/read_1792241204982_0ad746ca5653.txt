@@ -1,0 +1,645 @@
+     1→     1→/**
+     2→     2→ * services/odoo-push.js - v7.0.2
+     3→     3→ * =============================================
+     4→     4→ * Push de PDFs de boletos para Odoo via XML-RPC
+     5→     5→ * - Usa faturaId (record.id) diretamente - SEMPRE funciona, mesmo rascunho
+     6→     6→ * - Cria ir.attachment com PDF base64
+     7→     7→ * - Posta NOTA INTERNA no chatter com PDF anexado (mail.mt_note)
+     8→     8→ * - Cada boleto: 1 attachment + 1 nota com detalhes
+     9→     9→ * - Grava campos x_studio_* na fatura (situacao, tipo_pagamento, pix, nn, link)
+    10→    10→ *
+    11→    11→ * ENV VARS (Render):
+    12→    12→ *   ODOO_URL, ODOO_DB, ODOO_USER, ODOO_PASSWORD, ODOO_PUSH_ENABLED
+    13→    13→ * =============================================
+    14→    14→ */
+    15→    15→
+    16→    16→var xmlrpc = require('xmlrpc');
+    17→    17→
+    18→    18→function createClient(url) {
+    19→    19→  var base = url.replace(/\/+$/, '');
+    20→    20→  return {
+    21→    21→    common: xmlrpc.createSecureClient({ host: base.replace('https://', ''), path: '/xmlrpc/2/common', port: 443 }),
+    22→    22→    models: xmlrpc.createSecureClient({ host: base.replace('https://', ''), path: '/xmlrpc/2/object', port: 443 }),
+    23→    23→    baseUrl: base
+    24→    24→  };
+    25→    25→}
+    26→    26→
+    27→    27→function authenticate(client, db, login, password) {
+    28→    28→  return new Promise(function(resolve, reject) {
+    29→    29→    client.common.methodCall('authenticate', [db, login, password, {}], function(err, uid) {
+    30→    30→      if (err) {
+    31→    31→        reject(new Error('Erro ao autenticar no Odoo: ' + (err.message || JSON.stringify(err))));
+    32→    32→      } else if (uid === false || uid === null) {
+    33→    33→        reject(new Error('Falha na autenticacao Odoo: credenciais invalidas'));
+    34→    34→      } else {
+    35→    35→        console.log('[ODOO-PUSH] Autenticado. UID:', uid);
+    36→    36→        resolve(uid);
+    37→    37→      }
+    38→    38→    });
+    39→    39→  });
+    40→    40→}
+    41→    41→
+    42→    42→function executeKw(client, db, uid, password, model, method, args, kwargs) {
+    43→    43→  return new Promise(function(resolve, reject) {
+    44→    44→    var params = [db, uid, password, model, method, args || []];
+    45→    45→    if (kwargs) params.push(kwargs || {});
+    46→    46→    client.models.methodCall('execute_kw', params, function(err, result) {
+    47→    47→      if (err) {
+    48→    48→        reject(new Error('Erro Odoo ' + model + '.' + method + ': ' + (err.message || JSON.stringify(err))));
+    49→    49→      } else {
+    50→    50→        resolve(result);
+    51→    51→      }
+    52→    52→    });
+    53→    53→  });
+    54→    54→}
+    55→    55→
+    56→    56→/**
+    57→    57→ * Push completo
+    58→    58→ * @param {Object} pushData
+    59→    59→ *   - faturaId:    ID da fatura Odoo (record.id) - SEMPRE disponivel
+    60→    60→ *   - faturaName:  nome da fatura (pode ser vazio para rascunhos)
+    61→    61→ *   - boletos:     array de dados dos boletos
+    62→    62→ *   - pdfsBase64:  array de PDFs em base64 (mesma ordem)
+    63→    63→ */
+    64→    64→async function pushBoletosToOdoo(pushData) {
+    65→    65→  var config = require('../config');
+    66→    66→  var odooConfig = config.odoo;
+    67→    67→
+    68→    68→  if (!odooConfig || !odooConfig.enabled) {
+    69→    69→    console.log('[ODOO-PUSH] Desabilitado');
+    70→    70→    return { pushed: false, reason: 'disabled' };
+    71→    71→  }
+    72→    72→
+    73→    73→  if (!odooConfig.url || !odooConfig.db || !odooConfig.user || !odooConfig.password) {
+    74→    74→    console.warn('[ODOO-PUSH] Credenciais Odoo incompletas');
+    75→    75→    return { pushed: false, reason: 'missing_credentials' };
+    76→    76→  }
+    77→    77→
+    78→    78→  var faturaId = parseInt(pushData.faturaId) || 0;
+    79→    79→  var faturaName = pushData.faturaName || '';
+    80→    80→  var boletos = pushData.boletos || [];
+    81→    81→  var pdfsBase64 = pushData.pdfsBase64 || [];
+    82→    82→
+    83→    83→  console.log('[ODOO-PUSH] === INICIANDO ===');
+    84→    84→  console.log('[ODOO-PUSH] faturaId:', faturaId, '| faturaName:', faturaName || 'vazio');
+    85→    85→  console.log('[ODOO-PUSH] boletos:', boletos.length, '| pdfs:', pdfsBase64.length);
+    86→    86→
+    87→    87→  try {
+    88→    88→    var client = createClient(odooConfig.url);
+    89→    89→    var uid = await authenticate(client, odooConfig.db, odooConfig.user, odooConfig.password);
+    90→    90→
+    91→    91→    // Determinar recordId
+    92→    92→    var recordId;
+    93→    93→    if (faturaId > 0) {
+    94→    94→      // ID direto - sempre funciona, mesmo rascunho
+    95→    95→      recordId = faturaId;
+    96→    96→      console.log('[ODOO-PUSH] Usando faturaId direto:', recordId);
+    97→    97→    } else if (faturaName) {
+    98→    98→      // Fallback: buscar por nome
+    99→    99→      console.log('[ODOO-PUSH] Buscando fatura por nome:', faturaName);
+   100→   100→      var ids = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'search', [[['name', '=', faturaName]]]);
+   101→   101→      if (!ids || ids.length === 0) {
+   102→   102→        console.warn('[ODOO-PUSH] Fatura nao encontrada por nome, buscando mais recente...');
+   103→   103→        var recentIds = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'search', [[['move_type', '=', 'out_invoice']]], { order: 'id desc', limit: 1 });
+   104→   104→        if (!recentIds || recentIds.length === 0) {
+   105→   105→          return { pushed: false, reason: 'invoice_not_found' };
+   106→   106→        }
+   107→   107→        recordId = recentIds[0];
+   108→   108→      } else {
+   109→   109→        recordId = ids[0];
+   110→   110→      }
+   111→   111→    } else {
+   112→   112→      // Sem ID e sem nome - buscar mais recente
+   113→   113→      console.warn('[ODOO-PUSH] Sem ID e sem nome, buscando fatura mais recente...');
+   114→   114→      var recentIds = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'search', [[['move_type', '=', 'out_invoice']]], { order: 'id desc', limit: 1 });
+   115→   115→      if (!recentIds || recentIds.length === 0) {
+   116→   116→        return { pushed: false, reason: 'no_invoices' };
+   117→   117→      }
+   118→   118→      recordId = recentIds[0];
+   119→   119→    }
+   120→   120→
+   121→   121→    console.log('[ODOO-PUSH] recordId final:', recordId);
+   122→   122→
+   123→   123→    // Buscar nome da fatura para o filename (se nao temos)
+   124→   124→    if (!faturaName) {
+   125→   125→      try {
+   126→   126→        var names = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'read', [[recordId], ['name']]);
+   127→   127→        if (names && names[0] && names[0].name) {
+   128→   128→          faturaName = names[0].name;
+   129→   129→          console.log('[ODOO-PUSH] Nome encontrado:', faturaName);
+   130→   130→        }
+   131→   131→      } catch (e) {
+   132→   132→        console.warn('[ODOO-PUSH] Nao conseguiu ler nome:', e.message);
+   133→   133→      }
+   134→   134→    }
+   135→   135→
+   136→   136→    var faturaNameSafe = faturaName ? faturaName.replace(/[^a-zA-Z0-9\-_]/g, '_') : 'Fatura';
+   137→   137→    var totalAttachments = 0;
+   138→   138→
+   139→   139→    // Processar cada boleto
+   140→   140→    for (var i = 0; i < boletos.length; i++) {
+   141→   141→      var bol = boletos[i];
+   142→   142→      var pdfB64 = pdfsBase64[i];
+   143→   143→
+   144→   144→      console.log('[ODOO-PUSH] Processando boleto', (i + 1) + '/' + boletos.length, '- PDF:', pdfB64 ? (pdfB64.length / 1024).toFixed(0) + 'KB' : 'AUSENTE');
+   145→   145→
+   146→   146→      if (!pdfB64) {
+   147→   147→        console.warn('[ODOO-PUSH]   PDF ausente, pulando boleto', (i + 1));
+   148→   148→        continue;
+   149→   149→      }
+   150→   150→
+   151→   151→      var nn = bol.nosso_numero || '';
+   152→   152→      var vd = bol.valor_titulo || '0,00';
+   153→   153→      var vc = bol.data_vencimento || '';
+   154→   154→      var ld = bol.linha_digitavel || '';
+   155→   155→      var pix = bol.pix_copia_cola || '';
+   156→   156→      var p = bol.parcela || 1;
+   157→   157→      var t = bol.total_parcelas || 1;
+   158→   158→
+   159→   159→      // Nome do arquivo
+   160→   160→      var filename;
+   161→   161→      if (t > 1) {
+   162→   162→        filename = 'Boleto_' + faturaNameSafe + '_P' + p + 'de' + t + '_' + nn + '.pdf';
+   163→   163→      } else {
+   164→   164→        filename = 'Boleto_' + faturaNameSafe + '_' + nn + '.pdf';
+   165→   165→      }
+   166→   166→
+   167→   167→      try {
+   168→   168→        // 1. Criar attachment
+   169→   169→        var attachId = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'ir.attachment', 'create', [{
+   170→   170→          name: filename,
+   171→   171→          raw: pdfB64,
+   172→   172→          res_model: 'account.move',
+   173→   173→          res_id: recordId,
+   174→   174→          mimetype: 'application/pdf',
+   175→   175→        }]);
+   176→   176→        console.log('[ODOO-PUSH]   Attachment OK:', filename, 'ID:', attachId);
+   177→   177→
+   178→   178→        // 2. Criar nota interna com PDF amarrado
+   179→   179→        var htmlBody = '<b>' + (t > 1 ? 'Boleto Parcela ' + p + '/' + t : 'Boleto') + '</b><br/>';
+   180→   180→        htmlBody += 'Nosso Numero: ' + nn + '<br/>';
+   181→   181→        htmlBody += 'Valor: R$ ' + vd + '<br/>';
+   182→   182→        htmlBody += 'Vencimento: ' + vc + '<br/>';
+   183→   183→        htmlBody += 'Linha Digitavel: ' + ld + '<br/>';
+   184→   184→        if (pix) {
+   185→   185→          htmlBody += 'PIX Copia e Cola: ' + pix;
+   186→   186→        }
+   187→   187→
+   188→   188→        await executeKw(client, odooConfig.db, uid, odooConfig.password, 'mail.message', 'create', [{
+   189→   189→          model: 'account.move',
+   190→   190→          res_id: recordId,
+   191→   191→          body: htmlBody,
+   192→   192→          message_type: 'comment',
+   193→   193→          subtype_xmlid: 'mail.mt_note',
+   194→   194→          attachment_ids: [[6, 0, [attachId]]],
+   195→   195→        }]);
+   196→   196→        console.log('[ODOO-PUSH]   Nota interna OK - boleto', (i + 1));
+   197→   197→        totalAttachments++;
+   198→   198→
+   199→   199→      } catch (err) {
+   200→   200→        console.error('[ODOO-PUSH]   ERRO boleto', (i + 1) + ':', err.message);
+   201→   201→      }
+   202→   202→    }
+   203→   203→
+   204→   204→    // === GRAVAR CAMPOS x_studio_* NA FATURA ===
+   205→   205→    // Preenche os campos customizados do Odoo com dados dos boletos emitidos
+   206→   206→    try {
+   207→   207→      var bol0 = boletos[0] || {};
+   208→   208→      var nnList = [];
+   209→   209→      var pixList = [];
+   210→   210→      var linkList = [];
+   211→   211→      for (var i = 0; i < boletos.length; i++) {
+   212→   212→        if (boletos[i].nosso_numero) nnList.push(boletos[i].nosso_numero);
+   213→   213→        if (boletos[i].pix_copia_cola) pixList.push(boletos[i].pix_copia_cola);
+   214→   214→        if (boletos[i].pdf_url_txid) linkList.push(boletos[i].pdf_url_txid);
+   215→   215→        if (boletos[i].pdf_url_nn) linkList.push(boletos[i].pdf_url_nn);
+   216→   216→      }
+   217→   217→
+   218→   218→      var camposWrite = {};
+   219→   219→
+   220→   220→      // x_studio_itau_situacao
+   221→   221→      if (totalAttachments > 0) {
+   222→   222→        camposWrite['x_studio_itau_situacao'] = 'emitido';
+   223→   223→      } else {
+   224→   224→        camposWrite['x_studio_itau_situacao'] = 'erro';
+   225→   225→      }
+   226→   226→
+   227→   227→      // x_studio_itau_tipo_pagamento
+   228→   228→      camposWrite['x_studio_itau_tipo_pagamento'] = 'BOLETO';
+   229→   229→
+   230→   230→      // x_studio_itau_pix_copia_cola
+   231→   231→      if (pixList.length > 0) {
+   232→   232→        camposWrite['x_studio_itau_pix_copia_cola'] = pixList.join(' | ');
+   233→   233→      }
+   234→   234→
+   235→   235→      // x_studio_itau_nosso_numero
+   236→   236→      if (nnList.length > 0) {
+   237→   237→        camposWrite['x_studio_itau_nosso_numero'] = nnList.join(' | ');
+   238→   238→      }
+   239→   239→
+   240→   240→      // x_studio_itau_link_status
+   241→   241→      if (linkList.length > 0) {
+   242→   242→        camposWrite['x_studio_itau_link_status'] = linkList[0]; // Link do primeiro boleto
+   243→   243→      }
+   244→   244→
+   245→   245→      var keysWrite = Object.keys(camposWrite);
+   246→   246→      if (keysWrite.length > 0) {
+   247→   247→        console.log('[ODOO-PUSH] Gravando campos x_studio_*:', keysWrite.join(', '));
+   248→   248→        try {
+   249→   249→          await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], camposWrite]);
+   250→   250→          console.log('[ODOO-PUSH] Campos x_studio_* gravados com sucesso na fatura', recordId);
+   251→   251→        } catch (fieldWriteErr) {
+   252→   252→          // Campo pode nao existir - tentar campo a campo
+   253→   253→          console.warn('[ODOO-PUSH] Erro ao gravar todos campos, tentando campo a campo:', fieldWriteErr.message);
+   254→   254→          var writtenFields = [];
+   255→   255→          for (var wk = 0; wk < keysWrite.length; wk++) {
+   256→   256→            var singleField = {};
+   257→   257→            singleField[keysWrite[wk]] = camposWrite[keysWrite[wk]];
+   258→   258→            try {
+   259→   259→              await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], singleField]);
+   260→   260→              writtenFields.push(keysWrite[wk]);
+   261→   261→            } catch (singleErr) {
+   262→   262→              console.warn('[ODOO-PUSH] Campo ausente/pulando:', keysWrite[wk]);
+   263→   263→            }
+   264→   264→          }
+   265→   265→          if (writtenFields.length > 0) {
+   266→   266→            console.log('[ODOO-PUSH] Campos gravados individualmente:', writtenFields.join(', '));
+   267→   267→          }
+   268→   268→        }
+   269→   269→      }
+   270→   270→    } catch (fieldsErr) {
+   271→   271→      console.error('[ODOO-PUSH] Erro ao gravar campos x_studio_*:', fieldsErr.message);
+   272→   272→      // Nao falhar o push inteiro por causa dos campos
+   273→   273→    }
+   274→   274→
+   275→   275→    console.log('[ODOO-PUSH] === PUSH COMPLETO: ' + totalAttachments + '/' + boletos.length + ' PDFs na fatura ' + faturaNameSafe + ' (ID: ' + recordId + ') ===');
+   276→   276→
+   277→   277→    // === PUSH BOLETOS PARA O PEDIDO DE VENDA ===
+   278→   278→    // Quando o Financeiro emite boleto, anexar tambem no chatter do pedido
+   279→   279→    var soResult = { pushed: false };
+   280→   280→    if (totalAttachments > 0) {
+   281→   281→      try {
+   282→   282→        soResult = await pushBoletosToSaleOrder({
+   283→   283→          client: client, db: odooConfig.db, uid: uid, password: odooConfig.password,
+   284→   284→          invoiceId: recordId, boletos: boletos, pdfsBase64: pdfsBase64, faturaName: faturaName,
+   285→   285→        });
+   286→   286→        if (soResult.pushed) {
+   287→   287→          console.log('[ODOO-PUSH] Boleto(s) tambem anexado(s) no pedido de venda:', soResult.sale_order_name);
+   288→   288→        }
+   289→   289→      } catch (soErr) {
+   290→   290→        console.warn('[ODOO-PUSH] Nao conseguiu anexar no pedido de venda:', soErr.message);
+   291→   291→      }
+   292→   292→    }
+   293→   293→
+   294→   294→    return { pushed: totalAttachments > 0, attachments: totalAttachments, record_id: recordId, sale_order_push: soResult };
+   295→   295→
+   296→   296→  } catch (err) {
+   297→   297→    console.error('[ODOO-PUSH] ERRO FATAL:', err.message);
+   298→   298→    return { pushed: false, reason: err.message };
+   299→   299→  }
+   300→   300→}
+   301→   301→
+   302→   302→/**
+   303→   303→ * Push PIX para Odoo via XML-RPC
+   304→   304→ * - Grava campos x_studio_* na fatura (tipo_pagamento, pix, html com QR code)
+   305→   305→ * - Posta nota interna no chatter
+   306→   306→ */
+   307→   307→async function pushPixToOdoo(pushData) {
+   308→   308→  var config = require('../config');
+   309→   309→  var odooConfig = config.odoo;
+   310→   310→
+   311→   311→  if (!odooConfig || !odooConfig.enabled) {
+   312→   312→    console.log('[ODOO-PUSH-PIX] Desabilitado');
+   313→   313→    return { pushed: false, reason: 'disabled' };
+   314→   314→  }
+   315→   315→
+   316→   316→  if (!odooConfig.url || !odooConfig.db || !odooConfig.user || !odooConfig.password) {
+   317→   317→    console.warn('[ODOO-PUSH-PIX] Credenciais Odoo incompletas');
+   318→   318→    return { pushed: false, reason: 'missing_credentials' };
+   319→   319→  }
+   320→   320→
+   321→   321→  var faturaId = parseInt(pushData.faturaId) || 0;
+   322→   322→  var faturaName = pushData.faturaName || '';
+   323→   323→  var pix = pushData.pix || {};
+   324→   324→  var txid = pix.txid || '';
+   325→   325→  var pixCopiaCola = pix.pix_copia_cola || '';
+   326→   326→  var qrcodeBase64 = pix.qrcode_base64 || '';
+   327→   327→  var htmlPix = pix.html_pix || '';
+   328→   328→  var valor = pushData.valor || '0,00';
+   329→   329→
+   330→   330→  console.log('[ODOO-PUSH-PIX] === INICIANDO ===');
+   331→   331→  console.log('[ODOO-PUSH-PIX] faturaId:', faturaId, '| faturaName:', faturaName || 'vazio');
+   332→   332→  console.log('[ODOO-PUSH-PIX] TXID:', txid, '| Valor:', valor);
+   333→   333→
+   334→   334→  try {
+   335→   335→    var client = createClient(odooConfig.url);
+   336→   336→    var uid = await authenticate(client, odooConfig.db, odooConfig.user, odooConfig.password);
+   337→   337→
+   338→   338→    // Determinar recordId
+   339→   339→    var recordId;
+   340→   340→    if (faturaId > 0) {
+   341→   341→      recordId = faturaId;
+   342→   342→      console.log('[ODOO-PUSH-PIX] Usando faturaId direto:', recordId);
+   343→   343→    } else if (faturaName) {
+   344→   344→      console.log('[ODOO-PUSH-PIX] Buscando fatura por nome:', faturaName);
+   345→   345→      var ids = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'search', [[['name', '=', faturaName]]]);
+   346→   346→      if (!ids || ids.length === 0) {
+   347→   347→        var recentIds = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'search', [[['move_type', '=', 'out_invoice']]], { order: 'id desc', limit: 1 });
+   348→   348→        if (!recentIds || recentIds.length === 0) {
+   349→   349→          return { pushed: false, reason: 'invoice_not_found' };
+   350→   350→        }
+   351→   351→        recordId = recentIds[0];
+   352→   352→      } else {
+   353→   353→        recordId = ids[0];
+   354→   354→      }
+   355→   355→    } else {
+   356→   356→      var recentIds = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'search', [[['move_type', '=', 'out_invoice']]], { order: 'id desc', limit: 1 });
+   357→   357→      if (!recentIds || recentIds.length === 0) {
+   358→   358→        return { pushed: false, reason: 'no_invoices' };
+   359→   359→      }
+   360→   360→      recordId = recentIds[0];
+   361→   361→    }
+   362→   362→
+   363→   363→    console.log('[ODOO-PUSH-PIX] recordId final:', recordId);
+   364→   364→
+   365→   365→    // === Gravar campos texto/HTML + nota interna ===
+   366→   366→    // Campos Selection (tipo_pagamento, situacao) removidos: valores nao batem
+   367→   367→    // com as opcoes do Odoo Studio. Reative com os valores corretos se necessario.
+   368→   368→
+   369→   369→    var textFields = {};
+   370→   370→
+   371→   371→    // Campos obrigatórios para polling e exibição no Odoo
+   372→   372→    textFields['x_studio_itau_situacao'] = 'emitido';
+   373→   373→    textFields['x_studio_itau_tipo_pagamento'] = 'PIX';
+   374→   374→    if (txid) {
+   375→   375→      textFields['x_studio_itau_txid'] = txid;
+   376→   376→    }
+   377→   377→
+   378→   378→    if (pixCopiaCola) {
+   379→   379→      textFields['x_studio_itau_pix_copia_cola'] = pixCopiaCola;
+   380→   380→    }
+   381→   381→    if (htmlPix) {
+   382→   382→      textFields['x_studio_itau_boletos_html'] = htmlPix;
+   383→   383→    }
+   384→   384→
+   385→   385→    if (Object.keys(textFields).length > 0) {
+   386→   386→      try {
+   387→   387→        console.log('[ODOO-PUSH-PIX] Gravando campos texto/HTML:', Object.keys(textFields).join(', '));
+   388→   388→        await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], textFields]);
+   389→   389→        console.log('[ODOO-PUSH-PIX] Campos texto/HTML gravados OK');
+   390→   390→      } catch (textErr) {
+   391→   391→        // Campo pode nao existir - tentar campo a campo
+   392→   392→        console.warn('[ODOO-PUSH-PIX] Erro ao gravar todos campos, tentando campo a campo:', textErr.message);
+   393→   393→        var textKeys = Object.keys(textFields);
+   394→   394→        var writtenPixFields = [];
+   395→   395→        for (var tk = 0; tk < textKeys.length; tk++) {
+   396→   396→          var singlePixField = {};
+   397→   397→          singlePixField[textKeys[tk]] = textFields[textKeys[tk]];
+   398→   398→          try {
+   399→   399→            await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], singlePixField]);
+   400→   400→            writtenPixFields.push(textKeys[tk]);
+   401→   401→          } catch (singlePixErr) {
+   402→   402→            console.warn('[ODOO-PUSH-PIX] Campo ausente/pulando:', textKeys[tk]);
+   403→   403→          }
+   404→   404→        }
+   405→   405→        if (writtenPixFields.length > 0) {
+   406→   406→          console.log('[ODOO-PUSH-PIX] Campos gravados individualmente:', writtenPixFields.join(', '));
+   407→   407→        }
+   408→   408→      }
+   409→   409→    }
+   410→   410→
+   411→   411→    // Nota interna no chatter
+   412→   412→    var htmlBody = '<b>PIX Gerado</b><br/>';
+   413→   413→    htmlBody += 'TXID: ' + txid + '<br/>';
+   414→   414→    htmlBody += 'Valor: R$ ' + valor + '<br/>';
+   415→   415→    if (pixCopiaCola) {
+   416→   416→      htmlBody += 'PIX Copia e Cola: ' + pixCopiaCola;
+   417→   417→    }
+   418→   418→
+   419→   419→    try {
+   420→   420→      await executeKw(client, odooConfig.db, uid, odooConfig.password, 'mail.message', 'create', [{
+   421→   421→        model: 'account.move',
+   422→   422→        res_id: recordId,
+   423→   423→        body: htmlBody,
+   424→   424→        message_type: 'comment',
+   425→   425→      }]);
+   426→   426→      console.log('[ODOO-PUSH-PIX] Nota interna OK');
+   427→   427→    } catch (noteErr) {
+   428→   428→      console.warn('[ODOO-PUSH-PIX] Nota interna falhou (nao critico):', noteErr.message.substring(0, 100));
+   429→   429→    }
+   430→   430→
+   431→   431→    console.log('[ODOO-PUSH-PIX] === PUSH COMPLETO na fatura ' + faturaName + ' (ID: ' + recordId + ') ===');
+   432→   432→    return { pushed: true, record_id: recordId };
+   433→   433→
+   434→   434→  } catch (err) {
+   435→   435→    console.error('[ODOO-PUSH-PIX] ERRO:', err.message);
+   436→   436→    return { pushed: false, reason: err.message };
+   437→   437→  }
+   438→   438→}
+   439→   439→
+   440→   440→/**
+   441→   441→ * Busca o sale.order vinculado a uma invoice e anexa boleto/NF no chatter dele
+   442→   442→ * Chamado apos pushBoletosToOdoo() para espelhar os PDFs no pedido de venda
+   443→   443→ * @param {Object} params: { client, db, uid, password, invoiceId, boletos, pdfsBase64, faturaName }
+   444→   444→ */
+   445→   445→async function pushBoletosToSaleOrder(params) {
+   446→   446→  var client = params.client;
+   447→   447→  var db = params.db;
+   448→   448→  var uid = params.uid;
+   449→   449→  var password = params.password;
+   450→   450→  var invoiceId = params.invoiceId;
+   451→   451→  var boletos = params.boletos || [];
+   452→   452→  var pdfsBase64 = params.pdfsBase64 || [];
+   453→   453→  var faturaName = params.faturaName || '';
+   454→   454→
+   455→   455→  console.log('[ODOO-PUSH-SO] Buscando sale.order da fatura', invoiceId);
+   456→   456→
+   457→   457→  try {
+   458→   458→    // Buscar sale.order vinculado a esta invoice
+   459→   459→    // Metodo 1: via invoice_line_ids -> sale_line_ids -> order_id
+   460→   460→    // Metodo 2: search sale.order where invoice_ids contains invoiceId
+   461→   461→    var soIds = await executeKw(client, db, uid, password, 'sale.order', 'search', [[['invoice_ids', 'in', [invoiceId]]]], { limit: 5 });
+   462→   462→
+   463→   463→    if (!soIds || soIds.length === 0) {
+   464→   464→      // Fallback: tentar via invoice_origin (campo texto com nome do pedido)
+   465→   465→      console.log('[ODOO-PUSH-SO] Nenhum SO via invoice_ids, tentando invoice_origin...');
+   466→   466→      var invData = await executeKw(client, db, uid, password, 'account.move', 'read', [[invoiceId], ['invoice_origin']]);
+   467→   467→      var origin = (invData && invData[0] && invData[0].invoice_origin) || '';
+   468→   468→      if (origin) {
+   469→   469→        console.log('[ODOO-PUSH-SO] invoice_origin:', origin);
+   470→   470→        soIds = await executeKw(client, db, uid, password, 'sale.order', 'search', [[['name', 'ilike', origin]]], { limit: 5 });
+   471→   471→      }
+   472→   472→    }
+   473→   473→
+   474→   474→    if (!soIds || soIds.length === 0) {
+   475→   475→      console.warn('[ODOO-PUSH-SO] Nenhum pedido de venda vinculado a fatura', invoiceId);
+   476→   476→      return { pushed: false, reason: 'no_sale_order' };
+   477→   477→    }
+   478→   478→
+   479→   479→    // Usar o primeiro SO encontrado
+   480→   480→    var soId = soIds[0];
+   481→   481→    var soData = await executeKw(client, db, uid, password, 'sale.order', 'read', [[soId], ['name']]);
+   482→   482→    var soName = (soData && soData[0] && soData[0].name) || 'SO' + soId;
+   483→   483→    console.log('[ODOO-PUSH-SO] Pedido encontrado:', soName, '(ID:', soId, ')');
+   484→   484→
+   485→   485→    var faturaNameSafe = faturaName ? faturaName.replace(/[^a-zA-Z0-9\-_]/g, '_') : 'Fatura';
+   486→   486→    var soAttachments = 0;
+   487→   487→
+   488→   488→    for (var i = 0; i < boletos.length; i++) {
+   489→   489→      var bol = boletos[i];
+   490→   490→      var pdfB64 = pdfsBase64[i];
+   491→   491→      if (!pdfB64) continue;
+   492→   492→
+   493→   493→      var nn = bol.nosso_numero || '';
+   494→   494→      var vd = bol.valor_titulo || '0,00';
+   495→   495→      var vc = bol.data_vencimento || '';
+   496→   496→      var p = bol.parcela || 1;
+   497→   497→      var t = bol.total_parcelas || 1;
+   498→   498→
+   499→   499→      var filename;
+   500→   500→      if (t > 1) {
+   501→   501→        filename = 'Boleto_' + faturaNameSafe + '_P' + p + 'de' + t + '_' + nn + '.pdf';
+   502→   502→      } else {
+   503→   503→        filename = 'Boleto_' + faturaNameSafe + '_' + nn + '.pdf';
+   504→   504→      }
+   505→   505→
+   506→   506→      try {
+   507→   507→        // Criar attachment no sale.order
+   508→   508→        var attachId = await executeKw(client, db, uid, password, 'ir.attachment', 'create', [{
+   509→   509→          name: filename,
+   510→   510→          raw: pdfB64,
+   511→   511→          res_model: 'sale.order',
+   512→   512→          res_id: soId,
+   513→   513→          mimetype: 'application/pdf',
+   514→   514→        }]);
+   515→   515→        console.log('[ODOO-PUSH-SO]   Attachment OK:', filename, 'ID:', attachId);
+   516→   516→
+   517→   517→        // Nota interna no chatter do pedido
+   518→   518→        var htmlBody = '<b>' + (t > 1 ? 'Boleto Parcela ' + p + '/' + t : 'Boleto') + '</b> — Fatura: ' + (faturaName || 'N/A') + '<br/>';
+   519→   519→        htmlBody += 'Nosso Número: ' + nn + '<br/>';
+   520→   520→        htmlBody += 'Valor: R$ ' + vd + '<br/>';
+   521→   521→        htmlBody += 'Vencimento: ' + vc + '<br/>';
+   522→   522→
+   523→   523→        await executeKw(client, db, uid, password, 'mail.message', 'create', [{
+   524→   524→          model: 'sale.order',
+   525→   525→          res_id: soId,
+   526→   526→          body: htmlBody,
+   527→   527→          message_type: 'comment',
+   528→   528→          subtype_xmlid: 'mail.mt_note',
+   529→   529→          attachment_ids: [[6, 0, [attachId]]],
+   530→   530→        }]);
+   531→   531→        console.log('[ODOO-PUSH-SO]   Nota interna OK - boleto', (i + 1));
+   532→   532→        soAttachments++;
+   533→   533→
+   534→   534→      } catch (err) {
+   535→   535→        console.error('[ODOO-PUSH-SO]   ERRO boleto', (i + 1) + ':', err.message);
+   536→   536→      }
+   537→   537→    }
+   538→   538→
+   539→   539→    console.log('[ODOO-PUSH-SO] === PUSH COMPLETO: ' + soAttachments + '/' + boletos.length + ' PDFs no pedido ' + soName + ' ===');
+   540→   540→    return { pushed: soAttachments > 0, attachments: soAttachments, sale_order_id: soId, sale_order_name: soName };
+   541→   541→
+   542→   542→  } catch (err) {
+   543→   543→    console.error('[ODOO-PUSH-SO] ERRO:', err.message);
+   544→   544→    return { pushed: false, reason: err.message };
+   545→   545→  }
+   546→   546→}
+   547→   547→
+   548→   548→/**
+   549→   549→ * Copia attachments de boleto/NF da invoice para o sale.order vinculado
+   550→   550→ * Usado pelo script retroativo para pedidos que ja tinham boletos
+   551→   551→ * @param {Object} params: { client, db, uid, password, invoiceId }
+   552→   552→ */
+   553→   553→async function copyInvoiceAttachmentsToSaleOrder(params) {
+   554→   554→  var client = params.client;
+   555→   555→  var db = params.db;
+   556→   556→  var uid = params.uid;
+   557→   557→  var password = params.password;
+   558→   558→  var invoiceId = params.invoiceId;
+   559→   559→
+   560→   560→  try {
+   561→   561→    // Buscar SO vinculado
+   562→   562→    var soIds = await executeKw(client, db, uid, password, 'sale.order', 'search', [[['invoice_ids', 'in', [invoiceId]]]], { limit: 5 });
+   563→   563→    if (!soIds || soIds.length === 0) {
+   564→   564→      var invData = await executeKw(client, db, uid, password, 'account.move', 'read', [[invoiceId], ['invoice_origin', 'name']]);
+   565→   565→      var origin = (invData && invData[0] && invData[0].invoice_origin) || '';
+   566→   566→      if (origin) {
+   567→   567→        soIds = await executeKw(client, db, uid, password, 'sale.order', 'search', [[['name', 'ilike', origin]]], { limit: 5 });
+   568→   568→      }
+   569→   569→    }
+   570→   570→    if (!soIds || soIds.length === 0) return { pushed: false, reason: 'no_sale_order' };
+   571→   571→
+   572→   572→    var soId = soIds[0];
+   573→   573→
+   574→   574→    // Buscar attachments de boleto na invoice
+   575→   575→    var attachIds = await executeKw(client, db, uid, password, 'ir.attachment', 'search', [[
+   576→   576→      ['res_model', '=', 'account.move'],
+   577→   577→      ['res_id', '=', invoiceId],
+   578→   578→      ['name', 'ilike', 'Boleto'],
+   579→   579→      ['mimetype', '=', 'application/pdf'],
+   580→   580→    ]]);
+   581→   581→
+   582→   582→    if (!attachIds || attachIds.length === 0) {
+   583→   583→      console.log('[ODOO-COPY-SO] Fatura', invoiceId, ': sem attachments de boleto');
+   584→   584→      return { pushed: false, reason: 'no_boleto_attachments' };
+   585→   585→    }
+   586→   586→
+   587→   587→    // Ler dados dos attachments
+   588→   588→    var attachments = await executeKw(client, db, uid, password, 'ir.attachment', 'read', [attachIds, ['name', 'raw', 'mimetype']]);
+   589→   589→
+   590→   590→    // Verificar quais ja existem no SO (evitar duplicar)
+   591→   591→    var soExisting = await executeKw(client, db, uid, password, 'ir.attachment', 'search', [[
+   592→   592→      ['res_model', '=', 'sale.order'],
+   593→   593→      ['res_id', '=', soId],
+   594→   594→      ['name', 'ilike', 'Boleto'],
+   595→   595→    ]]);
+   596→   596→    var soExistingNames = [];
+   597→   597→    if (soExisting && soExisting.length > 0) {
+   598→   598→      var soExistingData = await executeKw(client, db, uid, password, 'ir.attachment', 'read', [soExisting, ['name']]);
+   599→   599→      soExistingNames = soExistingData.map(function(a) { return a.name; });
+   600→   600→    }
+   601→   601→
+   602→   602→    var copied = 0;
+   603→   603→    for (var i = 0; i < attachments.length; i++) {
+   604→   604→      var att = attachments[i];
+   605→   605→      // Pular se ja existe no SO
+   606→   606→      if (soExistingNames.indexOf(att.name) >= 0) {
+   607→   607→        console.log('[ODOO-COPY-SO]   Ja existe no SO:', att.name, '- pulando');
+   608→   608→        continue;
+   609→   609→      }
+   610→   610→
+   611→   611→      // Criar copia no sale.order
+   612→   612→      try {
+   613→   613→        var newAttId = await executeKw(client, db, uid, password, 'ir.attachment', 'create', [{
+   614→   614→          name: att.name,
+   615→   615→          raw: att.raw,
+   616→   616→          res_model: 'sale.order',
+   617→   617→          res_id: soId,
+   618→   618→          mimetype: att.mimetype || 'application/pdf',
+   619→   619→        }]);
+   620→   620→
+   621→   621→        // Postar chatter note
+   622→   622→        await executeKw(client, db, uid, password, 'mail.message', 'create', [{
+   623→   623→          model: 'sale.order',
+   624→   624→          res_id: soId,
+   625→   625→          body: '<b>Boleto</b> (cópia da fatura ID ' + invoiceId + ')<br/>Arquivo: ' + att.name,
+   626→   626→          message_type: 'comment',
+   627→   627→          subtype_xmlid: 'mail.mt_note',
+   628→   628→          attachment_ids: [[6, 0, [newAttId]]],
+   629→   629→        }]);
+   630→   630→        copied++;
+   631→   631→        console.log('[ODOO-COPY-SO]   Copiado:', att.name, '→ SO', soId);
+   632→   632→      } catch (copyErr) {
+   633→   633→        console.error('[ODOO-COPY-SO]   ERRO ao copiar', att.name + ':', copyErr.message);
+   634→   634→      }
+   635→   635→    }
+   636→   636→
+   637→   637→    return { pushed: copied > 0, copied: copied, sale_order_id: soId };
+   638→   638→
+   639→   639→  } catch (err) {
+   640→   640→    console.error('[ODOO-COPY-SO] ERRO:', err.message);
+   641→   641→    return { pushed: false, reason: err.message };
+   642→   642→  }
+   643→   643→}
+   644→   644→
+   645→   645→module.exports = { pushBoletosToOdoo, pushPixToOdoo, pushBoletosToSaleOrder, copyInvoiceAttachmentsToSaleOrder };
