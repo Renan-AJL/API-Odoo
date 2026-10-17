@@ -131,7 +131,7 @@ async function checkBoletoAtivo(faturaId, faturaName) {
               situacaoItau === '' && dados.data) {
             return {
               podeEmitir: false,
-              motivo: 'Primeiro, cancele o boleto no Itau para nova emissao. Nosso Numero: ' + nnFirst,
+              motivo: 'Primeiro, cancele o boleto no Itaú para nova emissão. Nosso Número: ' + nnFirst,
               nossoNumero: nnFirst,
             };
           }
@@ -149,7 +149,7 @@ async function checkBoletoAtivo(faturaId, faturaName) {
         // BLOQUEIA por seguranca (nao sabemos se o boleto ainda esta ativo)
         return {
           podeEmitir: false,
-          motivo: 'Primeiro, cancele o boleto no Itau para nova emissao. Nosso Numero: ' + nossoNumero.split(' | ')[0] + ' (nao foi possivel verificar status no Itau)',
+          motivo: 'Primeiro, cancele o boleto no Itaú para nova emissão. Nosso Número: ' + nossoNumero.split(' | ')[0] + ' (não foi possível verificar status no Itaú)',
           nossoNumero: nossoNumero.split(' | ')[0],
         };
       }
@@ -166,7 +166,7 @@ async function checkBoletoAtivo(faturaId, faturaName) {
         boletoStatus !== 'cancelado' && boletoStatus !== 'expirado' && boletoStatus !== 'pago') {
       return {
         podeEmitir: false,
-        motivo: 'Primeiro, cancele o boleto no Itau para nova emissao. Nosso Numero: ' + nossoNumero.split(' | ')[0],
+        motivo: 'Primeiro, cancele o boleto no Itaú para nova emissão. Nosso Número: ' + nossoNumero.split(' | ')[0],
         nossoNumero: nossoNumero.split(' | ')[0],
       };
     }
@@ -174,8 +174,54 @@ async function checkBoletoAtivo(faturaId, faturaName) {
     return { podeEmitir: true };
   } catch (err) {
     console.warn('[BOLETO-CHECK] Erro na verificacao: ' + err.message);
-    // Em caso de erro, permite emissao (falha aberta — melhor que bloquear tudo)
-    return { podeEmitir: true };
+    // Falha FECHADA: se nao conseguimos verificar, BLOQUEIA emissao por seguranca.
+    // Evita duplicacao quando Odoo ou API Itau estao instaveis.
+    return {
+      podeEmitir: false,
+      motivo: 'Primeiro, cancele o boleto no Itaú para nova emissão. Não foi possível verificar o status do boleto (' + (err.message || 'erro desconhecido') + ')',
+    };
+  }
+}
+
+/**
+ * Posta nota no chatter da invoice quando emissao de boleto e bloqueada
+ * Para rastreabilidade: o usuario ve no historico da fatura por que foi bloqueado
+ */
+async function postBoletoBlockedChatter(faturaId, motivo) {
+  var config = require('../config');
+  var odooConfig = config.odoo;
+  if (!odooConfig || !odooConfig.enabled || !odooConfig.url || !faturaId || faturaId <= 0) return;
+
+  try {
+    var xmlrpc = require('xmlrpc');
+    var base = odooConfig.url.replace(/\/+$/, '');
+    var host = base.replace('https://', '');
+    var client = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/common', port: 443 });
+
+    var uid = await new Promise(function(ok, fail) {
+      client.methodCall('authenticate', [odooConfig.db, odooConfig.user, odooConfig.password, {}], function(e, r) {
+        if (e || !r) return fail(e || new Error('Auth failed'));
+        ok(r);
+      });
+    });
+
+    var objClient = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/object', port: 443 });
+    var htmlBody = '<b>⚠️ Emissão de Boleto BLOQUEADA</b><br/>' + (motivo || 'Boleto ativo encontrado');
+    await new Promise(function(ok, fail) {
+      objClient.methodCall('execute_kw', [odooConfig.db, uid, odooConfig.password, 'mail.message', 'create', [{
+        model: 'account.move',
+        res_id: faturaId,
+        body: htmlBody,
+        message_type: 'comment',
+        subtype_xmlid: 'mail.mt_note',
+      }]], function(e, r) {
+        if (e) return fail(e);
+        ok(r);
+      });
+    });
+    console.log('[BOLETO-BLOCKED-CHATTER] Nota postada na fatura ' + faturaId);
+  } catch (err) {
+    console.warn('[BOLETO-BLOCKED-CHATTER] Erro ao postar chatter:', err.message);
   }
 }
 
@@ -341,6 +387,8 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
     var boletoCheck = await checkBoletoAtivo(faturaId, faturaName);
     if (!boletoCheck.podeEmitir) {
       console.warn('[API/BOLETO] Boleto ativo encontrado. Bloqueando emissao.');
+      // Postar chatter na fatura para rastreabilidade
+      try { await postBoletoBlockedChatter(faturaId, boletoCheck.motivo); } catch(cErr) {}
       return res.json({ success: false, message: boletoCheck.motivo, nosso_numero: boletoCheck.nossoNumero });
     }
 
@@ -512,6 +560,9 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
  * POST /api/v1/itau/gerar - Simplificado para Odoo Server Actions
  */
 router.post('/gerar', async function(req, res) {
+  var gerarBolLockKey = null;
+  var gerarLockResolve = null;
+
   try {
     var formaPag = req.body.forma_pagamento || '';
     var fatName = req.body.fatura_name || '';
@@ -523,6 +574,7 @@ router.post('/gerar', async function(req, res) {
     var pagCity = req.body.pagador_city || '';
     var pagState = req.body.pagador_state || '';
     var pagZip = req.body.pagador_zip || '';
+    var gerarFaturaId = parseInt(req.body.fatura_id || req.body.invoice_id) || 0;
 
     // === PIX ===
     if (formaPag.trim().toUpperCase().indexOf('PIX') === 0) {
@@ -560,14 +612,58 @@ router.post('/gerar', async function(req, res) {
     }
 
     // === GUARDA: Verificar boleto ativo antes de emitir ===
-    var gerarFaturaId = parseInt(req.body.fatura_id || req.body.invoice_id) || 0;
     var boletoCheckGerar = await checkBoletoAtivo(gerarFaturaId, fatName);
     if (!boletoCheckGerar.podeEmitir) {
       console.warn('[API/GERAR] Boleto ativo encontrado. Bloqueando emissao.');
+      // Postar chatter na fatura para rastreabilidade
+      try { await postBoletoBlockedChatter(gerarFaturaId, boletoCheckGerar.motivo); } catch(cErr) {}
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.send('ERRO|' + boletoCheckGerar.motivo);
       return;
     }
+
+    // === DEDUPLICACAO: Lock anti-concorrencia boleto ===
+    // (Antes so existia no /pagar; agora tambem no /gerar para evitar
+    //  duplicacao por cliques multiplos no Odoo Server Action)
+    gerarBolLockKey = getBoletoLockKey(gerarFaturaId, fatName);
+
+    // Se tem resultado cacheado (mesma fatura, menos de 90s atras), reusa
+    if (_boletoCache[gerarBolLockKey]) {
+      var gerarCached = _boletoCache[gerarBolLockKey];
+      var gerarAge = Date.now() - gerarCached.timestamp;
+      if (gerarAge < BOLETO_CACHE_TTL) {
+        console.log('[API/GERAR] REUSANDO resultado cacheado (' + (gerarAge / 1000).toFixed(1) + 's atras) para', gerarBolLockKey);
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.send(gerarCached.response);
+        return;
+      }
+      delete _boletoCache[gerarBolLockKey];
+    }
+
+    // Se tem requisicao em curso, espera ela terminar
+    if (_boletoLocks[gerarBolLockKey]) {
+      console.log('[API/GERAR] AGUARDANDO lock existente para', gerarBolLockKey);
+      try {
+        var gerarCachedResult = await _boletoLocks[gerarBolLockKey];
+        console.log('[API/GERAR] Lock liberado, retornando resultado da requisicao original');
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.send(gerarCachedResult);
+        return;
+      } catch (gerarLockErr) {
+        console.log('[API/GERAR] Requisicao original falhou, tentando novamente...');
+      }
+    }
+
+    // Criar lock
+    _boletoLocks[gerarBolLockKey] = new Promise(function(resolve) { gerarLockResolve = resolve; });
+
+    // Auto-limpar lock apos TTL
+    setTimeout(function() {
+      if (_boletoLocks[gerarBolLockKey]) {
+        console.warn('[API/GERAR] Lock expirou por TTL para', gerarBolLockKey);
+        delete _boletoLocks[gerarBolLockKey];
+      }
+    }, BOLETO_LOCK_TTL);
 
     var basePayload = {
       cpfCnpjPagador: pagCpf, nomePagador: pagNome, numeroPedido: fatName,
@@ -626,12 +722,25 @@ router.post('/gerar', async function(req, res) {
       );
     }
 
+    var gerarResult = lines.join('\n');
+
+    // Cache resultado e liberar lock
+    _boletoCache[gerarBolLockKey] = { timestamp: Date.now(), response: gerarResult };
+    delete _boletoLocks[gerarBolLockKey];
+    if (gerarLockResolve) gerarLockResolve(gerarResult);
+
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.send(lines.join('\n'));
+    res.send(gerarResult);
   } catch (e) {
     console.error('[API/GERAR] ERRO:', e.message);
+    // Liberar lock em caso de erro
+    var errGerarResult = 'ERRO|' + e.message;
+    if (gerarBolLockKey) {
+      delete _boletoLocks[gerarBolLockKey];
+      if (gerarLockResolve) gerarLockResolve(errGerarResult);
+    }
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.send('ERRO|' + e.message);
+    res.send(errGerarResult);
   }
 });
 
