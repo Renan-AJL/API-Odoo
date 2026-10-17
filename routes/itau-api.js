@@ -8,7 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const { apiKeyAuth } = require('../middleware/auth');
-const { emitirBoleto, parseFormaPagamento } = require('../services/itau-boleto');
+const { emitirBoleto, parseFormaPagamento, consultarBoletoPorNossoNumero } = require('../services/itau-boleto');
 const { storeBoleto, generatePdf, generatePdfFromFields } = require('../services/pdf-boleto');
 const { pushBoletosToOdoo, pushPixToOdoo } = require('../services/odoo-push');
 const { criarLinkPagamento } = require('../services/itau-link-pagamento');
@@ -24,8 +24,159 @@ var _pixCache = {};     // faturaId -> { timestamp, response } (resultado recent
 var PIX_LOCK_TTL = 30000;  // 30s - tempo maximo de lock
 var PIX_CACHE_TTL = 60000; // 60s - reusa resultado se Odoo reenviar
 
+// === Lock anti-concorrencia BOLETO ===
+// Impede triplicacao/quadruplicacao de boletos por clicks multiplos no Odoo
+var _boletoLocks = {};     // faturaId -> Promise (in-flight)
+var _boletoCache = {};     // faturaId -> { timestamp, response } (resultado recente)
+var BOLETO_LOCK_TTL = 45000;  // 45s - tempo maximo de lock (boleto demora mais que PIX)
+var BOLETO_CACHE_TTL = 90000; // 90s - reusa resultado se Odoo reenviar
+
 function getPixLockKey(faturaId, faturaName) {
   return String(faturaId || 'name:' + (faturaName || 'unknown'));
+}
+
+function getBoletoLockKey(faturaId, faturaName) {
+  return String(faturaId || 'name:' + (faturaName || 'unknown'));
+}
+
+// === Verificar boleto ativo antes de emitir novo ===
+// Consulta Odoo (campos x_studio_itau_*) e Itau API para confirmar status
+// Retorna: { podeEmitir: true } ou { podeEmitir: false, motivo: string }
+async function checkBoletoAtivo(faturaId, faturaName) {
+  var config = require('../config');
+  var odooConfig = config.odoo;
+
+  if (!odooConfig || !odooConfig.enabled || !odooConfig.url || faturaId <= 0) {
+    // Sem Odoo ou sem faturaId, nao podemos verificar — permite emissao
+    return { podeEmitir: true };
+  }
+
+  try {
+    var xmlrpc = require('xmlrpc');
+    var base = odooConfig.url.replace(/\/+$/, '');
+    var host = base.replace('https://', '');
+    var client = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/common', port: 443 });
+
+    // Auth
+    var uid = await new Promise(function(ok, fail) {
+      client.methodCall('authenticate', [odooConfig.db, odooConfig.user, odooConfig.password, {}], function(e, r) {
+        if (e || !r) return fail(e || new Error('Auth failed'));
+        ok(r);
+      });
+    });
+
+    var objClient = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/object', port: 443 });
+
+    function execKw(model, method, args, kwargs) {
+      return new Promise(function(ok, fail) {
+        var params = [odooConfig.db, uid, odooConfig.password, model, method, args];
+        if (kwargs) params.push(kwargs);
+        objClient.methodCall('execute_kw', params, function(e, r) {
+          if (e) return fail(e);
+          ok(r);
+        });
+      });
+    }
+
+    // Ler campos da fatura
+    var fieldsToRead = ['x_studio_itau_situacao', 'x_studio_itau_nosso_numero',
+      'x_studio_itau_boleto_status', 'x_studio_boleto_cancelado'];
+    var invoiceData = await execKw('account.move', 'read', [[faturaId]], { fields: fieldsToRead });
+
+    if (!invoiceData || !invoiceData.length) {
+      return { podeEmitir: true }; // Fatura nao encontrada, permite
+    }
+
+    var inv = invoiceData[0];
+    var situacao = (inv.x_studio_itau_situacao || '').toLowerCase();
+    var boletoStatus = (inv.x_studio_itau_boleto_status || '').toLowerCase();
+    var nossoNumero = inv.x_studio_itau_nosso_numero || '';
+    var boletoCancelado = inv.x_studio_boleto_cancelado || false;
+
+    console.log('[BOLETO-CHECK] Fatura ' + faturaId + ': situacao=' + situacao +
+      ' | boleto_status=' + boletoStatus + ' | nn=' + nossoNumero +
+      ' | cancelado=' + boletoCancelado);
+
+    // Se boleto foi cancelado ou expirado, pode emitir novo
+    if (boletoCancelado || situacao === 'cancelado' || situacao === 'expirado' ||
+        boletoStatus === 'cancelado' || boletoStatus === 'expirado') {
+      console.log('[BOLETO-CHECK] Boleto anterior cancelado/expirado. Pode emitir novo.');
+      return { podeEmitir: true };
+    }
+
+    // Se nao tem nosso_numero, nao tem boleto emitido
+    if (!nossoNumero) {
+      console.log('[BOLETO-CHECK] Sem nosso_numero. Pode emitir.');
+      return { podeEmitir: true };
+    }
+
+    // Se situacao = emitido ou em_aberto, verificar no Itau se ainda ativo
+    if (situacao === 'emitido' || boletoStatus === 'em_aberto' || situacao === '' && nossoNumero) {
+      // Tentar consultar boleto no Itau
+      try {
+        var nnFirst = nossoNumero.split(' | ')[0].trim(); // Pega primeiro se multiplos
+        var consultaResult = await consultarBoletoPorNossoNumero(nnFirst);
+
+        if (consultaResult && consultaResult.dados) {
+          var dados = consultaResult.dados;
+          // Verificar situacao do boleto no Itau
+          var situacaoItau = '';
+          if (dados.data && dados.data.dado_boleto) {
+            situacaoItau = (dados.data.dado_boleto.situacao_boleto || '').toLowerCase();
+          }
+          console.log('[BOLETO-CHECK] Itau situacao_boleto: ' + situacaoItau);
+
+          // Se boleto esta ativo (em_aberto, registrado, etc), BLOQUEAR
+          if (situacaoItau === 'em_aberto' || situacaoItau === 'registrado' ||
+              situacaoItau === '' && dados.data) {
+            return {
+              podeEmitir: false,
+              motivo: 'Primeiro, cancele o boleto no Itau para nova emissao. Nosso Numero: ' + nnFirst,
+              nossoNumero: nnFirst,
+            };
+          }
+
+          // Se baixado/cancelado no Itau, pode emitir novo
+          if (situacaoItau.indexOf('cancelado') >= 0 || situacaoItau.indexOf('baixado') >= 0 ||
+              situacaoItau.indexOf('pago') >= 0) {
+            console.log('[BOLETO-CHECK] Boleto ' + situacaoItau + ' no Itau. Pode emitir novo.');
+            return { podeEmitir: true };
+          }
+        }
+      } catch (itauErr) {
+        console.warn('[BOLETO-CHECK] Erro ao consultar Itau: ' + itauErr.message);
+        // Se nao conseguiu consultar o Itau, e temos situacao=emitido no Odoo,
+        // BLOQUEIA por seguranca (nao sabemos se o boleto ainda esta ativo)
+        return {
+          podeEmitir: false,
+          motivo: 'Primeiro, cancele o boleto no Itau para nova emissao. Nosso Numero: ' + nossoNumero.split(' | ')[0] + ' (nao foi possivel verificar status no Itau)',
+          nossoNumero: nossoNumero.split(' | ')[0],
+        };
+      }
+    }
+
+    // Se situacao = pago, pode emitir novo (boleto ja foi pago)
+    if (situacao === 'pago' || boletoStatus === 'pago') {
+      console.log('[BOLETO-CHECK] Boleto anterior ja pago. Pode emitir novo.');
+      return { podeEmitir: true };
+    }
+
+    // Default: se tem nosso_numero e situacao nao e cancelado/expirado/pago, bloqueia
+    if (nossoNumero && situacao !== 'cancelado' && situacao !== 'expirado' && situacao !== 'pago' &&
+        boletoStatus !== 'cancelado' && boletoStatus !== 'expirado' && boletoStatus !== 'pago') {
+      return {
+        podeEmitir: false,
+        motivo: 'Primeiro, cancele o boleto no Itau para nova emissao. Nosso Numero: ' + nossoNumero.split(' | ')[0],
+        nossoNumero: nossoNumero.split(' | ')[0],
+      };
+    }
+
+    return { podeEmitir: true };
+  } catch (err) {
+    console.warn('[BOLETO-CHECK] Erro na verificacao: ' + err.message);
+    // Em caso de erro, permite emissao (falha aberta — melhor que bloquear tudo)
+    return { podeEmitir: true };
+  }
 }
 
 // --- Deteccao de cartao por bandeira ---
@@ -186,6 +337,51 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
       return res.json({ success: false, message: 'Forma de pagamento nao suportada para boleto: ' + formaPag });
     }
 
+    // === GUARDA: Verificar boleto ativo antes de emitir ===
+    var boletoCheck = await checkBoletoAtivo(faturaId, faturaName);
+    if (!boletoCheck.podeEmitir) {
+      console.warn('[API/BOLETO] Boleto ativo encontrado. Bloqueando emissao.');
+      return res.json({ success: false, message: boletoCheck.motivo, nosso_numero: boletoCheck.nossoNumero });
+    }
+
+    // === DEDUPLICACAO: Lock anti-concorrencia boleto ===
+    var boletoLockKey = getBoletoLockKey(faturaId, faturaName);
+
+    // Se tem resultado cacheado (mesma fatura, menos de 90s atras), reusa
+    if (_boletoCache[boletoLockKey]) {
+      var boletoCached = _boletoCache[boletoLockKey];
+      var boletoAge = Date.now() - boletoCached.timestamp;
+      if (boletoAge < BOLETO_CACHE_TTL) {
+        console.log('[API/BOLETO] REUSANDO resultado cacheado (' + (boletoAge / 1000).toFixed(1) + 's atras) para', boletoLockKey);
+        return res.json(boletoCached.response);
+      }
+      delete _boletoCache[boletoLockKey];
+    }
+
+    // Se tem requisicao em curso, espera ela terminar
+    if (_boletoLocks[boletoLockKey]) {
+      console.log('[API/BOLETO] AGUARDANDO lock existente para', boletoLockKey);
+      try {
+        var boletoCachedResult = await _boletoLocks[boletoLockKey];
+        console.log('[API/BOLETO] Lock liberado, retornando resultado da requisicao original');
+        return res.json(boletoCachedResult);
+      } catch (boletoLockErr) {
+        console.log('[API/BOLETO] Requisicao original falhou, tentando novamente...');
+      }
+    }
+
+    // Criar lock
+    var boletoLockResolve;
+    _boletoLocks[boletoLockKey] = new Promise(function(resolve) { boletoLockResolve = resolve; });
+
+    // Auto-limpar lock apos TTL
+    setTimeout(function() {
+      if (_boletoLocks[boletoLockKey]) {
+        console.warn('[API/BOLETO] Lock expirou por TTL para', boletoLockKey);
+        delete _boletoLocks[boletoLockKey];
+      }
+    }, BOLETO_LOCK_TTL);
+
     var basePayload = {
       cpfCnpjPagador: pag.cpf_cnpj || d.pagador_cpf || '',
       nomePagador: pag.nome || d.pagador_nome || '',
@@ -283,7 +479,7 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
       pushResult = { pushed: false, reason: pushErr.message };
     }
 
-    res.json({
+    var boletoResponseData = {
       success: true,
       data: {
         forma_pagamento: formaPag, total_parcelas: totalP,
@@ -293,11 +489,22 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
         pagamentos: pagamentos,
         odoo_push: pushResult.pushed ? 'OK_' + pushResult.attachments + '_attachments' : 'falhou_' + (pushResult.reason || 'unknown')
       }
-    });
+    };
+
+    // Cache resultado e liberar lock boleto
+    _boletoCache[boletoLockKey] = { timestamp: Date.now(), response: boletoResponseData };
+    delete _boletoLocks[boletoLockKey];
+    if (boletoLockResolve) boletoLockResolve(boletoResponseData);
+
+    res.json(boletoResponseData);
 
   } catch (e) {
     console.error('[API] ERRO:', e.message, e.stack);
-    res.json({ success: false, message: e.message });
+    // Liberar lock boleto em caso de erro
+    var errBolResponse = { success: false, message: e.message };
+    delete _boletoLocks[boletoLockKey];
+    if (boletoLockResolve) boletoLockResolve(errBolResponse);
+    res.json(errBolResponse);
   }
 });
 
@@ -349,6 +556,16 @@ router.post('/gerar', async function(req, res) {
     if (plano.tipo !== 'boleto' || plano.parcelas.length === 0) {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.send('ERRO|Forma de pagamento nao suportada: ' + formaPag);
+      return;
+    }
+
+    // === GUARDA: Verificar boleto ativo antes de emitir ===
+    var gerarFaturaId = parseInt(req.body.fatura_id || req.body.invoice_id) || 0;
+    var boletoCheckGerar = await checkBoletoAtivo(gerarFaturaId, fatName);
+    if (!boletoCheckGerar.podeEmitir) {
+      console.warn('[API/GERAR] Boleto ativo encontrado. Bloqueando emissao.');
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.send('ERRO|' + boletoCheckGerar.motivo);
       return;
     }
 
