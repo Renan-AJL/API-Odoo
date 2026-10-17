@@ -266,7 +266,7 @@ async function main() {
       try {
         var actionId = await rpc(client, db, uid, pw, 'ir.actions.server', 'create', [{
           name: 'Gerar PIX',
-          model_name: 'sale.order',
+          model_id: soModelId,
           state: 'code',
           code: pixActionCode,
           usage: 'ir_actions_server',
@@ -287,33 +287,40 @@ async function main() {
   console.log('\n--- PASSO 3: Automated Action - Travar pagamento após PIX ---');
 
   var existingLockPayment = await rpc(client, db, uid, pw, 'base.automation', 'search', [
-    [['name', '=', 'PIX: Travar forma de pagamento'], ['model_name', '=', 'sale.order']]
+    [['name', '=', 'PIX: Travar forma de pagamento'], ['model_id', '=', soModelId]]
   ]);
 
   if (existingLockPayment && existingLockPayment.length > 0) {
     console.log('  ✅ Automated Action já existe (id=' + existingLockPayment[0] + ')');
   } else {
+    // Criar Server Action primeiro (o código fica lá)
     var lockPaymentCode = [
       '# PIX: Travar forma de pagamento após PIX gerado',
-      '# Se PIX já foi gerado (tipo_pagamento = pix), não permite alterar',
       'if record.x_studio_itau_tipo_pagamento == "pix":',
-      '    # Verificar se payment_term_id foi alterado',
-      '    if "payment_term_id" in record._fields and record.payment_term_id:',
-      '        # PIX = pagamento imediato, se mudou, bloquear',
-      '        raise UserError("Não é possível alterar a forma de pagamento após PIX gerado. Cancele o PIX no Itaú primeiro.")',
+      '    raise UserError("Não é possível alterar a forma de pagamento após PIX gerado. Cancele o PIX no Itaú primeiro.")',
     ].join('\n');
 
     if (DRY_RUN) {
       console.log('  🔄 [DRY-RUN] Criaria Automated Action para travar pagamento');
     } else {
       try {
+        // 1. Criar Server Action com o código
+        var lockPaySaId = await rpc(client, db, uid, pw, 'ir.actions.server', 'create', [{
+          name: 'PIX: Travar forma de pagamento (código)',
+          model_id: soModelId,
+          state: 'code',
+          code: lockPaymentCode,
+          usage: 'ir_actions_server',
+        }]);
+        console.log('  ✅ Server Action interno criado (id=' + lockPaySaId + ')');
+
+        // 2. Criar Automated Action linkando o Server Action
         var autoId1 = await rpc(client, db, uid, pw, 'base.automation', 'create', [{
           name: 'PIX: Travar forma de pagamento',
-          model_name: 'sale.order',
+          model_id: soModelId,
           trigger: 'on_write',
           active: true,
-          code: lockPaymentCode,
-          state: 'code',
+          action_server_ids: [[6, 0, [lockPaySaId]]],
         }]);
         console.log('  ✅ Automated Action criado (id=' + autoId1 + ')');
       } catch (err) {
@@ -329,7 +336,7 @@ async function main() {
   console.log('\n--- PASSO 4: Automated Action - Travar cancelar após PIX ---');
 
   var existingLockCancel = await rpc(client, db, uid, pw, 'base.automation', 'search', [
-    [['name', '=', 'PIX: Bloquear cancelar/voltar rascunho'], ['model_name', '=', 'sale.order']]
+    [['name', '=', 'PIX: Bloquear cancelar/voltar rascunho'], ['model_id', '=', soModelId]]
   ]);
 
   if (existingLockCancel && existingLockCancel.length > 0) {
@@ -338,24 +345,31 @@ async function main() {
     var lockCancelCode = [
       '# PIX: Bloquear cancelar e voltar rascunho após PIX gerado',
       'if record.x_studio_itau_tipo_pagamento == "pix":',
-      '    # Verificar se o estado está mudando para cancel ou draft',
-      '    if "state" in record._fields:',
-      '        new_state = record.state',
-      '        if new_state in ("cancel", "draft"):',
-      '            raise UserError("Não é possível cancelar ou voltar para rascunho após PIX gerado. Cancele o PIX no Itaú primeiro.")',
+      '    if record.state in ("cancel", "draft"):',
+      '        raise UserError("Não é possível cancelar ou voltar para rascunho após PIX gerado. Cancele o PIX no Itaú primeiro.")',
     ].join('\n');
 
     if (DRY_RUN) {
       console.log('  🔄 [DRY-RUN] Criaria Automated Action para travar cancelar');
     } else {
       try {
+        // 1. Criar Server Action com o código
+        var lockCancelSaId = await rpc(client, db, uid, pw, 'ir.actions.server', 'create', [{
+          name: 'PIX: Bloquear cancelar/voltar rascunho (código)',
+          model_id: soModelId,
+          state: 'code',
+          code: lockCancelCode,
+          usage: 'ir_actions_server',
+        }]);
+        console.log('  ✅ Server Action interno criado (id=' + lockCancelSaId + ')');
+
+        // 2. Criar Automated Action linkando o Server Action
         var autoId2 = await rpc(client, db, uid, pw, 'base.automation', 'create', [{
           name: 'PIX: Bloquear cancelar/voltar rascunho',
-          model_name: 'sale.order',
+          model_id: soModelId,
           trigger: 'on_write',
           active: true,
-          code: lockCancelCode,
-          state: 'code',
+          action_server_ids: [[6, 0, [lockCancelSaId]]],
         }]);
         console.log('  ✅ Automated Action criado (id=' + autoId2 + ')');
       } catch (err) {
