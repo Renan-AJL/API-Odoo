@@ -3,11 +3,15 @@
  * ============================================
  * Configura regras de PIX no app Vendas (sale.order) via XML-RPC:
  *
- * 1. Cria campos x_studio_itau_* no sale.order (se não existirem)
+ * 1. Verifica campos Studio já criados no sale.order
  * 2. Cria Server Action "Gerar PIX" no sale.order
  * 3. Cria Automated Action: travar forma de pagamento após PIX
  * 4. Cria Automated Action: travar cancelar/voltar rascunho após PIX
- * 5. Cria Automated Action: só Finance cria fatura
+ * 5. Informa sobre restrição de fatura (só Finance)
+ *
+ * CAMPOS REAIS DO ODOO STUDIO (sale.order):
+ *   x_studio_related_field_2jf_1k4uaua7n  → HTML (PIX/Boleto display)
+ *   x_studio_boletos_pix                   → PIX Copia e Cola (text)
  *
  * Uso: node scripts/setup-pix-sales.js <ODOO_API_KEY> [--dry-run]
  *
@@ -26,6 +30,13 @@ var DRY_RUN = process.argv.indexOf('--dry-run') >= 0;
 var MIDDLEWARE_URL = process.env.RENDER_URL || 'https://api-odoo-rhzf.onrender.com';
 var MIDDLEWARE_KEY = process.env.MIDDLEWARE_API_KEY || 'cnpja-odoo-secret-2024';
 
+// ============================================================
+// CAMPOS REAIS DO ODOO STUDIO (sale.order)
+// Estes campos foram criados manualmente no Odoo Studio
+// ============================================================
+var SO_FIELD_HTML     = 'x_studio_related_field_2jf_1k4uaua7n'; // HTML field (PIX/Boleto display)
+var SO_FIELD_PIX_CC   = 'x_studio_boletos_pix';                  // PIX Copia e Cola (text)
+
 if (!ODOO_API_KEY) {
   console.error('Uso: node scripts/setup-pix-sales.js <ODOO_API_KEY> [--dry-run]');
   console.error('Gere a API key em Odoo: Settings > Users > API Keys');
@@ -38,6 +49,9 @@ console.log('DB:', ODOO_DB);
 console.log('User:', ODOO_USER);
 console.log('Dry Run:', DRY_RUN);
 console.log('Middleware:', MIDDLEWARE_URL);
+console.log('Campos Studio sale.order:');
+console.log('  HTML:', SO_FIELD_HTML);
+console.log('  PIX CC:', SO_FIELD_PIX_CC);
 
 // ============================================================
 // XML-RPC helpers
@@ -84,24 +98,40 @@ async function main() {
   // ============================================================
   console.log('\n--- PASSO 0: Verificando existentes ---');
 
-  // Verificar campos itau no sale.order
+  // Verificar model sale.order
   var soModelIds = await rpc(client, db, uid, pw, 'ir.model', 'search', [[['model', '=', 'sale.order']]]);
   var soModelId = soModelIds && soModelIds[0] || 0;
   console.log('sale.order model ID:', soModelId);
 
-  var existingItauFields = await rpc(client, db, uid, pw, 'ir.model.fields', 'search_read', [
-    [['model_id', '=', soModelId], ['name', 'like', 'x_studio_itau']]
-  ], { fields: ['name', 'field_description', 'ttype'] });
-  console.log('Campos itau em sale.order:', existingItauFields.length);
-  for (var f of existingItauFields) {
+  // Verificar TODOS os campos x_studio_* no sale.order
+  var allStudioFields = await rpc(client, db, uid, pw, 'ir.model.fields', 'search_read', [
+    [['model_id', '=', soModelId], ['name', 'like', 'x_studio']]
+  ], { fields: ['name', 'field_description', 'ttype'], order: 'name' });
+  console.log('Campos x_studio_* em sale.order:', allStudioFields.length);
+  for (var f of allStudioFields) {
     console.log('  ', f.name, '(' + f.ttype + ') -', f.field_description);
+  }
+
+  // Verificar se os campos PIX existem
+  var pixHtmlField = allStudioFields.find(function(f) { return f.name === SO_FIELD_HTML; });
+  var pixCcField = allStudioFields.find(function(f) { return f.name === SO_FIELD_PIX_CC; });
+
+  console.log('\nCampos PIX no sale.order:');
+  console.log('  ' + SO_FIELD_HTML + ':', pixHtmlField ? 'EXISTE (' + pixHtmlField.ttype + ')' : 'AUSENTE');
+  console.log('  ' + SO_FIELD_PIX_CC + ':', pixCcField ? 'EXISTE (' + pixCcField.ttype + ')' : 'AUSENTE');
+
+  if (!pixHtmlField || !pixCcField) {
+    console.log('\n⚠️  Campos Studio não encontrados. Crie no Odoo Studio:');
+    if (!pixHtmlField) console.log('  - Campo HTML "Itaú Boletos/PIX HTML" (nome será gerado pelo Studio)');
+    if (!pixCcField) console.log('  - Campo Text "PIX Copia e Cola" (nome será gerado pelo Studio)');
+    console.log('  Depois rode este script novamente para criar as ações.');
   }
 
   // Verificar Server Actions existentes
   var existingActions = await rpc(client, db, uid, pw, 'ir.actions.server', 'search_read', [
     [['model_name', 'like', 'sale.order']]
   ], { fields: ['name', 'code', 'model_name'] });
-  console.log('Server Actions em sale.order:', existingActions.length);
+  console.log('\nServer Actions em sale.order:', existingActions.length);
   for (var a of existingActions) {
     console.log('  ', a.id, '-', a.name);
   }
@@ -115,69 +145,21 @@ async function main() {
     console.log('  ', au.id, '-', au.name, '(ativo:', au.active, ', trigger:', au.trigger, ')');
   }
 
-  // Verificar campos de pagamento no sale.order
-  var paymentFields = ['payment_term_id', 'x_studio_itau_tipo_pagamento', 'x_studio_itau_pix_copia_cola'];
-  var paymentFieldData = await rpc(client, db, uid, pw, 'ir.model.fields', 'search_read', [
-    [['model_id', '=', soModelId], ['name', 'in', paymentFields]]
-  ], { fields: ['name', 'field_description', 'ttype'] });
-  console.log('Campos de pagamento em sale.order:');
-  for (var pf of paymentFieldData) {
-    console.log('  ', pf.name, '(' + pf.ttype + ') -', pf.field_description);
-  }
-
   // ============================================================
-  // PASSO 1: Criar campos x_studio_itau_* no sale.order (se não existirem)
+  // PASSO 1: Verificar campos no account.move (para referência)
   // ============================================================
-  console.log('\n--- PASSO 1: Campos Itaú no sale.order ---');
+  console.log('\n--- PASSO 1: Campos Itaú no account.move (referência) ---');
 
-  var FIELDS_SO = [
-    { name: 'x_studio_itau_tipo_pagamento', field_description: 'Tipo Pagamento Itaú', ttype: 'selection', selection: "[('pix','PIX'),('boleto','Boleto'),('cartao','Cartão')]" },
-    { name: 'x_studio_itau_situacao', field_description: 'Status Itaú', ttype: 'selection', selection: "[('emitido','Emitido'),('pago','Pago'),('cancelado','Cancelado'),('expirado','Expirado'),('erro','Erro')]" },
-    { name: 'x_studio_itau_txid', field_description: 'PIX TXID', ttype: 'char' },
-    { name: 'x_studio_itau_pix_copia_cola', field_description: 'PIX Copia e Cola', ttype: 'text' },
-    { name: 'x_studio_itau_boletos_html', field_description: 'Itaú Boletos/PIX HTML', ttype: 'html' },
-    { name: 'x_studio_itau_pix_status', field_description: 'PIX Status', ttype: 'selection', selection: "[('ativa','Ativa'),('concluida','Concluída'),('removida_pelo_psp','Removida pelo PSP'),('expirada','Expirada')]" },
-  ];
+  var amModelIds = await rpc(client, db, uid, pw, 'ir.model', 'search', [[['model', '=', 'account.move']]]);
+  var amModelId = amModelIds && amModelIds[0] || 0;
 
-  var existingNames = existingItauFields.map(function(f) { return f.name; });
-  var createdFields = 0;
-
-  for (var fd of FIELDS_SO) {
-    if (existingNames.indexOf(fd.name) >= 0) {
-      console.log('  ✅', fd.name, '- JÁ EXISTE');
-      continue;
-    }
-
-    var vals = {
-      name: fd.name,
-      field_description: fd.field_description,
-      ttype: fd.ttype,
-      model_id: soModelId,
-      store: true,
-    };
-    if (fd.ttype === 'selection') vals.selection = fd.selection;
-    if (fd.ttype === 'char') vals.size = 256;
-
-    if (DRY_RUN) {
-      console.log('  🔄 [DRY-RUN] Criaria:', fd.name, '(' + fd.ttype + ')');
-      createdFields++;
-      continue;
-    }
-
-    try {
-      var fieldId = await rpc(client, db, uid, pw, 'ir.model.fields', 'create', [vals]);
-      console.log('  ✅', fd.name, '- CRIADO (id=' + fieldId + ')');
-      createdFields++;
-    } catch (err) {
-      if (err.message && err.message.indexOf('unique') !== -1) {
-        console.log('  ⚠️', fd.name, '- JÁ EXISTE (recusado pelo Odoo)');
-      } else {
-        console.error('  ❌', fd.name, '- ERRO:', err.message);
-      }
-    }
+  var amItauFields = await rpc(client, db, uid, pw, 'ir.model.fields', 'search_read', [
+    [['model_id', '=', amModelId], ['name', 'like', 'x_studio_itau']]
+  ], { fields: ['name', 'field_description', 'ttype'], order: 'name' });
+  console.log('Campos x_studio_itau_* em account.move:', amItauFields.length);
+  for (var af of amItauFields) {
+    console.log('  ', af.name, '(' + af.ttype + ') -', af.field_description);
   }
-
-  console.log('Campos criados:', createdFields);
 
   // ============================================================
   // PASSO 2: Criar Server Action "Gerar PIX" no sale.order
@@ -193,8 +175,12 @@ async function main() {
     console.log('  ✅ Server Action "Gerar PIX" já existe (id=' + existingPixAction[0] + ')');
   } else {
     // Código Python do Server Action
+    // Escreve nos campos REAIS do Studio: x_studio_related_field_2jf_1k4uaua7n (HTML) e x_studio_boletos_pix (PIX CC)
     var pixActionCode = [
-      '# Gerar PIX via middleware Itaú',
+      '# Gerar PIX via middleware Itau',
+      '# Grava nos campos Studio do sale.order:',
+      '#   ' + SO_FIELD_HTML + '  (HTML com QR code)',
+      '#   ' + SO_FIELD_PIX_CC + '  (PIX Copia e Cola)',
       'import json',
       'import urllib.request',
       '',
@@ -210,7 +196,7 @@ async function main() {
       '# Dados do pagador',
       'partner = order.partner_id',
       'pagador_nome = partner.name or ""',
-      'pagador_cpf = partner.cnpj_cpf or (partner.vat or "") if hasattr(partner, "cnpj_cpf") else (partner.vat or "")',
+      'pagador_cpf = (partner.cnpj_cpf if hasattr(partner, "cnpj_cpf") else (partner.vat or "")) or ""',
       '',
       '# Montar payload',
       'payload = json.dumps({',
@@ -237,31 +223,29 @@ async function main() {
       '        pix_data = result.get("data", {})',
       '        pagamento = pix_data.get("pagamentos", [{}])[0] if pix_data.get("pagamentos") else {}',
       '        ',
-      '        # Gravar campos no pedido',
+      '        # Gravar campos no pedido (campos reais do Studio)',
       '        write_vals = {}',
-      '        write_vals["x_studio_itau_tipo_pagamento"] = "pix"',
-      '        write_vals["x_studio_itau_situacao"] = "emitido"',
-      '        if pagamento.get("txid"):',
-      '            write_vals["x_studio_itau_txid"] = pagamento["txid"]',
       '        if pagamento.get("pix_copia_cola"):',
-      '            write_vals["x_studio_itau_pix_copia_cola"] = pagamento["pix_copia_cola"]',
+      '            write_vals["' + SO_FIELD_PIX_CC + '"] = pagamento["pix_copia_cola"]',
       '        if pagamento.get("html_pix"):',
-      '            write_vals["x_studio_itau_boletos_html"] = pagamento["html_pix"]',
+      '            write_vals["' + SO_FIELD_HTML + '"] = pagamento["html_pix"]',
       '        ',
-      '        order.write(write_vals)',
+      '        if write_vals:',
+      '            order.write(write_vals)',
       '        ',
       '        # Postar no chatter',
       '        body = "<b>PIX Gerado</b><br/>TXID: " + str(pagamento.get("txid", "")) + "<br/>Valor: R$ " + str(pagamento.get("valor_titulo", valor))',
       '        order.message_post(body=body, subtype_xmlid="mail.mt_note")',
       '    else:',
       '        error_msg = result.get("message", "Erro desconhecido")',
-      '        order.message_post(body="<b>⚠️ Erro ao gerar PIX:</b> " + error_msg, subtype_xmlid="mail.mt_note")',
+      '        order.message_post(body="<b>Erro ao gerar PIX:</b> " + error_msg, subtype_xmlid="mail.mt_note")',
       'except Exception as e:',
-      '    order.message_post(body="<b>⚠️ Erro ao gerar PIX:</b> " + str(e), subtype_xmlid="mail.mt_note")',
+      '    order.message_post(body="<b>Erro ao gerar PIX:</b> " + str(e), subtype_xmlid="mail.mt_note")',
     ].join('\n');
 
     if (DRY_RUN) {
       console.log('  🔄 [DRY-RUN] Criaria Server Action "Gerar PIX"');
+      console.log('  Campos escritos: ' + SO_FIELD_HTML + ', ' + SO_FIELD_PIX_CC);
     } else {
       try {
         var actionId = await rpc(client, db, uid, pw, 'ir.actions.server', 'create', [{
@@ -293,10 +277,12 @@ async function main() {
   if (existingLockPayment && existingLockPayment.length > 0) {
     console.log('  ✅ Automated Action já existe (id=' + existingLockPayment[0] + ')');
   } else {
-    // Criar Server Action primeiro (o código fica lá)
+    // Depois que PIX foi gerado (campo PIX CC preenchido), não permite alterar pagamento
     var lockPaymentCode = [
       '# PIX: Travar forma de pagamento após PIX gerado',
-      'if record.x_studio_itau_tipo_pagamento == "pix":',
+      '# Se o campo PIX Copia e Cola (' + SO_FIELD_PIX_CC + ') está preenchido,',
+      '# não permite alterar a forma de pagamento',
+      'if record.' + SO_FIELD_PIX_CC + ':',
       '    raise UserError("Não é possível alterar a forma de pagamento após PIX gerado. Cancele o PIX no Itaú primeiro.")',
     ].join('\n');
 
@@ -304,7 +290,6 @@ async function main() {
       console.log('  🔄 [DRY-RUN] Criaria Automated Action para travar pagamento');
     } else {
       try {
-        // 1. Criar Server Action com o código
         var lockPaySaId = await rpc(client, db, uid, pw, 'ir.actions.server', 'create', [{
           name: 'PIX: Travar forma de pagamento (código)',
           model_id: soModelId,
@@ -314,7 +299,6 @@ async function main() {
         }]);
         console.log('  ✅ Server Action interno criado (id=' + lockPaySaId + ')');
 
-        // 2. Criar Automated Action linkando o Server Action
         var autoId1 = await rpc(client, db, uid, pw, 'base.automation', 'create', [{
           name: 'PIX: Travar forma de pagamento',
           model_id: soModelId,
@@ -344,7 +328,7 @@ async function main() {
   } else {
     var lockCancelCode = [
       '# PIX: Bloquear cancelar e voltar rascunho após PIX gerado',
-      'if record.x_studio_itau_tipo_pagamento == "pix":',
+      'if record.' + SO_FIELD_PIX_CC + ':',
       '    if record.state in ("cancel", "draft"):',
       '        raise UserError("Não é possível cancelar ou voltar para rascunho após PIX gerado. Cancele o PIX no Itaú primeiro.")',
     ].join('\n');
@@ -353,7 +337,6 @@ async function main() {
       console.log('  🔄 [DRY-RUN] Criaria Automated Action para travar cancelar');
     } else {
       try {
-        // 1. Criar Server Action com o código
         var lockCancelSaId = await rpc(client, db, uid, pw, 'ir.actions.server', 'create', [{
           name: 'PIX: Bloquear cancelar/voltar rascunho (código)',
           model_id: soModelId,
@@ -363,7 +346,6 @@ async function main() {
         }]);
         console.log('  ✅ Server Action interno criado (id=' + lockCancelSaId + ')');
 
-        // 2. Criar Automated Action linkando o Server Action
         var autoId2 = await rpc(client, db, uid, pw, 'base.automation', 'create', [{
           name: 'PIX: Bloquear cancelar/voltar rascunho',
           model_id: soModelId,
@@ -380,7 +362,7 @@ async function main() {
   }
 
   // ============================================================
-  // PASSO 5: Informações sobre restricao de fatura para Finance
+  // PASSO 5: Informações sobre restrição de fatura para Finance
   // ============================================================
   console.log('\n--- PASSO 5: Restrição de criação de fatura (só Finance) ---');
   console.log('  ℹ️  No Odoo SaaS, a restrição de quem pode criar fatura é feita via:');
@@ -389,17 +371,22 @@ async function main() {
   console.log('  ℹ️  Recomendado: Configurar permissões diretamente no Odoo UI');
   console.log('     - Vendedor: pode confirmar pedido, NÃO pode criar fatura');
   console.log('     - Finance: pode criar fatura, pode cancelar PIX/boleto');
+  console.log('  ℹ️  Boleto: o vendedor NÃO gera boleto. Boletos são gerados pelo Finance');
+  console.log('     e o HTML do boleto vai para o mesmo campo (' + SO_FIELD_HTML + ')');
 
   // ============================================================
   // RESUMO
   // ============================================================
   console.log('\n=== RESUMO ===');
-  console.log('Campos Itaú criados em sale.order:', createdFields);
+  console.log('Campos Studio sale.order:');
+  console.log('  HTML (PIX/Boleto):', SO_FIELD_HTML, pixHtmlField ? '✅' : '❌');
+  console.log('  PIX Copia e Cola: ', SO_FIELD_PIX_CC, pixCcField ? '✅' : '❌');
   console.log('');
   console.log('📋 PRÓXIMOS PASSOS MANUAIS:');
-  console.log('1. No Odoo Studio, adicionar os campos x_studio_itau_* na aba Itaú do sale.order');
+  console.log('1. No Odoo Studio, adicionar os campos na aba do sale.order (se ainda não estiverem no form)');
   console.log('2. No formulário sale.order, adicionar botão "Gerar PIX" que chama o Server Action');
   console.log('3. Configurar permissões: Vendedor NÃO cria fatura, só Finance');
+  console.log('4. Finance: pode gerar boleto (que vai para o campo HTML)');
   if (DRY_RUN) console.log('\n⚠️  MODO DRY-RUN — nada foi alterado');
 }
 

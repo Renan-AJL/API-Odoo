@@ -681,4 +681,208 @@ async function copyInvoiceAttachmentsToSaleOrder(params) {
   }
 }
 
-module.exports = { pushBoletosToOdoo, pushPixToOdoo, pushBoletosToSaleOrder, copyInvoiceAttachmentsToSaleOrder };
+/**
+ * Push PIX para sale.order via XML-RPC
+ * Grava PIX Copia e Cola e HTML nos campos Studio do pedido de venda
+ * Campos reais do Odoo Studio (sale.order):
+ *   x_studio_related_field_2jf_1k4uaua7n  → HTML (PIX/Boleto display)
+ *   x_studio_boletos_pix                   → PIX Copia e Cola (text)
+ *
+ * @param {Object} params: { faturaId, faturaName, pixCopiaCola, htmlPix, txid, valor }
+ */
+async function pushPixToSaleOrder(params) {
+  var config = require('../config');
+  var odooConfig = config.odoo;
+
+  if (!odooConfig || !odooConfig.enabled) {
+    console.log('[ODOO-PUSH-PIX-SO] Desabilitado');
+    return { pushed: false, reason: 'disabled' };
+  }
+
+  var faturaId = parseInt(params.faturaId) || 0;
+  var faturaName = params.faturaName || '';
+  var pixCopiaCola = params.pixCopiaCola || '';
+  var htmlPix = params.htmlPix || '';
+  var txid = params.txid || '';
+  var valor = params.valor || '0,00';
+
+  // Campos reais do Odoo Studio (sale.order)
+  var SO_FIELD_HTML   = 'x_studio_related_field_2jf_1k4uaua7n';
+  var SO_FIELD_PIX_CC = 'x_studio_boletos_pix';
+
+  console.log('[ODOO-PUSH-PIX-SO] === INICIANDO ===');
+  console.log('[ODOO-PUSH-PIX-SO] faturaId:', faturaId, '| faturaName:', faturaName || 'vazio');
+  console.log('[ODOO-PUSH-PIX-SO] TXID:', txid, '| Valor:', valor);
+
+  try {
+    var client = createClient(odooConfig.url);
+    var uid = await authenticate(client, odooConfig.db, odooConfig.user, odooConfig.password);
+
+    // Buscar sale.order vinculado a esta invoice
+    var soIds = [];
+    if (faturaId > 0) {
+      soIds = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'sale.order', 'search', [[['invoice_ids', 'in', [faturaId]]]], { limit: 5 });
+    }
+
+    if (!soIds || soIds.length === 0) {
+      // Fallback: via invoice_origin
+      if (faturaName) {
+        console.log('[ODOO-PUSH-PIX-SO] Tentando via invoice_origin...');
+        try {
+          var invData = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'read', [[faturaId], ['invoice_origin']]);
+          var origin = (invData && invData[0] && invData[0].invoice_origin) || '';
+          if (origin) {
+            soIds = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'sale.order', 'search', [[['name', 'ilike', origin]]], { limit: 5 });
+          }
+        } catch (e) { /* ignore */ }
+      }
+    }
+
+    if (!soIds || soIds.length === 0) {
+      console.warn('[ODOO-PUSH-PIX-SO] Nenhum pedido de venda vinculado a fatura', faturaId);
+      return { pushed: false, reason: 'no_sale_order' };
+    }
+
+    var soId = soIds[0];
+    var soData = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'sale.order', 'read', [[soId], ['name']]);
+    var soName = (soData && soData[0] && soData[0].name) || 'SO' + soId;
+    console.log('[ODOO-PUSH-PIX-SO] Pedido encontrado:', soName, '(ID:', soId, ')');
+
+    // Gravar campos no sale.order
+    var writeVals = {};
+    if (pixCopiaCola) {
+      writeVals[SO_FIELD_PIX_CC] = pixCopiaCola;
+    }
+    if (htmlPix) {
+      writeVals[SO_FIELD_HTML] = htmlPix;
+    }
+
+    if (Object.keys(writeVals).length > 0) {
+      try {
+        console.log('[ODOO-PUSH-PIX-SO] Gravando campos:', Object.keys(writeVals).join(', '));
+        await executeKw(client, odooConfig.db, uid, odooConfig.password, 'sale.order', 'write', [[soId], writeVals]);
+        console.log('[ODOO-PUSH-PIX-SO] Campos gravados OK no pedido', soName);
+      } catch (writeErr) {
+        // Campo pode nao existir - tentar campo a campo
+        console.warn('[ODOO-PUSH-PIX-SO] Erro ao gravar todos campos, tentando campo a campo:', writeErr.message);
+        var writeKeys = Object.keys(writeVals);
+        var writtenFields = [];
+        for (var wk = 0; wk < writeKeys.length; wk++) {
+          var singleField = {};
+          singleField[writeKeys[wk]] = writeVals[writeKeys[wk]];
+          try {
+            await executeKw(client, odooConfig.db, uid, odooConfig.password, 'sale.order', 'write', [[soId], singleField]);
+            writtenFields.push(writeKeys[wk]);
+          } catch (singleErr) {
+            console.warn('[ODOO-PUSH-PIX-SO] Campo ausente/pulando:', writeKeys[wk]);
+          }
+        }
+        if (writtenFields.length > 0) {
+          console.log('[ODOO-PUSH-PIX-SO] Campos gravados individualmente:', writtenFields.join(', '));
+        }
+      }
+    }
+
+    // Nota interna no chatter do pedido
+    var htmlBody = '<b>PIX Gerado</b><br/>';
+    htmlBody += 'Fatura: ' + (faturaName || 'N/A') + '<br/>';
+    htmlBody += 'TXID: ' + txid + '<br/>';
+    htmlBody += 'Valor: R$ ' + valor;
+    if (pixCopiaCola) {
+      htmlBody += '<br/>PIX Copia e Cola: ' + pixCopiaCola;
+    }
+
+    try {
+      await executeKw(client, odooConfig.db, uid, odooConfig.password, 'mail.message', 'create', [{
+        model: 'sale.order',
+        res_id: soId,
+        body: htmlBody,
+        message_type: 'comment',
+        subtype_xmlid: 'mail.mt_note',
+      }]);
+      console.log('[ODOO-PUSH-PIX-SO] Nota interna OK');
+    } catch (noteErr) {
+      console.warn('[ODOO-PUSH-PIX-SO] Nota interna falhou (nao critico):', noteErr.message.substring(0, 100));
+    }
+
+    console.log('[ODOO-PUSH-PIX-SO] === PUSH COMPLETO no pedido ' + soName + ' (ID: ' + soId + ') ===');
+    return { pushed: true, sale_order_id: soId, sale_order_name: soName };
+
+  } catch (err) {
+    console.error('[ODOO-PUSH-PIX-SO] ERRO:', err.message);
+    return { pushed: false, reason: err.message };
+  }
+}
+
+/**
+ * Push Boleto HTML para sale.order
+ * Quando o Finance gera boleto, o HTML vai para o mesmo campo do PIX
+ * Campo: x_studio_related_field_2jf_1k4uaua7n (HTML)
+ *
+ * @param {Object} params: { faturaId, faturaName, boletosHtml }
+ */
+async function pushBoletoHtmlToSaleOrder(params) {
+  var config = require('../config');
+  var odooConfig = config.odoo;
+
+  if (!odooConfig || !odooConfig.enabled) {
+    return { pushed: false, reason: 'disabled' };
+  }
+
+  var faturaId = parseInt(params.faturaId) || 0;
+  var faturaName = params.faturaName || '';
+  var boletosHtml = params.boletosHtml || '';
+
+  var SO_FIELD_HTML = 'x_studio_related_field_2jf_1k4uaua7n';
+
+  console.log('[ODOO-PUSH-BOLETO-SO] Fatura:', faturaId, '| HTML length:', boletosHtml.length);
+
+  if (!boletosHtml) {
+    return { pushed: false, reason: 'no_html' };
+  }
+
+  try {
+    var client = createClient(odooConfig.url);
+    var uid = await authenticate(client, odooConfig.db, odooConfig.user, odooConfig.password);
+
+    // Buscar SO
+    var soIds = [];
+    if (faturaId > 0) {
+      soIds = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'sale.order', 'search', [[['invoice_ids', 'in', [faturaId]]]], { limit: 5 });
+    }
+    if ((!soIds || soIds.length === 0) && faturaName) {
+      try {
+        var invData = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'read', [[faturaId], ['invoice_origin']]);
+        var origin = (invData && invData[0] && invData[0].invoice_origin) || '';
+        if (origin) {
+          soIds = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'sale.order', 'search', [[['name', 'ilike', origin]]], { limit: 5 });
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    if (!soIds || soIds.length === 0) {
+      return { pushed: false, reason: 'no_sale_order' };
+    }
+
+    var soId = soIds[0];
+
+    // Gravar HTML no campo (append se já tem PIX, prepend se já tem boleto)
+    var writeVals = {};
+    writeVals[SO_FIELD_HTML] = boletosHtml;
+
+    try {
+      await executeKw(client, odooConfig.db, uid, odooConfig.password, 'sale.order', 'write', [[soId], writeVals]);
+      console.log('[ODOO-PUSH-BOLETO-SO] HTML gravado no pedido', soId);
+    } catch (writeErr) {
+      console.warn('[ODOO-PUSH-BOLETO-SO] Erro ao gravar HTML:', writeErr.message);
+      return { pushed: false, reason: writeErr.message };
+    }
+
+    return { pushed: true, sale_order_id: soId };
+  } catch (err) {
+    console.error('[ODOO-PUSH-BOLETO-SO] ERRO:', err.message);
+    return { pushed: false, reason: err.message };
+  }
+}
+
+module.exports = { pushBoletosToOdoo, pushPixToOdoo, pushBoletosToSaleOrder, pushPixToSaleOrder, pushBoletoHtmlToSaleOrder, copyInvoiceAttachmentsToSaleOrder };

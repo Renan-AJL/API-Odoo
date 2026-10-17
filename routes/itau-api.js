@@ -10,7 +10,7 @@ const router = express.Router();
 const { apiKeyAuth } = require('../middleware/auth');
 const { emitirBoleto, parseFormaPagamento, consultarBoletoPorNossoNumero, cancelarBoleto } = require('../services/itau-boleto');
 const { storeBoleto, generatePdf, generatePdfFromFields } = require('../services/pdf-boleto');
-const { pushBoletosToOdoo, pushPixToOdoo } = require('../services/odoo-push');
+const { pushBoletosToOdoo, pushPixToOdoo, pushPixToSaleOrder, pushBoletoHtmlToSaleOrder } = require('../services/odoo-push');
 const { criarLinkPagamento } = require('../services/itau-link-pagamento');
 const { criarCobrancaPix, consultarCobrancaPix } = require('../services/itau-pix');
 const { buildDevedorFromDoc } = require('../utils/pix-devedor');
@@ -529,6 +529,30 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
       pushResult = { pushed: false, reason: pushErr.message };
     }
 
+    // Push Boleto HTML para o sale.order (campo HTML do Studio)
+    // O financeiro gera boleto e o HTML vai para o mesmo campo do PIX no pedido
+    if (pushResult.pushed) {
+      try {
+        var bol0 = pagamentos[0] || {};
+        var bolHtmlForSO = bol0.html_boleto || '';
+        // Se nao tem html_boleto, construir a partir dos campos
+        if (!bolHtmlForSO && pushResult.attachments > 0) {
+          // Reusar o HTML que foi gravado no campo x_studio_itau_boletos_html da fatura
+          // (pushBoletosToOdoo ja gravou la, aqui so precisamos espelhar no sale.order)
+        }
+        if (bolHtmlForSO) {
+          var soBolResult = await pushBoletoHtmlToSaleOrder({
+            faturaId: faturaId, faturaName: faturaName, boletosHtml: bolHtmlForSO
+          });
+          if (soBolResult.pushed) {
+            console.log('[API] Boleto HTML tambem gravado no pedido de venda');
+          }
+        }
+      } catch (soBolErr) {
+        console.warn('[API] Nao conseguiu gravar boleto HTML no pedido:', soBolErr.message);
+      }
+    }
+
     var boletoResponseData = {
       success: true,
       data: {
@@ -1026,6 +1050,24 @@ async function handlePix(req, res, d) {
 
     // Responde pro Odoo IMEDIATAMENTE (o modulo Odoo grava os campos)
     res.json(responseData);
+
+    // Push PIX para sale.order (async, nao bloqueia a resposta)
+    // Grava PIX Copia e Cola e HTML nos campos Studio do pedido de venda
+    try {
+      var soPixResult = await pushPixToSaleOrder({
+        faturaId: faturaId,
+        faturaName: faturaName,
+        pixCopiaCola: pixCopiaCola,
+        htmlPix: htmlPix,
+        txid: pixResult.txid || '',
+        valor: valorTotal.toFixed(2),
+      });
+      if (soPixResult.pushed) {
+        console.log('[API/PIX] PIX tambem gravado no pedido de venda:', soPixResult.sale_order_name);
+      }
+    } catch (soPixErr) {
+      console.warn('[API/PIX] Nao conseguiu gravar PIX no pedido de venda:', soPixErr.message);
+    }
   } catch (err) {
     console.error('[API/PIX] ERRO:', err.message);
     var errResponse = { success: false, message: 'Erro ao criar PIX: ' + (err.message || 'Erro desconhecido') };

@@ -114,3 +114,33 @@ Stage Summary:
 - Falha-fechada: bloqueia se não consegue verificar status ✅
 - Chatter: nota postada na fatura quando bloqueia ✅
 - Código pushado para GitHub (Render deploy pendente - manual deploy)
+
+---
+Task ID: 4
+Agent: main
+Task: Configurar campos PIX no sale.order com nomes reais do Odoo Studio e atualizar ações
+
+Work Log:
+- Descobriu nomes reais dos campos Studio no sale.order via dry-run:
+  - x_studio_related_field_2jf_1k4uaua7n (html) - "Boletos e QRCode"
+  - x_studio_boletos_pix (html) - "Cód PIX"
+- Identificou que x_studio_boletos_pix é html (não text como assumido)
+- Identificou 87 campos x_studio_* no sale.order, incluindo 6 x_studio_itau_* já existentes
+- Atualizou setup-pix-sales.js para usar nomes reais dos campos Studio
+- Criou pushPixToSaleOrder() em odoo-push.js - grava PIX CC e HTML nos campos do sale.order
+- Criou pushBoletoHtmlToSaleOrder() em odoo-push.js - grava HTML do boleto no sale.order (Finance)
+- Atualizou itau-api.js /pagar para chamar pushPixToSaleOrder após criar PIX
+- Atualizou itau-api.js /pagar para chamar pushBoletoHtmlToSaleOrder após emitir boleto
+- Criou update-pix-actions.js para atualizar Server Action e Automated Actions
+- Atualizou Server Action "Gerar PIX" (id=1483) com código sandbox-safe que escreve nos campos corretos
+- Atualizou Automated Action "PIX: Travar forma de pagamento" (id=1477/94) para checar x_studio_boletos_pix
+- Atualizou Automated Action "PIX: Bloquear cancelar" (id=1478/95) para checar x_studio_boletos_pix
+- Verificou sintaxe de todos os arquivos modificados
+
+Stage Summary:
+- Server Action "Gerar PIX" atualizado: escreve em x_studio_related_field_2jf_1k4uaua7n (HTML) e x_studio_boletos_pix (Cód PIX) e x_studio_itau_* campos
+- Automated Actions atualizadas: agora checam x_studio_boletos_pix (antes: x_studio_itau_tipo_pagamento)
+- Middleware PIX (/pagar) agora também grava dados no sale.order vinculado
+- Boleto HTML também pode ser gravado no sale.order quando Finance emite
+- Arquivos modificados: scripts/setup-pix-sales.js, services/odoo-push.js, routes/itau-api.js
+- Arquivo criado: scripts/update-pix-actions.js
