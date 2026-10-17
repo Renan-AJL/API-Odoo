@@ -549,7 +549,12 @@ router.post('/send-invoice', async (req, res) => {
     if (!invoice) {
       return res.status(404).json({ success: false, error: 'Fatura ' + invId + ' nao encontrada' });
     }
-    console.log('[TE-SEND-INVOICE] Fatura: ' + invoice.name + ' (id=' + invoice.id + ', partner=' + JSON.stringify(invoice.partner_id) + ')');
+    console.log('[TE-SEND-INVOICE] Fatura: ' + invoice.name + ' (id=' + invoice.id + ', state=' + invoice.state + ', partner=' + JSON.stringify(invoice.partner_id) + ')');
+
+    // Rejeita fatura em rascunho — TE exige fatura postada (state=posted, move_type=out_invoice)
+    if (invoice.state === 'draft') {
+      return res.status(409).json({ success: false, error: 'Fatura ' + invId + ' esta em rascunho (draft). Poste a fatura antes de enviar ao TE.' });
+    }
 
     // 2. Le o partner da fatura (usa getPartner com safeReadCustom — fallback automatico)
     const partnerId = invoice.partner_id ? (Array.isArray(invoice.partner_id) ? invoice.partner_id[0] : invoice.partner_id) : null;
@@ -611,7 +616,7 @@ router.post('/send-invoice', async (req, res) => {
     }
 
     if (!saleOrder) {
-      console.log('[TE-SEND-INVOICE] Fluxo direto fatura->TE (sem motorista, sem picking)');
+      console.log('[TE-SEND-INVOICE] Fluxo direto fatura->TE (sem picking)');
       try {
         orderLines = await odooTe.getInvoiceLines(invId);
         console.log('[TE-SEND-INVOICE] ' + orderLines.length + ' linhas da fatura com produto');
@@ -630,9 +635,31 @@ router.post('/send-invoice', async (req, res) => {
     // 6. Le dados da empresa (remetente)
     const company = await odooTe.getCompany();
 
-    // 6b. Motorista: TE atribui automaticamente (DefineDriverAfter=1)
+    // 6b. Motorista: OBRIGATORIO — campo x_studio_motorista_te na invoice
     let motoristaName = null;
     let teDriver = null;
+
+    // Le o campo selection x_studio_motorista_te da fatura
+    const motoristaKey = invoice.x_studio_motorista_te || null;
+    if (!motoristaKey) {
+      console.warn('[TE-SEND-INVOICE] Fatura ' + invId + ' SEM motorista selecionado (x_studio_motorista_te vazio). Abortando envio.');
+      await odooTe.postChatter('account.move', invId, '<b>TudoEntregue - BLOQUEADO</b><br/>Fatura sem motorista selecionado no campo <i>Motorista TE</i>. Selecione um motorista antes de enviar.');
+      return res.status(400).json({ success: false, error: 'Fatura sem motorista selecionado. Selecione um motorista no campo Motorista TE antes de enviar ao TudoEntregue.' });
+    }
+    console.log('[TE-SEND-INVOICE] Motorista selecionado: ' + motoristaKey);
+
+    // Busca dados do motorista no TE (telefone para o Driver block)
+    motoristaName = motoristaKey;
+    try {
+      teDriver = await teClient.findDriverByName(motoristaKey);
+      if (teDriver) {
+        console.log('[TE-SEND-INVOICE] Driver encontrado no TE: Phone=' + teDriver.PhoneNumber);
+      } else {
+        console.warn('[TE-SEND-INVOICE] Motorista "' + motoristaKey + '" NAO encontrado no TE. Usando auto-atribuicao (DefineDriverAfter=1).');
+      }
+    } catch (err) {
+      console.warn('[TE-SEND-INVOICE] Erro ao buscar driver no TE: ' + err.message + '. Usando auto-atribuicao.');
+    }
 
     // 7. Mapeia para TE (picking sera sintetico pelo mapper se null)
     const delivery = Mapper.odooToTeDelivery({
@@ -644,8 +671,8 @@ router.post('/send-invoice', async (req, res) => {
       companyCnpj: config.empresa.cnpj,
       orderLines: orderLines,
       productsMap: productsMap,
-      motoristaName: null,
-      teDriver: null,
+      motoristaName: motoristaName,
+      teDriver: teDriver,
     });
     if (!delivery) {
       return res.status(500).json({ success: false, error: 'Falha no mapeamento dos dados' });
@@ -664,6 +691,7 @@ router.post('/send-invoice', async (req, res) => {
     if (delivery.Documents && delivery.Documents.length) {
       chatterMsg += '<br/>NF: ' + (delivery.Documents[0].DocumentNumber || '');
     }
+    chatterMsg += '<br/>Motorista: ' + (teDriver ? '<b>' + motoristaName + '</b> (atribuido)' : motoristaName + ' (auto-atribuicao TE)');
     if (!saleOrder) {
       chatterMsg += '<br/><i>Sem sale.order vinculada — fluxo direto fatura</i>';
     }
@@ -910,6 +938,132 @@ router.get('/drivers', async (req, res) => {
     });
     res.json({ success: true, count: list.length, drivers: list });
   } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ============================================================
+// POST /api/v1/te/setup-motorista-field — Configura campo x_studio_motorista
+// na fatura (account.move) como Selection com motoristas do TE
+// ============================================================
+router.post('/setup-motorista-field', apiKeyAuth, async (req, res) => {
+  try {
+    const drivers = await teClient.getDrivers();
+    const driverNames = Object.keys(drivers || {});
+    if (!driverNames.length) {
+      return res.status(400).json({ success: false, error: 'Nenhum motorista encontrado no TE' });
+    }
+
+    var xmlrpc = require('xmlrpc');
+    var oc = config.odoo;
+    var base = oc.url.replace(/\/+$/, '');
+    var host = base.replace('https://', '');
+
+    function odooExec(model, method, args, kwargs) {
+      return new Promise(function(ok, fail) {
+        var common = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/common', port: 443 });
+        common.methodCall('authenticate', [oc.db, oc.user, oc.password, {}], function(e, uid) {
+          if (e || !uid) return fail(e || new Error('auth failed'));
+          var params = [oc.db, uid, oc.password, model, method, args || []];
+          if (kwargs) params.push(kwargs);
+          var models = xmlrpc.createSecureClient({ host: host, path: '/xmlrpc/2/object', port: 443 });
+          models.methodCall('execute_kw', params, function(e2, r) {
+            if (e2) return fail(e2);
+            ok(r);
+          });
+        });
+      });
+    }
+
+    var modelIds = await odooExec('ir.model', 'search', [[['model', '=', 'account.move']]]);
+    if (!modelIds || !modelIds.length) {
+      return res.status(500).json({ success: false, error: 'Model account.move nao encontrado' });
+    }
+    var modelId = modelIds[0];
+
+    var fieldIds = await odooExec('ir.model.fields', 'search', [
+      [['name', '=', 'x_studio_motorista'], ['model_id', '=', modelId]]
+    ]);
+
+    var selectionParts = driverNames.map(function(n) { return "('" + n.toLowerCase() + "','" + n + "')"; });
+    var selectionStr = selectionParts.join(',');
+
+    if (fieldIds && fieldIds.length) {
+      try {
+        await odooExec('ir.model.fields', 'write', [
+          [fieldIds[0]],
+          { ttype: 'selection', selection: selectionStr }
+        ]);
+        console.log('[TE] Campo x_studio_motorista atualizado para Selection com ' + driverNames.length + ' motoristas');
+      } catch (writeErr) {
+        console.warn('[TE] Nao conseguiu alterar tipo do campo:', writeErr.message);
+      }
+    } else {
+      try {
+        await odooExec('ir.model.fields', 'create', [{
+          name: 'x_studio_motorista',
+          field_description: 'Motorista (TE)',
+          ttype: 'selection',
+          selection: selectionStr,
+          model_id: modelId,
+          store: true,
+        }]);
+        console.log('[TE] Campo x_studio_motorista criado como Selection');
+      } catch (createErr) {
+        console.warn('[TE] Nao conseguiu criar campo:', createErr.message);
+      }
+    }
+
+    // Adicionar campo ao form view da fatura
+    var viewIds = await odooExec('ir.ui.view', 'search', [
+      [['model', '=', 'account.move'], ['type', '=', 'form'], ['inherit_id', '=', false]],
+      { limit: 1 }
+    ]);
+    if (viewIds && viewIds.length) {
+      var existingInherit = await odooExec('ir.ui.view', 'search', [
+        [['model', '=', 'account.move'], ['type', '=', 'form'], ['name', 'like', 'motorista']]
+      ]);
+      if (!existingInherit || !existingInherit.length) {
+        var motoristaArch = [
+          '<data>',
+          '  <xpath expr="//page[last()]" position="after">',
+          '    <page string="Entrega" name="entrega_tab">',
+          '      <group>',
+          '        <group string="TudoEntregue">',
+          '          <field name="x_studio_motorista"/>',
+          '          <field name="x_studio_te_order_id" readonly="1"/>',
+          '          <field name="x_studio_status_de_entrega_te" readonly="1"/>',
+          '        </group>',
+          '      </group>',
+          '    </page>',
+          '  </xpath>',
+          '</data>',
+        ].join('\n');
+
+        try {
+          await odooExec('ir.ui.view', 'create', [{
+            name: 'account.move.form.motorista.te',
+            model: 'account.move',
+            type: 'form',
+            inherit_id: viewIds[0],
+            arch_base: motoristaArch,
+            active: true,
+          }]);
+          console.log('[TE] View herdada com campo motorista criada na fatura');
+        } catch (viewErr) {
+          console.warn('[TE] Nao conseguiu criar view herdada:', viewErr.message);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Campo x_studio_motorista configurado na fatura com ' + driverNames.length + ' motoristas',
+      motoristas: driverNames,
+    });
+
+  } catch (err) {
+    console.error('[TE] Erro ao configurar campo motorista:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

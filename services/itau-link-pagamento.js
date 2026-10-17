@@ -61,7 +61,8 @@ async function getRedeToken() {
     }
 
     tokenCache.accessToken = data.access_token;
-    tokenCache.expiresAt = now + (data.expires_in * 1000);
+    var ttlMs = (data.expires_in || 1800) * 1000;
+    tokenCache.expiresAt = now + Math.max(ttlMs - 300000, ttlMs * 0.2);
 
     logger.info('[REDE-OAUTH] Token OK (expira em ' + data.expires_in + 's)');
     return data.access_token;

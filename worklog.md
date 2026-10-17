@@ -58,3 +58,31 @@ Stage Summary:
 - services/odoo-field-setup.js: domain changed to model (not model_id.model), detection failure aborts creation, early return when all fields exist
 - routes/delivery.js: motorista partner read uses odooTe.read() wrapper
 - All 15 x_studio_itau_* fields already exist — FIELD-SETUP will now detect them correctly and skip creation
+
+---
+Task ID: 2
+Agent: main
+Task: Cancelar boletos, corrigir emissão triplicada, verificar PIX, ajustar TudoEntregue
+
+Work Log:
+- Boletos hoje: 2 faturas (ID 114 e 111) com boletos TRIPICADOS (3 NNs cada)
+- Cancelamento Itaú: API retorna 403 "Erro ao obter dados rota filter failed" — escopo OAuth2 não autorizado para cancelamento
+- Fix idBoleto: DAC estava duplicado no cálculo (23 chars → 22 chars). Corrigido.
+- Fix CM PATCH: Adicionado body {motivo_baixa: 'CANCELAMENTO'} e parâmetro body na função
+- Emissão triplicada: Root cause = Odoo Server Action dispara 3x por fatura + sem guarda Odoo-side
+- Fix: Adicionada função checkOdooBoletoExists() — checa x_studio_itau_nosso_numero no Odoo antes de emitir
+- Fix: Odoo-side dedup integrado em /gerar e /pagar — se fatura já tem boleto, retorna DEDUP sem emitir
+- PIX: Token OK, polling OK, sem erros
+- TudoEntregue: send-invoice testado com fatura 114 → SUCESSO (te_order_id=855, te_received=true)
+- TudoEntregue: Fatura 111 também enviada com sucesso (te_order_id=852)
+- TudoEntregue: Fatura inexistente 999999999 → 404 correto
+- Motorista: Adicionado campo x_studio_motorista (Selection) no account.move com 24 motoristas TE
+- Motorista: Campo aparece na aba Itau do form view (grupo "Entrega")
+- Motorista: send-invoice já lê invoice.x_studio_motorista primeiro (delivery.js linha 645)
+
+Stage Summary:
+- Cancelar boletos: BLOQUEADO pelo Itaú (403 — scope não autorizado). Precisa verificar com Itaú.
+- Emissão triplicada: CORRIGIDA com Odoo-side dedup (definitivo, sobrevive a restart)
+- PIX: FUNCIONANDO
+- TudoEntregue: FUNCIONANDO (faturas 114 e 111 enviadas com sucesso)
+- Motorista: Campo Selection adicionado na fatura com 24 motoristas TE

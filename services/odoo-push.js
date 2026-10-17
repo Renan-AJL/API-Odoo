@@ -168,7 +168,7 @@ async function pushBoletosToOdoo(pushData) {
         // 1. Criar attachment
         var attachId = await executeKw(client, odooConfig.db, uid, odooConfig.password, 'ir.attachment', 'create', [{
           name: filename,
-          datas: pdfB64,
+          raw: pdfB64,
           res_model: 'account.move',
           res_id: recordId,
           mimetype: 'application/pdf',
@@ -219,9 +219,9 @@ async function pushBoletosToOdoo(pushData) {
 
       // x_studio_itau_situacao
       if (totalAttachments > 0) {
-        camposWrite['x_studio_itau_situacao'] = 'EMITIDO';
+        camposWrite['x_studio_itau_situacao'] = 'emitido';
       } else {
-        camposWrite['x_studio_itau_situacao'] = 'ERRO';
+        camposWrite['x_studio_itau_situacao'] = 'erro';
       }
 
       // x_studio_itau_tipo_pagamento
@@ -245,8 +245,27 @@ async function pushBoletosToOdoo(pushData) {
       var keysWrite = Object.keys(camposWrite);
       if (keysWrite.length > 0) {
         console.log('[ODOO-PUSH] Gravando campos x_studio_*:', keysWrite.join(', '));
-        await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], camposWrite]);
-        console.log('[ODOO-PUSH] Campos x_studio_* gravados com sucesso na fatura', recordId);
+        try {
+          await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], camposWrite]);
+          console.log('[ODOO-PUSH] Campos x_studio_* gravados com sucesso na fatura', recordId);
+        } catch (fieldWriteErr) {
+          // Campo pode nao existir - tentar campo a campo
+          console.warn('[ODOO-PUSH] Erro ao gravar todos campos, tentando campo a campo:', fieldWriteErr.message);
+          var writtenFields = [];
+          for (var wk = 0; wk < keysWrite.length; wk++) {
+            var singleField = {};
+            singleField[keysWrite[wk]] = camposWrite[keysWrite[wk]];
+            try {
+              await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], singleField]);
+              writtenFields.push(keysWrite[wk]);
+            } catch (singleErr) {
+              console.warn('[ODOO-PUSH] Campo ausente/pulando:', keysWrite[wk]);
+            }
+          }
+          if (writtenFields.length > 0) {
+            console.log('[ODOO-PUSH] Campos gravados individualmente:', writtenFields.join(', '));
+          }
+        }
       }
     } catch (fieldsErr) {
       console.error('[ODOO-PUSH] Erro ao gravar campos x_studio_*:', fieldsErr.message);
@@ -330,6 +349,14 @@ async function pushPixToOdoo(pushData) {
     // com as opcoes do Odoo Studio. Reative com os valores corretos se necessario.
 
     var textFields = {};
+
+    // Campos obrigatórios para polling e exibição no Odoo
+    textFields['x_studio_itau_situacao'] = 'emitido';
+    textFields['x_studio_itau_tipo_pagamento'] = 'PIX';
+    if (txid) {
+      textFields['x_studio_itau_txid'] = txid;
+    }
+
     if (pixCopiaCola) {
       textFields['x_studio_itau_pix_copia_cola'] = pixCopiaCola;
     }
@@ -343,7 +370,23 @@ async function pushPixToOdoo(pushData) {
         await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], textFields]);
         console.log('[ODOO-PUSH-PIX] Campos texto/HTML gravados OK');
       } catch (textErr) {
-        console.error('[ODOO-PUSH-PIX] Erro campos texto/HTML:', textErr.message);
+        // Campo pode nao existir - tentar campo a campo
+        console.warn('[ODOO-PUSH-PIX] Erro ao gravar todos campos, tentando campo a campo:', textErr.message);
+        var textKeys = Object.keys(textFields);
+        var writtenPixFields = [];
+        for (var tk = 0; tk < textKeys.length; tk++) {
+          var singlePixField = {};
+          singlePixField[textKeys[tk]] = textFields[textKeys[tk]];
+          try {
+            await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'write', [[recordId], singlePixField]);
+            writtenPixFields.push(textKeys[tk]);
+          } catch (singlePixErr) {
+            console.warn('[ODOO-PUSH-PIX] Campo ausente/pulando:', textKeys[tk]);
+          }
+        }
+        if (writtenPixFields.length > 0) {
+          console.log('[ODOO-PUSH-PIX] Campos gravados individualmente:', writtenPixFields.join(', '));
+        }
       }
     }
 
