@@ -86,3 +86,31 @@ Stage Summary:
 - PIX: FUNCIONANDO
 - TudoEntregue: FUNCIONANDO (faturas 114 e 111 enviadas com sucesso)
 - Motorista: Campo Selection adicionado na fatura com 24 motoristas TE
+
+---
+Task ID: 3
+Agent: main
+Task: Revisar emissão de boletos e adicionar guard de re-emissão
+
+Work Log:
+- Revisão completa do código de emissão em routes/itau-api.js (888 linhas)
+- checkBoletoAtivo() já existia e funcionava bem (consulta Odoo + Itaú API)
+- Identificado problema: /gerar endpoint NÃO tinha lock anti-concorrência
+- Identificado problema: checkBoletoAtivo() falha-aberta (permite emissão se Odoo falha)
+- Identificado problema: mensagens de erro sem acentos (Itau → Itaú, emissao → emissão)
+- Identificado problema: sem chatter quando bloqueia re-emissão
+- FIX: Adicionado lock anti-concorrência ao /gerar (mesmo padrão do /pagar)
+- FIX: checkBoletoAtivo() agora é falha-fechada (bloqueia se não consegue verificar)
+- FIX: Mensagens com acentos: "Primeiro, cancele o boleto no Itaú para nova emissão"
+- FIX: postBoletoBlockedChatter() posta nota no chatter quando bloqueia
+- FIX: Chatter postado tanto em /pagar quanto em /gerar quando bloqueia
+- Merge: Resolvidos conflitos com remote (cancelarBoleto + extrato)
+- Push para GitHub: commit 54b3558
+
+Stage Summary:
+- Emissão de boletos segue forma_pagamento via parseFormaPagamento() ✅
+- Proteção 3 camadas contra duplicação: checkBoletoAtivo() + lock + cache ✅
+- Guard de re-emissão: "Primeiro, cancele o boleto no Itaú para nova emissão" ✅
+- Falha-fechada: bloqueia se não consegue verificar status ✅
+- Chatter: nota postada na fatura quando bloqueia ✅
+- Código pushado para GitHub (Render deploy pendente - manual deploy)
