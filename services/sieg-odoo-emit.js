@@ -299,8 +299,34 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
 
   // 6. Build line data with taxes + product x_studio_ fields
   var linesData = [];
+  // 6a. Determinar CFOP e ICMS baseado na UF do emitente vs destinatario
+  var ufEmit = (company.state || '').toUpperCase();
+  var ufDest = (partner.state || '').toUpperCase();
+  var isInterstate = ufEmit && ufDest && ufEmit !== ufDest;
+  // ICMS interestadual: 12% para Sul/Sudeste, 7% para Norte/Nordeste/Centro-Oeste
+  var ICMS_INTERSTATE_SUL_SE = ['PR','SC','RS','SP','MG','RJ','ES'];
+  var picmsInterstate = ICMS_INTERSTATE_SUL_SE.includes(ufDest) ? 12 : 7;
+  if (isInterstate) {
+    console.log('[SIEG-EMIT] Operacao INTERESTADUAL: ' + ufEmit + ' → ' + ufDest + ' — CFOP 5xxx→6xxx, pICMS→' + picmsInterstate + '%');
+  } else {
+    console.log('[SIEG-EMIT] Operacao INTERNA: ' + ufEmit + ' → ' + ufDest + ' — CFOP 5xxx');
+  }
   for (var i = 0; i < invoiceLines.length; i++) {
     var ld = await buildLineData(client, db, uid, pwd, invoiceLines[i]);
+    // Ajustar CFOP: se interestadual, 5xxx → 6xxx
+    if (isInterstate && ld.cfop && /^5\d{3}$/.test(ld.cfop)) {
+      var cfopOrig = ld.cfop;
+      ld.cfop = '6' + ld.cfop.substring(1);
+      console.log('[SIEG-EMIT] CFOP ajustado para interestadual: ' + ld.cfop + ' (original: ' + cfopOrig + ')');
+    }
+    // Ajustar ICMS para operacao interestadual (CST 00 com pICMS interno → interestadual)
+    if (isInterstate && ld.cst_icms === '00' && parseFloat(ld.picms) > picmsInterstate) {
+      var picmsOrig = ld.picms;
+      var vbc = parseFloat(ld.vbc_icms || ld.vbc || 0);
+      ld.picms = String(picmsInterstate);
+      ld.vicms = String(Math.round(vbc * picmsInterstate / 100 * 100) / 100);
+      console.log('[SIEG-EMIT] ICMS interestadual: pICMS ' + picmsOrig + '%→' + ld.picms + '%, vICMS=' + ld.vicms + ' (vBC=' + vbc + ')');
+    }
     linesData.push(ld);
   }
 
