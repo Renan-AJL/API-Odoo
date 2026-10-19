@@ -541,8 +541,8 @@ async function readCompany(client, db, uid, pwd, companyId) {
   var stateId = tupId(c.state_id || p.state_id);
   if (stateId) {
     try {
-      var sts = await executeKw(client, db, uid, pwd, 'res.country.state', 'read', [[stateId], ['code', 'ibge_code']]);
-      if (sts && sts[0]) { stateCode = sts[0].code || ''; stateIbge = sts[0].ibge_code || ''; }
+      var sts = await executeKw(client, db, uid, pwd, 'res.country.state', 'read', [[stateId], ['code', 'ibge_code', 'x_ibge_code']]);
+      if (sts && sts[0]) { stateCode = sts[0].code || ''; stateIbge = sts[0].x_ibge_code || sts[0].ibge_code || ''; }
     } catch (e) {}
   }
 
@@ -1192,7 +1192,7 @@ function parseResult(resultado, tipo) {
 
 async function readCityIbge(client, db, uid, pwd, cityId) {
   // Tenta varios nomes de campo IBGE possiveis no Odoo
-  var ibgeFields = ['ibge_code', 'code', 'l10n_br_ibge_code', 'x_studio_ibge_code'];
+  var ibgeFields = ['x_ibge_code', 'ibge_code', 'code', 'l10n_br_ibge_code', 'x_studio_ibge_code'];
   for (var i = 0; i < ibgeFields.length; i++) {
     try {
       var c = await executeKw(client, db, uid, pwd, 'res.city', 'read', [[cityId], [ibgeFields[i]]]);
@@ -1224,12 +1224,13 @@ async function searchCityIbge(client, db, uid, pwd, cityName, stateId) {
     var ids = await executeKw(client, db, uid, pwd, 'res.city', 'search', [domain], { limit: 5 });
     if (ids && ids.length > 0) {
       // Ler ibge_code de todos os resultados encontrados
-      var cities = await executeKw(client, db, uid, pwd, 'res.city', 'read', [ids, ['name', 'ibge_code']]);
+      var cities = await executeKw(client, db, uid, pwd, 'res.city', 'read', [ids, ['name', 'ibge_code', 'x_ibge_code']]);
       if (cities) {
         for (var i = 0; i < cities.length; i++) {
-          if (cities[i].ibge_code) {
-            console.log('[SIEG-EMIT] IBGE encontrado por busca: ' + cities[i].name + ' = ' + cities[i].ibge_code);
-            return String(cities[i].ibge_code);
+          var cityIbgeVal = cities[i].x_ibge_code || cities[i].ibge_code;
+          if (cityIbgeVal) {
+            console.log('[SIEG-EMIT] IBGE encontrado por busca: ' + cities[i].name + ' = ' + cityIbgeVal);
+            return String(cityIbgeVal);
           }
         }
       }
