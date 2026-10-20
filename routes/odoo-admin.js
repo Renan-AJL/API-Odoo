@@ -1168,19 +1168,24 @@ router.post('/report-render', apiKeyAuth, async function(req, res) {
     // 1) sessao HTTP no Odoo (mesmas credenciais do XML-RPC)
     const authRes = await fetch(base + '/web/session/authenticate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      redirect: 'manual',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', params: { db: odoo.db, login: odoo.user, password: odoo.password } }),
     });
-    if (!authRes.ok) throw new Error('sessao HTTP ' + authRes.status);
+    const authBodyText = await authRes.text();
     const setCookies = (typeof authRes.headers.getSetCookie === 'function')
       ? authRes.headers.getSetCookie()
       : [authRes.headers.get('set-cookie')].filter(Boolean);
     const cookie = setCookies.map(function(c) { return c.split(';')[0]; }).join('; ');
-    if (!cookie) throw new Error('sem cookie de sessao no login');
+    if (!cookie) {
+      let extra = '';
+      try { const ab = JSON.parse(authBodyText); extra = (ab.error && (ab.error.data && ab.error.data.message || ab.error.message)) || ''; } catch (e2) {}
+      throw new Error('sem cookie de sessao no login (HTTP ' + authRes.status + (extra ? ' | ' + extra : '') + ' | body: ' + authBodyText.substring(0, 160) + ')');
+    }
 
     // 2) busca o relatorio renderizado
     const url = base + '/report/' + fmt + '/' + encodeURIComponent(report) + '/' + docids.map(encodeURIComponent).join(',');
-    const repRes = await fetch(url, { headers: { 'Cookie': cookie } });
+    const repRes = await fetch(url, { headers: { 'Cookie': cookie }, redirect: 'follow' });
     if (!repRes.ok) throw new Error('report HTTP ' + repRes.status);
 
     if (fmt === 'html') {
