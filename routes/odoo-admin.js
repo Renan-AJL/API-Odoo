@@ -1140,4 +1140,58 @@ router.post('/odoo-rpc', apiKeyAuth, async function(req, res) {
   }
 });
 
+// ============================================================
+// POST /api/v1/admin/report-render
+// Renderiza um relatorio QWeb pelo controlador HTTP do Odoo
+// (mesma rota que o navegador usa: /report/html e /report/pdf),
+// permitindo diagnosticar diferencas de layout por empresa.
+// Body: { report: 'sale.report_saleorder', docids: [953969], format?: 'html'|'pdf' }
+// Retorna { html } ou { pdfBase64 }. Read-only (apenas GET no Odoo).
+// ============================================================
+router.post('/report-render', apiKeyAuth, async function(req, res) {
+  const odoo = config.odoo;
+  if (!odoo || !odoo.url || !odoo.enabled) {
+    return res.status(503).json({ success: false, error: 'Odoo nao configurado' });
+  }
+  const report = String(req.body.report || 'sale.report_saleorder');
+  if (!/^[a-z0-9_.]+$/.test(report)) {
+    return res.status(400).json({ success: false, error: 'report invalido' });
+  }
+  const docids = Array.isArray(req.body.docids) ? req.body.docids.map(Number).filter(function(n) { return n > 0; }) : [];
+  if (!docids.length) {
+    return res.status(400).json({ success: false, error: 'docids obrigatorio' });
+  }
+  const fmt = (req.body.format === 'pdf') ? 'pdf' : 'html';
+
+  try {
+    const base = odoo.url.replace(/\/+$/, '');
+    // 1) sessao HTTP no Odoo (mesmas credenciais do XML-RPC)
+    const authRes = await fetch(base + '/web/session/authenticate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', params: { db: odoo.db, login: odoo.user, password: odoo.password } }),
+    });
+    if (!authRes.ok) throw new Error('sessao HTTP ' + authRes.status);
+    const setCookies = (typeof authRes.headers.getSetCookie === 'function')
+      ? authRes.headers.getSetCookie()
+      : [authRes.headers.get('set-cookie')].filter(Boolean);
+    const cookie = setCookies.map(function(c) { return c.split(';')[0]; }).join('; ');
+    if (!cookie) throw new Error('sem cookie de sessao no login');
+
+    // 2) busca o relatorio renderizado
+    const url = base + '/report/' + fmt + '/' + encodeURIComponent(report) + '/' + docids.map(encodeURIComponent).join(',');
+    const repRes = await fetch(url, { headers: { 'Cookie': cookie } });
+    if (!repRes.ok) throw new Error('report HTTP ' + repRes.status);
+
+    if (fmt === 'html') {
+      const html = await repRes.text();
+      return res.json({ success: true, format: 'html', report: report, docids: docids, html: html });
+    }
+    const buf = Buffer.from(await repRes.arrayBuffer());
+    return res.json({ success: true, format: 'pdf', report: report, docids: docids, size: buf.length, pdfBase64: buf.toString('base64') });
+  } catch (e) {
+    res.status(500).json({ success: false, error: 'report-render: ' + e.message });
+  }
+});
+
 module.exports = router;
