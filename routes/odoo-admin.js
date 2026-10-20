@@ -1027,6 +1027,54 @@ function escapeXmlText(s) {
 }
 
 // ============================================================
+// POST /api/v1/admin/recompute-draft-so
+// Forca o recompute das linhas de pedidos em rascunho (draft/sent) para que
+// os totais (amount_untaxed/amount_tax/amount_total) reflitam os impostos
+// com price_include corrigido (nao-IPI por dentro, nao soma no total).
+// Body: { limit? } (default 400 linhas por chamada; chamar repetidamente)
+// ============================================================
+router.post('/recompute-draft-so', apiKeyAuth, async function(req, res) {
+  var limit = parseInt(req.body.limit) || 400;
+  try {
+    var odoo = config.odoo;
+    if (!odoo || !odoo.url || !odoo.enabled) {
+      return res.status(503).json({ success: false, error: 'Odoo nao configurado' });
+    }
+    var client = createClient(odoo.url);
+    var uid = await authenticate(client, odoo.db, odoo.user, odoo.password);
+    var ekw = function(model, method, args, kwargs) {
+      return executeKw(client, odoo.db, uid, odoo.password, model, method, args, kwargs);
+    };
+
+    var lineIds = await ekw('sale.order.line', 'search', [[
+      ['display_type', 'in', [false, 'product']],
+      ['order_id.state', 'in', ['draft', 'sent']],
+      ['price_unit', '>', 0],
+    ]], { limit: limit, order: 'id' });
+
+    var recomputed = 0;
+    for (var i = 0; i < lineIds.length; i++) {
+      try {
+        var rec = await ekw('sale.order.line', 'read', [[lineIds[i]], ['price_unit']]);
+        var pu = rec[0].price_unit || 0;
+        await ekw('sale.order.line', 'write', [[lineIds[i]], { price_unit: pu }]);
+        recomputed++;
+      } catch (eL) {
+        console.warn('[RECOMPUTE-SO] linha ' + lineIds[i] + ': ' + eL.message);
+      }
+    }
+
+    // Totais apos recompute (amostra)
+    var orders = await ekw('sale.order', 'search_read', [[['state', 'in', ['draft', 'sent']]]],
+      { fields: ['name', 'amount_untaxed', 'amount_tax', 'amount_total'], order: 'id desc', limit: 12 });
+
+    res.json({ success: true, linhas_no_domain: lineIds.length, recomputadas: recomputed, amostra_pedidos: orders });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ============================================================
 // POST /api/v1/admin/odoo-rpc
 // RPC generico controlado para diagnostico/correcao no Odoo.
 // Body: { model, method, args?, kwargs?, readOnly? }
