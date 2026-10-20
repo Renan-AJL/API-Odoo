@@ -670,6 +670,13 @@ ${xmlEndereco(partner, 'enderDest')}
     infCplText = 'Pagamento a vista. ' + infCplText;
   }
   if (infCplText) {
+    // AJL 21/10/2026: sanitizacao p/ schema NF-e (evita rejeicao 225):
+    // trim nas pontas (schema nao aceita espaco na 1a/ultima posicao),
+    // sem caracteres de controle e sem quebras de linha cruas.
+    infCplText = String(infCplText)
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     xml += `\n    <infAdic>
       <infCpl>${esc(infCplText.substring(0, 2000))}</infCpl>
     </infAdic>`;

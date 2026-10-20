@@ -28,6 +28,7 @@ var xmlrpc = require('xmlrpc');
 var { emitirNota } = require('./sieg-api');
 var config = require('../config');
 var { IeService } = require('./ie.service');
+var ibgeMunicipios = require('./ibge-municipios');
 var _ieService = new IeService();
 
 // ============================================================
@@ -343,9 +344,10 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   console.log('[SIEG-EMIT] Fatura: ' + move.name + ' | R$ ' + (move.amount_total || 0));
 
   // 1c-2. DIARIO DE TRANSFERENCIA (ex: "Transferência entre Filiais" / FAT1)
-  // Pedido AJL 20/10/2026: NF emitida por diario de transferencia deve sair
-  // com CFOP 5901 (interna) / 6901 (interestadual) — remessa p/ outra filial
-  // da mesma empresa — e NAO como "Venda de Mercadoria".
+  // AJL 21/10/2026: NF do diario de transferencia sai com CFOP 5152 (interna) /
+  // 6152 (interestadual) e natOp pela nomenclatura do tipo de operacao do Odoo.
+  // Se a fatura tiver o TIPO DE OPERACAO preenchido (ex: remessa p/ industriali-
+  // zacao = 5901/6901), o tipo manda (ver 1c-3 e bloco de CFOP das linhas).
   var isTransferencia = false;
   try {
     var jId = (move.journal_id && move.journal_id[0]) || 0;
@@ -354,10 +356,30 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     isTransferencia = jEnv.indexOf(jId) >= 0 ||
       jName.indexOf('transfer') >= 0 || jName.indexOf('filial') >= 0 || jName.indexOf('remessa') >= 0;
     if (isTransferencia) {
-      console.log('[SIEG-EMIT] Diario de TRANSFERENCIA: ' + (move.journal_id[1] || jId) + ' -> CFOP 5901/6901, natOp remessa');
+      console.log('[SIEG-EMIT] Diario de TRANSFERENCIA: ' + (move.journal_id[1] || jId) + ' -> CFOP 5152/6152, natOp pelo tipo de operacao');
     }
   } catch (eJ) {
     console.log('[SIEG-EMIT] Journal read falhou (seguindo como venda): ' + eJ.message);
+  }
+
+  // 1c-3. TIPO DE OPERACAO (l10n_br.operation.type) — AJL 21/10/2026
+  // A NF deve sair com a NOMENCLATURA usada no Odoo (nome do tipo em pt_BR) e o
+  // CFOP correto: transferencia -> 5152/6152; remessa industrializacao -> 5901/6901.
+  var opTypeId = 0, opTypeName = '', opTypeTech = '';
+  try {
+    var otVal = await executeKw(client, db, uid, pwd, 'account.move', 'read',
+      [[moveId], ['l10n_br_goods_operation_type_id']], { context: { lang: 'pt_BR' } });
+    var opRef = (otVal && otVal[0] && otVal[0].l10n_br_goods_operation_type_id) || false;
+    if (opRef && opRef[0]) {
+      opTypeId = opRef[0];
+      opTypeName = opRef[1] || '';
+      var otd = await executeKw(client, db, uid, pwd, 'l10n_br.operation.type', 'read',
+        [[opTypeId], ['technical_name']]);
+      if (otd && otd[0]) opTypeTech = otd[0].technical_name || '';
+      console.log('[SIEG-EMIT] Tipo de operacao: id=' + opTypeId + ' "' + opTypeName + '" (' + opTypeTech + ')');
+    }
+  } catch (eOT) {
+    console.log('[SIEG-EMIT] Tipo de operacao nao lido (segue padrao): ' + eOT.message);
   }
 
   // 1a. GUARDA ANTI-DUPLICAÇÃO: se a NF-e já foi autorizada (ou já tem chave),
@@ -674,11 +696,26 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       ld.cfop = '6' + ld.cfop.substring(1);
       console.log('[SIEG-EMIT] CFOP ajustado para interestadual: ' + ld.cfop + ' (original: ' + cfopOrig + ')');
     }
-    // TRANSFERENCIA entre filiais: CFOP 5901 (interna) / 6901 (interestadual)
-    if (isTransferencia) {
-      var cfopTransf = isInterstate ? '6901' : '5901';
+    // AJL 21/10/2026: CFOP pelo TIPO DE OPERACAO do Odoo (l10n_br.operation.type)
+    //  - transferencia de produtos   -> 5152 (interna) / 6152 (interestadual)
+    //  - remessa p/ industrializacao -> 5901 (interna) / 6901 (interestadual)
+    var cfopOp = '';
+    if (opTypeTech === 'itemsForManufacturingShippingOutbound') {
+      cfopOp = isInterstate ? '6901' : '5901';
+    } else if (opTypeTech === 'itemTransferShippingOutbound' ||
+               opTypeTech === 'itemTransferShippingOutboundBetweenIPITaxPayer') {
+      cfopOp = isInterstate ? '6152' : '5152';
+    }
+    if (cfopOp) {
+      if (ld.cfop !== cfopOp) {
+        console.log('[SIEG-EMIT] CFOP por tipo de operacao (' + opTypeTech + '): ' + ld.cfop + ' -> ' + cfopOp);
+      }
+      ld.cfop = cfopOp;
+    } else if (isTransferencia) {
+      // Diario de transferencia sem tipo definido -> transferencia de produtos
+      var cfopTransf = isInterstate ? '6152' : '5152';
       if (ld.cfop !== cfopTransf) {
-        console.log('[SIEG-EMIT] CFOP transferencia: ' + ld.cfop + ' -> ' + cfopTransf);
+        console.log('[SIEG-EMIT] CFOP transferencia (diario): ' + ld.cfop + ' -> ' + cfopTransf);
       }
       ld.cfop = cfopTransf;
     }
@@ -833,7 +870,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     config: {
       serie: serie,
       tpAmb: process.env.SIEG_TP_AMB || config.sieg.tpAmb || '2',
-      natOp: isTransferencia ? 'Remessa para outra filial da mesma empresa' : 'Venda de Mercadoria',
+      natOp: opTypeName || (isTransferencia ? 'Transferência de produtos' : 'Venda de Mercadoria'),
       mod: tipo === 'nfe' ? '55' : '01',
     },
     tipo: tipo,
@@ -1047,6 +1084,15 @@ async function readCompany(client, db, uid, pwd, companyId) {
   var cityRef = p.l10n_br_city_id || p.city_id;
   if (cityRef && Array.isArray(cityRef)) cityIbge = await readCityIbge(client, db, uid, pwd, cityRef[0]);
 
+  // AJL 21/10/2026: emitente tambem segue a tabela IBGE do middleware
+  var tabelaIbgeEmp = ibgeMunicipios.lookup(stateCode || 'PR', c.city || p.city);
+  if (tabelaIbgeEmp) {
+    if (cityIbge && cityIbge !== tabelaIbgeEmp) {
+      console.log('[SIEG-EMIT] cMun EMITENTE corrigido pela tabela IBGE: %s/%s %s -> %s', c.city, stateCode, cityIbge, tabelaIbgeEmp);
+    }
+    cityIbge = tabelaIbgeEmp;
+  }
+
   return {
     cnpj_cpf: p.cnpj_cpf || c.vat || '22603750000190',
     legal_name: p.legal_name || c.name || 'AJL FERRO E ACO LTDA',
@@ -1242,6 +1288,18 @@ async function readPartner(client, db, uid, pwd, partnerId) {
   var cityIbge = '';
   var cityRef = p.l10n_br_city_id || p.city_id;
   if (cityRef && Array.isArray(cityRef)) cityIbge = await readCityIbge(client, db, uid, pwd, cityRef[0]);
+
+  // AJL 21/10/2026: a tabela IBGE 2026 gravada no middleware manda sobre o Odoo.
+  // Se o codigo do Odoo divergir (ou faltar) -> usa o da tabela (fix rejeicao 274).
+  var tabelaIbgeDest = ibgeMunicipios.lookup(stateCode, p.city);
+  if (tabelaIbgeDest) {
+    if (cityIbge && cityIbge !== tabelaIbgeDest) {
+      console.log('[SIEG-EMIT] cMun DEST CORRIGIDO pela tabela IBGE: %s/%s %s -> %s', p.city, stateCode, cityIbge, tabelaIbgeDest);
+    } else if (!cityIbge) {
+      console.log('[SIEG-EMIT] cMun DEST da tabela IBGE: %s/%s = %s', p.city, stateCode, tabelaIbgeDest);
+    }
+    cityIbge = tabelaIbgeDest;
+  }
 
   // Fallback 1: buscar res.city por nome + estado
   if (!cityIbge && p.city && stateCode) {
@@ -2063,6 +2121,9 @@ function normalizeCityName(name) {
 
 function lookupIbgeFallback(cityName, stateCode) {
   if (!cityName || !stateCode) return '';
+  // AJL 21/10/2026: tabela IBGE 2026 completa (5570 municipios) tem prioridade
+  var full = ibgeMunicipios.lookup(stateCode, cityName);
+  if (full) return full;
   var key = (normalizeCityName(cityName) + '/' + stateCode.toUpperCase().trim());
   var code = IBGE_FALLBACK[key];
   if (code) {
