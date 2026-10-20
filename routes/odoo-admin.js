@@ -324,3 +324,105 @@ router.post('/apply-demandas', apiKeyAuth, async function(req, res) {
 });
 
 module.exports = router;
+
+// POST /api/v1/admin/compact-so-print
+// Rota dedicada para compactar o report de SO para 1 pagina
+router.post('/compact-so-print', apiKeyAuth, async function(req, res) {
+  const odoo = config.odoo;
+  if (!odoo || !odoo.url || !odoo.enabled) {
+    return res.status(503).json({ success: false, error: 'Odoo nao configurado' });
+  }
+
+  try {
+    var client = createClient(odoo.url);
+    var uid2 = await authenticate(client, odoo.db, odoo.user, odoo.password);
+    var db = odoo.db;
+    var pwd = odoo.password;
+
+    function ekw2(model, method, args, kwargs) {
+      return executeKw(client, db, uid2, pwd, model, method, args, kwargs);
+    }
+
+    // Encontrar a view
+    var soViews = await ekw2('ir.ui.view', 'search_read', [[['key','=','sale.report_saleorder_document']]], {fields:['id','name'], limit:3});
+    if (!soViews.length) {
+      soViews = await ekw2('ir.ui.view', 'search_read', [[['name','ilike','report_saleorder_document']]], {fields:['id','name'], limit:3});
+    }
+    if (!soViews.length) {
+      return res.json({ success: false, error: 'View nao encontrada' });
+    }
+
+    var viewId = soViews[0].id;
+    
+    // Ler arch_db
+    var archData = await ekw2('ir.ui.view', 'read', [[viewId], ['arch_db', 'arch']]);
+    var arch = archData[0].arch_db || archData[0].arch || '';
+    
+    var newArch = arch;
+    var changes = [];
+    
+    // 1. Remover page breaks
+    if (newArch.indexOf('page-break-after: always') !== -1) {
+      newArch = newArch.replace(/page-break-after:\s*always/g, 'page-break-after: avoid');
+      changes.push('page-break-after: always→avoid');
+    }
+    if (newArch.indexOf('page-break-before: always') !== -1) {
+      newArch = newArch.replace(/page-break-before:\s*always/g, 'page-break-before: avoid');
+      changes.push('page-break-before: always→avoid');
+    }
+    if (newArch.indexOf('page-break-inside: avoid') !== -1) {
+      newArch = newArch.replace(/page-break-inside:\s*avoid/g, 'page-break-inside: auto');
+      changes.push('page-break-inside: avoid→auto');
+    }
+    
+    // 2. Reduzir margins
+    newArch = newArch.replace(/margin-top:\s*20px/g, 'margin-top:5px');
+    newArch = newArch.replace(/margin-bottom:\s*20px/g, 'margin-bottom:5px');
+    newArch = newArch.replace(/margin-top:\s*15px/g, 'margin-top:3px');
+    newArch = newArch.replace(/margin-bottom:\s*15px/g, 'margin-bottom:3px');
+    newArch = newArch.replace(/margin-top:\s*10px/g, 'margin-top:2px');
+    newArch = newArch.replace(/margin-bottom:\s*10px/g, 'margin-bottom:2px');
+    changes.push('margins reduzidos (20→5, 15→3, 10→2px)');
+    
+    // 3. @page A4 margem minima
+    if (newArch.indexOf('@page') !== -1) {
+      newArch = newArch.replace(/@page\s*\{[^}]*\}/g, '@page { size: A4; margin: 5mm; }');
+      changes.push('@page ajustado para A4 5mm');
+    } else {
+      var stylePos = newArch.indexOf('<style');
+      if (stylePos !== -1) {
+        var styleEnd = newArch.indexOf('>', stylePos) + 1;
+        newArch = newArch.substring(0, styleEnd) + '\n@page { size: A4; margin: 5mm; }\n' + newArch.substring(styleEnd);
+        changes.push('@page adicionado: A4 5mm');
+      }
+    }
+    
+    // 4. Font 12px global
+    if (newArch.indexOf('font-size: 12px') === -1 && newArch.indexOf('font-size:12px') === -1) {
+      var stylePos = newArch.indexOf('<style');
+      if (stylePos !== -1) {
+        var styleEnd = newArch.indexOf('>', stylePos) + 1;
+        newArch = newArch.substring(0, styleEnd) + '\nbody, table, th, td, p, span { font-size: 12px; line-height: 1.3; }\n' + newArch.substring(styleEnd);
+        changes.push('font 12px adicionado');
+      }
+    }
+    
+    if (newArch !== arch) {
+      try {
+        await ekw2('ir.ui.view', 'write', [[viewId], {'arch_db': newArch}]);
+        return res.json({ success: true, viewId: viewId, changes: changes, originalLen: arch.length, newLen: newArch.length, field: 'arch_db' });
+      } catch(e2) {
+        try {
+          await ekw2('ir.ui.view', 'write', [[viewId], {'arch': newArch}]);
+          return res.json({ success: true, viewId: viewId, changes: changes, originalLen: arch.length, newLen: newArch.length, field: 'arch (fallback)' });
+        } catch(e3) {
+          return res.json({ success: false, error: 'Write falhou: ' + e3.message, changes: changes });
+        }
+      }
+    } else {
+      return res.json({ success: true, msg: 'Nenhuma mudanca necessaria', changes: changes });
+    }
+  } catch(e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
