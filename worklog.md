@@ -257,3 +257,20 @@ Stage Summary:
 - Boleto = valor da NF (IPI soma; ICMS/Difal não somam) — confirmado nos 4 pontos + SA 1166
 - Difal automático / ICMS manual (só fatura) / IPI manual — valendo para todas as unidades
 - Arquivos: scripts/ajl_20261021_apply.py, scripts/ajl_20261021_diag.py, scripts/ajl_20261021_diag2.py, scripts/ajl_20261021_diag3.py
+
+---
+Task ID: 8
+Agent: main (sessão IM AJL)
+Task: 21/10 — NF-e de transferência 72857 pendente: diagnóstico + destravamento + emissão autorizada (CFOP 5901) + guard anti-chave-stale
+
+Work Log:
+- Diagnóstico: fatura 157 "NFe 00072857" (diário Transferência entre Filiais) duplicada de 156 (cancelada) — Odoo copiou x_studio_nfe_chave (nNF 72856) e protocolo 141260426915072 da NF cancelada; guarda anti-duplicação do emissor via chave presente e SKIPava todo ciclo ("ja_autorizada")
+- Destravamento (scripts/ajl_20261021_destrava_157.py): limpou chave/protocolo stale da 157 -> poller emitiu em ~30s
+- NF-e 72857 AUTORIZADA: chave 41261022603750000190551000000728571204677937, protocolo 141260427055777, cStat 100; XML verificado: natOp "Remessa para outra filial da mesma empresa", CFOP 5901, vNF 35090.00 (vIPI 0)
+- Guard no emissor (services/sieg-odoo-emit.js): se fatura pendente/erro tem chave cujo nNF (pos. 26-34) != número do nome da fatura -> chave STALE (cópia de duplicação) -> limpa chave/protocolo e emite; faturas autorizadas nunca são tocadas
+- Achado adicional: NFe 00071908 (id 129, erro, 19/10) tem o mesmo problema (chave nNF 71913 != 71908) — aguardando decisão do usuário antes de destravar
+
+Stage Summary:
+- NF 72857 de transferência autorizada com CFOP 5901 — caso resolvido
+- Emissor agora auto-destrava faturas duplicadas com chave de outra NF (não trava mais para sempre)
+- Arquivos: services/sieg-odoo-emit.js, scripts/ajl_20261021_destrava_157.py, scripts/ajl_20261021_nf72857_diag.py, scripts/ajl_20261021_verifica_cfop_157.py

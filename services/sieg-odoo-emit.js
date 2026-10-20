@@ -363,6 +363,10 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   // 1a. GUARDA ANTI-DUPLICAÇÃO: se a NF-e já foi autorizada (ou já tem chave),
   // NUNCA reemitir. Evita emissão duplicada em corrida de pollers
   // (ex: sobreposição de instâncias durante deploy no Render).
+  // EXCEÇÃO (AJL 21/10/2026): chave STALE copiada por DUPLICAÇÃO de fatura
+  // (ex: duplicar NF cancelada -> Odoo copia x_studio_nfe_chave/protocolo).
+  // Se o nNF dentro da chave (pos. 26-34) NÃO bate com o número do NOME da
+  // fatura, a chave pertence a OUTRA NF -> limpa e segue para emissão normal.
   var currentNfeStatus = move.x_studio_nfe_status || '';
   var currentKey = '';
   if (tipo === 'nfe') {
@@ -370,6 +374,23 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       var kv = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], ['x_studio_nfe_chave']]);
       currentKey = (kv && kv[0] && kv[0].x_studio_nfe_chave) || '';
     } catch (eKey) {}
+    if (currentKey && currentNfeStatus !== 'autorizada') {
+      var chaveDig = String(currentKey).replace(/\D/g, '');
+      var nfNaChave = (chaveDig.length === 44) ? chaveDig.slice(25, 34).replace(/^0+/, '') : '';
+      var mNomeNF = String(move.name || '').match(/(\d{5,})/);
+      var nfNoNome = mNomeNF ? mNomeNF[1].replace(/^0+/, '') : '';
+      if (nfNaChave && nfNoNome && nfNaChave !== nfNoNome) {
+        console.log('[SIEG-EMIT] Fatura ' + moveId + ' (' + move.name + ') com chave STALE ' +
+          chaveDig + ' (nNF ' + nfNaChave + ' != ' + nfNoNome + ') — limpando chave/protocolo copiados e emitindo');
+        try {
+          await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId],
+            { x_studio_nfe_chave: false, x_studio_nfe_protocolo: false }]);
+        } catch (eStale) {
+          console.warn('[SIEG-EMIT] Falha ao limpar chave stale: ' + eStale.message);
+        }
+        currentKey = '';
+      }
+    }
     if (currentNfeStatus === 'autorizada' || currentKey) {
       console.log('[SIEG-EMIT] Fatura ' + moveId + ' ja AUTORIZADA (status=' + currentNfeStatus +
         ', chave=' + (currentKey || 'n/d') + ') — SKIP, não reemitir');
