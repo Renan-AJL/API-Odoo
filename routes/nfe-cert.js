@@ -11,7 +11,7 @@ var express = require('express');
 var router = express.Router();
 var { apiKeyAuth } = require('../middleware/auth');
 var { salvarCertificado, statusCertificado, removerCertificado } = require('../services/nfe-cert');
-var { statusServico } = require('../services/sefaz-client');
+var { statusServico, consultarChave } = require('../services/sefaz-client');
 var { gerarDanfePdf } = require('../services/danfe-pdf');
 
 // Upload do certificado A1 (protegido por API key)
@@ -39,6 +39,24 @@ router.get('/certificado', apiKeyAuth, function (req, res) {
 router.delete('/certificado', apiKeyAuth, function (req, res) {
   removerCertificado();
   res.json({ sucesso: true, mensagem: 'Certificado removido.' });
+});
+
+// AJL 21/10/2026: consulta a situacao de uma NF-e pela CHAVE de acesso
+// (NFeConsultaProtocolo4). Usado para adotar NFs autorizadas na SEFAZ que
+// nao foram registradas no Odoo (falha de escrita) — ex: rejeicao 539.
+// POST /api/v1/nfe/consultar-chave  body: { "chave": "44digitos" }
+router.post('/consultar-chave', apiKeyAuth, async function (req, res) {
+  try {
+    var chave = String((req.body || {}).chave || '').replace(/\D/g, '');
+    if (chave.length !== 44) {
+      return res.status(400).json({ sucesso: false, erro: 'Chave deve ter 44 digitos (recebido: ' + chave.length + ').' });
+    }
+    var r = await consultarChave(chave);
+    res.json({ sucesso: true, chave: chave, resultado: r });
+  } catch (err) {
+    console.error('[NFE-CERT] Erro consultar-chave: ' + err.message);
+    res.status(500).json({ sucesso: false, erro: err.message });
+  }
 });
 
 // Testa conexao mTLS com a SEFAZ usando o certificado carregado
