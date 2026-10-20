@@ -1093,6 +1093,17 @@ async function readCompany(client, db, uid, pwd, companyId) {
     cityIbge = tabelaIbgeEmp;
   }
 
+  // AJL 21/10/2026 (pedido Renan): campo x_studio_codigo_municipio do cadastro
+  // MANDA como cMun — APENAS para emitente do PARANA. Prioridade maxima,
+  // acima da tabela e do Odoo (deterministico, sem depender de nome de cidade).
+  var campoMunEmp = String(p.x_studio_codigo_municipio || '').replace(/\D/g, '');
+  if ((stateCode || 'PR').toUpperCase() === 'PR' && campoMunEmp.length === 7) {
+    if (cityIbge !== campoMunEmp) {
+      console.log('[SIEG-EMIT] cMun EMITENTE pelo campo do cadastro (PR): %s -> %s', cityIbge || '(vazio)', campoMunEmp);
+    }
+    cityIbge = campoMunEmp;
+  }
+
   return {
     cnpj_cpf: p.cnpj_cpf || c.vat || '22603750000190',
     legal_name: p.legal_name || c.name || 'AJL FERRO E ACO LTDA',
@@ -1220,6 +1231,15 @@ async function readPartnerSafe(client, db, uid, pwd, partnerId, extraFields) {
     console.log('[SIEG-EMIT] Campos l10n_br nao disponiveis, usando vat como CNPJ/CPF');
   }
 
+  // AJL 21/10/2026: campo do cadastro com o codigo IBGE do municipio (NF-e).
+  // Leitura separada: o campo pode nao existir em outro ambiente Odoo.
+  try {
+    var munRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], ['x_studio_codigo_municipio']]);
+    if (munRecs && munRecs[0]) p.x_studio_codigo_municipio = munRecs[0].x_studio_codigo_municipio || '';
+  } catch (eMun) {
+    console.log('[SIEG-EMIT] Campo x_studio_codigo_municipio nao disponivel (segue sem ele)');
+  }
+
   // Discovery: tenta encontrar campos IE/CNPJ/razao social via fields_get
   await discoverPartnerFields(client, db, uid, pwd);
 
@@ -1299,6 +1319,17 @@ async function readPartner(client, db, uid, pwd, partnerId) {
       console.log('[SIEG-EMIT] cMun DEST da tabela IBGE: %s/%s = %s', p.city, stateCode, tabelaIbgeDest);
     }
     cityIbge = tabelaIbgeDest;
+  }
+
+  // AJL 21/10/2026 (pedido Renan): campo x_studio_codigo_municipio no cadastro
+  // do cliente MANDA como cMun — APENAS para PARANA. Prioridade maxima,
+  // acima da tabela IBGE e do codigo vindo do Odoo (deterministico).
+  var campoMunDest = String(p.x_studio_codigo_municipio || '').replace(/\D/g, '');
+  if (stateCode === 'PR' && campoMunDest.length === 7) {
+    if (cityIbge !== campoMunDest) {
+      console.log('[SIEG-EMIT] cMun DEST pelo campo do cadastro (PR): %s/%s %s -> %s', p.city, stateCode, cityIbge || '(vazio)', campoMunDest);
+    }
+    cityIbge = campoMunDest;
   }
 
   // Fallback 1: buscar res.city por nome + estado
