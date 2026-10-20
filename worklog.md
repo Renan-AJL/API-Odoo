@@ -213,3 +213,27 @@ Stage Summary:
 - Guardas anti-duplicacao e anti-downgrade de status implementados
 - ICMS manual disponivel na fatura (4 campos + view)
 - Fatura 148 pronta para reemissao (cidade/IBGE corrigidos)
+
+---
+Task ID: 6
+Agent: main
+Task: 20/10 noite — IPI no boleto/PIX (valor igual NF) + CFOP 5901 diario transferencia + mesma sequencia NF + sem ICMS automatico em cotacao/pedido + forma de pagamento no DANFE
+
+Work Log:
+- Diagnosticado valor do boleto: Server Action 1166 "Processar Pgto Itau" enviava amount_untaxed (sem IPI). NF 72855 (autorizada, correta): vNF = amount_untaxed 35090.00 + IPI 1140.43 = 36230.43
+- Middleware (routes/itau-api.js): novo corrigirValorComIpi() — le a fatura no Odoo (amount_untaxed + linhas de imposto IPI via tax_line_id ilike IPI) e corrige o valor em /pagar (boleto, PIX, cartao) e /gerar; cache 60s; so atua para faturas (nome 'NFe ...'), pedidos passam direto
+- Server Action 1166 atualizado no Odoo: _valor_cobranca = amount_untaxed + soma |balance| das linhas IPI (marca AJL268-IPI)
+- Diario "Transferência entre Filiais" (id 24, FAT1): emissor agora detecta (nome contendo transfer/filial/remessa ou NFE_TRANSFER_JOURNAL_IDS) -> CFOP 5901 interna / 6901 interestadual + natOp "Remessa para outra filial da mesma empresa"
+- MESMA SEQUENCIA p/ os dois diarios: nNF segue o numero do NOME da fatura ('NFe 000NNNNN') quando novo (> contador global x_studio_sieg_ultimo_nfe); contador avanca para o numero usado; se numero do nome ja usado, usa contador+1 (seguro SEFAZ)
+- ICMS automatico em cotacao/pedido removido: (1) limpou taxes_id ICMS de 1264 produtos (script remove-default-icms-products.py, mantidos IPI/Difal/PIS/COFINS); (2) SA 1186 "Automação 2" agora remove ICMS automatico na 1a passada da linha (preco_base vazio), preservando ICMS manual do vendedor (marca AJL-SEM-ICMS-AUTO)
+- DIFAL automatico REATIVADO: base.automation 15 "Automação 2: Impostos" estava INATIVA — reativada a pedido (difal pode ser o automatico); acréscimo PR 7,5% continua desligado; Difal so p/ interestadual sem IE, por dentro, nao soma no total
+- DANFE (services/danfe-pdf.js): novo campo FORMA DE PAGAMENTO (mapeia tPag/indPag/detPag, ex: "Boleto bancário — à prazo (3 parcelas)") na linha Natureza/Protocolo; testado com XML real da NF 72855
+- NF 72853: fatura 150 esta CANCELADA (nfe_status=cancelada) e SEM boleto Itau (nosso_numero vazio) — condicao "remontar/reenviar se tiver boleto" nao se aplica; nada feito (nao reemitir)
+- node -c OK nos 3 arquivos; scripts aplicados em producao via /api/v1/admin/odoo-rpc (1166+1186 gravados, auto 15 ativa, 0 produtos com ICMS padrao)
+
+Stage Summary:
+- Boleto/PIX/Cartao passam a usar valor fiscal igual NF (vProd + vIPI; apenas IPI soma) — na origem (SA 1166) e com garantia no middleware
+- NF de diario de transferencia sai com CFOP 5901/6901 e natOp de remessa; os dois diarios (FAT/FAT1) compartilham a mesma sequencia de NF via nome da fatura
+- Cotacao/pedido sem ICMS automatico (manual ok); Difal automatico reativado e nao soma no total; IPI somando
+- DANFE mostra FORMA DE PAGAMENTO
+- Arquivos: routes/itau-api.js, services/sieg-odoo-emit.js, services/danfe-pdf.js, scripts/ajl_20261020_night.py, scripts/remove-default-icms-products.py

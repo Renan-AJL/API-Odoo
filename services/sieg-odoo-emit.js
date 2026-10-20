@@ -331,7 +331,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
 
   // 1. Read account.move (sem invoice_line_ids — pode ser computed nao-stored no Odoo 19)
   var moves = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], [
-    'name', 'partner_id', 'company_id', 'invoice_date', 'date',
+    'name', 'partner_id', 'company_id', 'invoice_date', 'date', 'journal_id',
     'amount_total', 'narration',
     'x_studio_nfe_status', 'x_studio_nfse_status', 'payment_state',
     'x_studio_itau_nosso_numero', 'x_studio_itau_resposta_json', 'x_studio_boleto_cancelado',
@@ -341,6 +341,24 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
   var move = moves[0];
   console.log('[SIEG-EMIT] Fatura: ' + move.name + ' | R$ ' + (move.amount_total || 0));
+
+  // 1c-2. DIARIO DE TRANSFERENCIA (ex: "Transferência entre Filiais" / FAT1)
+  // Pedido AJL 20/10/2026: NF emitida por diario de transferencia deve sair
+  // com CFOP 5901 (interna) / 6901 (interestadual) — remessa p/ outra filial
+  // da mesma empresa — e NAO como "Venda de Mercadoria".
+  var isTransferencia = false;
+  try {
+    var jId = (move.journal_id && move.journal_id[0]) || 0;
+    var jName = (move.journal_id && move.journal_id[1]) ? String(move.journal_id[1]).toLowerCase() : '';
+    var jEnv = (process.env.NFE_TRANSFER_JOURNAL_IDS || '').split(',').map(function(s){ return parseInt(s); }).filter(Boolean);
+    isTransferencia = jEnv.indexOf(jId) >= 0 ||
+      jName.indexOf('transfer') >= 0 || jName.indexOf('filial') >= 0 || jName.indexOf('remessa') >= 0;
+    if (isTransferencia) {
+      console.log('[SIEG-EMIT] Diario de TRANSFERENCIA: ' + (move.journal_id[1] || jId) + ' -> CFOP 5901/6901, natOp remessa');
+    }
+  } catch (eJ) {
+    console.log('[SIEG-EMIT] Journal read falhou (seguindo como venda): ' + eJ.message);
+  }
 
   // 1a. GUARDA ANTI-DUPLICAÇÃO: se a NF-e já foi autorizada (ou já tem chave),
   // NUNCA reemitir. Evita emissão duplicada em corrida de pollers
@@ -592,6 +610,25 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     numField = 'x_studio_sieg_ultimo_nfse';
   }
   nextNum = (parseInt(company[numField]) || 0) + 1;
+  // MESMA SEQUENCIA PARA OS DOIS DIARIOS (Sales e Transferência entre Filiais):
+  // o numero da NF segue o NOME da fatura ('NFe 000NNNNN') quando esse numero
+  // ainda e novo (maior que o contador). Assim os dois diarios compartilham a
+  // mesma sequencia — o contador global avanca para o numero efetivamente usado.
+  try {
+    var mNameNum = String(move.name || '').match(/(\d{4,9})\s*$/);
+    if (mNameNum) {
+      var namedNum = parseInt(mNameNum[1]);
+      var contadorAtual = parseInt(company[numField]) || 0;
+      if (namedNum > contadorAtual) {
+        if (namedNum !== nextNum) {
+          console.log('[SIEG-EMIT] nNF alinhado ao nome da fatura: ' + namedNum + ' (contador emitiria ' + nextNum + ')');
+        }
+        nextNum = namedNum;
+      } else if (namedNum > 0 && namedNum < nextNum) {
+        console.warn('[SIEG-EMIT] Numero do nome da fatura (' + namedNum + ') ja usado na serie — usando contador: ' + nextNum);
+      }
+    }
+  } catch (eNum) {}
   console.log('[SIEG-EMIT] Serie: ' + serie + ' | nNF: ' + nextNum);
 
   // 6. Build line data with taxes + product x_studio_ fields
@@ -615,6 +652,14 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       var cfopOrig = ld.cfop;
       ld.cfop = '6' + ld.cfop.substring(1);
       console.log('[SIEG-EMIT] CFOP ajustado para interestadual: ' + ld.cfop + ' (original: ' + cfopOrig + ')');
+    }
+    // TRANSFERENCIA entre filiais: CFOP 5901 (interna) / 6901 (interestadual)
+    if (isTransferencia) {
+      var cfopTransf = isInterstate ? '6901' : '5901';
+      if (ld.cfop !== cfopTransf) {
+        console.log('[SIEG-EMIT] CFOP transferencia: ' + ld.cfop + ' -> ' + cfopTransf);
+      }
+      ld.cfop = cfopTransf;
     }
     // Ajustar ICMS baseado na regra PR
     if (!isInterstate) {
@@ -767,7 +812,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     config: {
       serie: serie,
       tpAmb: process.env.SIEG_TP_AMB || config.sieg.tpAmb || '2',
-      natOp: 'Venda de Mercadoria',
+      natOp: isTransferencia ? 'Remessa para outra filial da mesma empresa' : 'Venda de Mercadoria',
       mod: tipo === 'nfe' ? '55' : '01',
     },
     tipo: tipo,

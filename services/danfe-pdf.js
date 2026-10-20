@@ -161,9 +161,32 @@ async function gerarDanfePdf(nfeProcXml, opts) {
   );
   y += hHead + 2;
 
-  // --- Protocolo / natureza ---
-  campo(L, y, W * 0.55, 20, 'NATUREZA DA OPERACAO', tag(ide, 'natOp'), 7);
-  campo(L + W * 0.55, y, W * 0.45, 20, 'PROTOCOLO DE AUTORIZACAO DE USO',
+  // --- Protocolo / natureza / forma de pagamento ---
+  // FORMA DE PAGAMENTO (layout NF — pedido AJL): mapeia tPag/indPag/detPag
+  var TPAG_LABEL = {
+    '01': 'Dinheiro', '02': 'Cheque', '03': 'Cartão de crédito', '04': 'Cartão de débito',
+    '05': 'Crédito loja', '10': 'Vale alimentação', '11': 'Vale presente', '12': 'Vale combustível',
+    '13': 'Boleto bancário', '14': 'Depósito bancário', '15': 'PIX', '16': 'Transferência bancária',
+    '17': 'Programa de fidelidade', '18': 'Crédito virtual', '19': 'Pagamento instantâneo (PIX)',
+    '20': 'Pagamento instantâneo (outro)', '21': 'Crédito SIMPLES', '99': 'Outros',
+  };
+  var pagBlocos = blocos(infNFe, 'pag');
+  var detPags = [];
+  for (var pgB = 0; pgB < pagBlocos.length; pgB++) detPags = detPags.concat(blocos(pagBlocos[pgB], 'detPag'));
+  if (!detPags.length) detPags = blocos(infNFe, 'detPag');
+  var formaPagTxt = '';
+  if (detPags.length > 0) {
+    var tPag0 = tag(detPags[0], 'tPag');
+    var indPag0 = tag(detPags[0], 'indPag');
+    formaPagTxt = TPAG_LABEL[tPag0] || 'Outros';
+    formaPagTxt += ' — ' + (indPag0 === '1' ? 'à prazo' : 'à vista');
+    if (detPags.length > 1) formaPagTxt += ' (' + detPags.length + ' parcelas)';
+  } else if (tag(total, 'vNF')) {
+    formaPagTxt = 'Sem informação (a vista)';
+  }
+  campo(L, y, W * 0.40, 20, 'NATUREZA DA OPERACAO', tag(ide, 'natOp'), 7);
+  campo(L + W * 0.40, y, W * 0.25, 20, 'FORMA DE PAGAMENTO', formaPagTxt, 7);
+  campo(L + W * 0.65, y, W * 0.35, 20, 'PROTOCOLO DE AUTORIZACAO DE USO',
     (tag(prot, 'nProt') || '-') + '  ' + dataFmt(tag(prot, 'dhRecbto')), 7);
   y += 22;
 

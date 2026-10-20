@@ -227,6 +227,72 @@ async function postBoletoBlockedChatter(faturaId, motivo) {
   }
 }
 
+// === VALOR DA COBRANCA = vProd + vIPI (igual NF) ===
+// Regra AJL: APENAS o IPI soma no valor. ICMS/Difal e outros impostos nao
+// somam (por dentro / informativos). O Server Action "Processar Pgto Itau"
+// pode enviar valor sem IPI (amount_untaxed); aqui garantimos o valor fiscal
+// correto lendo a fatura no Odoo: amount_untaxed + soma das linhas de IPI.
+// So atua para FATURAS (nome 'NFe ...'); pedidos de venda ('S...') passam direto.
+var _valorIpiCache = {};
+async function corrigirValorComIpi(faturaName, faturaId, valorInformado) {
+  var informado = Math.round((parseFloat(valorInformado) || 0) * 100) / 100;
+  try {
+    var oc = config.odoo;
+    if (!oc || !oc.enabled || !oc.url) return informado;
+    var nm = String(faturaName || '').trim();
+    if (!/^NFe/i.test(nm)) return informado; // nao e fatura emitida -> sem correcao
+    var cacheKey = nm || ('id:' + faturaId);
+    var cached = _valorIpiCache[cacheKey];
+    if (cached && (Date.now() - cached.ts) < 60000) return cached.valor;
+
+    var xmlrpcV = require('xmlrpc');
+    var baseV = oc.url.replace(/\/+$/, '');
+    var hostV = baseV.replace('https://', '').replace('http://', '');
+    var commonV = xmlrpcV.createSecureClient({ host: hostV, path: '/xmlrpc/2/common', port: 443 });
+    var modelsV = xmlrpcV.createSecureClient({ host: hostV, path: '/xmlrpc/2/object', port: 443 });
+    var uidV = await new Promise(function(ok, fail) {
+      commonV.methodCall('authenticate', [oc.db, oc.user, oc.password, {}], function(e, r) {
+        if (e || !r) return fail(e || new Error('auth failed')); ok(r);
+      });
+    });
+    function ekwV(model, method, args, kwargs) {
+      return new Promise(function(ok, fail) {
+        var params = [oc.db, uidV, oc.password, model, method, args];
+        if (kwargs) params.push(kwargs);
+        modelsV.methodCall('execute_kw', params, function(e, r) {
+          if (e) return fail(e); ok(r);
+        });
+      });
+    }
+
+    var domain = nm ? [['name', '=', nm], ['move_type', '=', 'out_invoice']]
+                    : [['id', '=', faturaId], ['move_type', '=', 'out_invoice']];
+    var ids = await ekwV('account.move', 'search', [domain], { limit: 1 });
+    if (!ids || !ids.length) return informado;
+    var inv = await ekwV('account.move', 'read', [ids, ['amount_untaxed']]);
+    var untaxed = parseFloat((inv && inv[0] && inv[0].amount_untaxed) || 0) || 0;
+    var taxLines = await ekwV('account.move.line', 'search_read',
+      [[['move_id', '=', ids[0]], ['tax_line_id', 'ilike', 'IPI']]],
+      { fields: ['balance'] });
+    var ipi = 0;
+    for (var ti = 0; ti < taxLines.length; ti++) {
+      ipi += Math.abs(parseFloat(taxLines[ti].balance) || 0);
+    }
+    var valor = Math.round((untaxed + ipi) * 100) / 100;
+    if (valor <= 0) return informado;
+    if (Math.abs(valor - informado) > 0.01) {
+      console.log('[VALOR-IPI] ' + nm + ': valor informado R$ ' + informado.toFixed(2) +
+        ' -> corrigido p/ R$ ' + valor.toFixed(2) + ' (vProd ' + untaxed.toFixed(2) +
+        ' + IPI ' + ipi.toFixed(2) + ')');
+    }
+    _valorIpiCache[cacheKey] = { ts: Date.now(), valor: valor };
+    return valor;
+  } catch (eV) {
+    console.warn('[VALOR-IPI] Correcao falhou (usando valor informado):', eV.message);
+    return informado;
+  }
+}
+
 // --- Deteccao de cartao por bandeira ---
 var BANDEIRAS = ['VISA', 'MASTER', 'ELO', 'AMEX', 'HIPERCARD', 'HIPER'];
 
@@ -259,7 +325,8 @@ async function handleCartao(req, res, d, cartaoInfo) {
   var fat = d.fatura || {};
   var faturaName = fat.name || fat.seu_numero || d.fatura_name || '';
   var faturaId = (fat.id || d.fatura_id) ? parseInt(String(fat.id || d.fatura_id)) : 0;
-  var valorTotal = parseFloat(fat.valor_nominal || d.fatura_valor) || 0;
+  // AJL: valor = vProd + vIPI (igual NF) — apenas IPI soma
+  var valorTotal = await corrigirValorComIpi(faturaName, faturaId, parseFloat(fat.valor_nominal || d.fatura_valor) || 0);
   var pag = d.pagador || {};
 
   console.log('[API/CARTAO] Fatura:', faturaName, '| Valor:', valorTotal, '| Bandeira:', cartaoInfo.bandeira);
@@ -373,7 +440,8 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
     var fatNameFromFlat = d.fatura_name || d.invoice_name || '';
     var faturaName = fatNameFromNested || fatNameFromFlat;
     var faturaId = (fat.id || d.fatura_id || d.invoice_id) ? parseInt(String(fat.id || d.fatura_id || d.invoice_id)) : 0;
-    var valorTotal = parseFloat(fat.valor_nominal || d.fatura_valor) || 0;
+    // AJL: valor do boleto = vProd + vIPI (igual NF) — apenas IPI soma
+    var valorTotal = await corrigirValorComIpi(faturaName, faturaId, parseFloat(fat.valor_nominal || d.fatura_valor) || 0);
     var dataVencBase = fat.data_vencimento || d.fatura_vencimento || '';
 
     var pag = d.pagador || {};
@@ -658,7 +726,8 @@ router.post('/gerar', async function(req, res) {
   try {
     var formaPag = req.body.forma_pagamento || '';
     var fatName = req.body.fatura_name || '';
-    var fatValor = parseFloat(req.body.fatura_valor) || 0;
+    // AJL: valor = vProd + vIPI (igual NF) — apenas IPI soma (so faturas 'NFe ...')
+    var fatValor = await corrigirValorComIpi(fatName, parseInt(req.body.fatura_id || req.body.invoice_id) || 0, parseFloat(req.body.fatura_valor) || 0);
     var fatVenc = req.body.fatura_vencimento || '';
 
     // === DEDUPLICACAO BOLETO: verificar se ja tem requisicao em curso ou resultado recente ===
@@ -927,7 +996,8 @@ async function handlePix(req, res, d) {
   var fat = d.fatura || {};
   var faturaName = fat.name || fat.seu_numero || d.fatura_name || '';
   var faturaId = (fat.id || d.fatura_id) ? parseInt(String(fat.id || d.fatura_id)) : 0;
-  var valorTotal = parseFloat(fat.valor_nominal || d.fatura_valor) || 0;
+  // AJL: valor do PIX = vProd + vIPI (igual NF) — apenas IPI soma
+  var valorTotal = await corrigirValorComIpi(faturaName, faturaId, parseFloat(fat.valor_nominal || d.fatura_valor) || 0);
   var pag = d.pagador || {};
   var pagNome = pag.nome || d.pagador_nome || '';
   var pagCpf = pag.cpf_cnpj || d.pagador_cpf || '';
