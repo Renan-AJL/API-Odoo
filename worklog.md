@@ -190,3 +190,26 @@ Stage Summary:
 - Odoo view 3513: Sub total/Total corrigidos (IPI agora aparece no Total)
 - Odoo report 1126: fonte 12px + containers ajustados
 - Pendente observacao: fatura 147 total Odoo = 2257.92 (ICMS 12% soma no total do Odoo pois price_include=false) — XML NF-e ignora ICMS no vNF (vNF = vProd + vIPI), correto fiscalmente; avaliar com cliente se ICMS deve virar price_include (afetaria vBC/vProd do XML)
+
+---
+Task ID: 5
+Agent: main
+Task: NF-e 147 autorizada + guardas anti-corrida + ICMS manual + fix cMun vazio (cStat 225 fatura 148)
+
+Work Log:
+- NF-e 00072846 (fatura 147) AUTORIZADA pela SEFAZ PR: chave 41261022603750000190551000000728521108228101, protocolo 141260426529110, XML+DANFE anexados
+- Deploy overlap no Render fez 2 pollers processarem a mesma fatura: codigo novo autorizou, codigo velho (round2 bug) regravou status 'erro' por cima de 'autorizada'
+- Corrigido status da fatura 147 para 'autorizada' via XML-RPC (chave confirmada, sem duplicar emissao)
+- GUARDA 1 (processOne): skip se fatura ja 'autorizada' ou ja tem x_studio_nfe_chave — nunca reemitir
+- GUARDA 2 (writeStatusSafe): bloqueia downgrade 'autorizada' -> 'erro'/'pendente' (le status atual antes de gravar; cancelando/cancelada permitidos)
+- ICMS MANUAL (pedido do Renan): campos x_studio_icms_manual/aliquota/bc/valor em account.move — se manual ativo, sobrescreve vBC/pICMS/vICMS das linhas (rateio proporcional ao vProd); alíquota 0 => CST 40 isento; infCpl informa "ICMS informado manualmente"
+- Campos criados no Odoo + view herdada 'AJL - ICMS Manual NF-e' (id 4935) no form da fatura
+- Fix cStat 225 (fatura 148, EVERALDO DOS REIS JAPONES): parceiro sem cidade — cMun/xMun vazios rejeitados pelo XSD TCodMunIBGE
+- Parceiro 129796: city_id=1235 Campo Magro/PR; res.city 1235 x_ibge_code corrigido 4104401->4104253 (IBGE oficial)
+- Tabela IBGE_FALLBACK corrigida: Lages 4209300 (era 4209102=Joinville), Sao Jose 4209602 (era 4205407=Florianopolis), Itapema 4208302 (era 4208601), Joacaba 4209003 (era 4210600), Palhoca nome, Cacador key sem acento, Videira key uppercase
+
+Stage Summary:
+- NF-e 147 autorizada e status corrigido — NAO reemitir
+- Guardas anti-duplicacao e anti-downgrade de status implementados
+- ICMS manual disponivel na fatura (4 campos + view)
+- Fatura 148 pronta para reemissao (cidade/IBGE corrigidos)

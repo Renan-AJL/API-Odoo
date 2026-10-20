@@ -156,6 +156,26 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   var move = moves[0];
   console.log('[SIEG-EMIT] Fatura: ' + move.name + ' | R$ ' + (move.amount_total || 0));
 
+  // 1a. GUARDA ANTI-DUPLICAÇÃO: se a NF-e já foi autorizada (ou já tem chave),
+  // NUNCA reemitir. Evita emissão duplicada em corrida de pollers
+  // (ex: sobreposição de instâncias durante deploy no Render).
+  var currentNfeStatus = move.x_studio_nfe_status || '';
+  var currentKey = '';
+  if (tipo === 'nfe') {
+    try {
+      var kv = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], ['x_studio_nfe_chave']]);
+      currentKey = (kv && kv[0] && kv[0].x_studio_nfe_chave) || '';
+    } catch (eKey) {}
+    if (currentNfeStatus === 'autorizada' || currentKey) {
+      console.log('[SIEG-EMIT] Fatura ' + moveId + ' ja AUTORIZADA (status=' + currentNfeStatus +
+        ', chave=' + (currentKey || 'n/d') + ') — SKIP, não reemitir');
+      return { move_id: moveId, tipo: tipo, sucesso: true, skip: true, motivo: 'ja_autorizada' };
+    }
+  } else if ((move.x_studio_nfse_status || '') === 'autorizada') {
+    console.log('[SIEG-EMIT] NFS-e ' + moveId + ' ja AUTORIZADA — SKIP');
+    return { move_id: moveId, tipo: tipo, sucesso: true, skip: true, motivo: 'ja_autorizada' };
+  }
+
   // 1b. Read sale order origin (invoice_origin / sale_order_ids) for pedido number
   var saleOrderNumber = '';
   try {
@@ -389,6 +409,53 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     linesData.push(ld);
   }
 
+  // 6b. ICMS MANUAL — campos x_studio na fatura (fallback quando o cálculo
+  // automático não serve: usuário informa alíquota/BC/valor e a NF sai com eles)
+  //   x_studio_icms_manual   (Boolean)  -> ativa o modo manual
+  //   x_studio_icms_aliquota (Float %)  -> alíquota aplicada às linhas
+  //   x_studio_icms_bc       (Monetary) -> BC total manual (opcional; rateia proporcional ao vProd)
+  //   x_studio_icms_valor    (Monetary) -> vICMS total manual (opcional; rateia proporcional ao vProd)
+  var icmsManual = { ativo: false, aliquota: 0, bc: 0, valor: 0 };
+  try {
+    var mvIcms = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], [
+      'x_studio_icms_manual', 'x_studio_icms_aliquota', 'x_studio_icms_bc', 'x_studio_icms_valor',
+    ]]);
+    if (mvIcms && mvIcms[0] && mvIcms[0].x_studio_icms_manual) {
+      icmsManual.ativo = true;
+      icmsManual.aliquota = parseFloat(mvIcms[0].x_studio_icms_aliquota) || 0;
+      icmsManual.bc = parseFloat(mvIcms[0].x_studio_icms_bc) || 0;
+      icmsManual.valor = parseFloat(mvIcms[0].x_studio_icms_valor) || 0;
+    }
+  } catch (eIcmsMan) {
+    console.log('[SIEG-EMIT] Campos ICMS manual nao disponiveis: ' + eIcmsMan.message);
+  }
+  if (icmsManual.ativo) {
+    var vProdManual = 0;
+    for (var vm = 0; vm < linesData.length; vm++) vProdManual += parseFloat(linesData[vm].price_subtotal) || 0;
+    var vIcmsManualTotal = 0;
+    var vBcManualTotal = 0;
+    for (var mi = 0; mi < linesData.length; mi++) {
+      var mld = linesData[mi];
+      var mSub = parseFloat(mld.price_subtotal) || 0;
+      var mProp = vProdManual > 0 ? mSub / vProdManual : 0;
+      var mBc = icmsManual.bc > 0 ? round2(icmsManual.bc * mProp) : round2(mSub);
+      var mVicms = icmsManual.valor > 0 ? round2(icmsManual.valor * mProp) : round2(mBc * icmsManual.aliquota / 100);
+      var mPicms = mBc > 0 ? Math.round((mVicms / mBc) * 100 * 100) / 100 : icmsManual.aliquota;
+      mld.vbc_icms = String(mBc);
+      mld.picms = String(mPicms);
+      mld.vicms = String(mVicms);
+      // Alíquota 0 e valor 0 => ICMS isento (CST 40); senão mantém CST atual
+      if (icmsManual.aliquota === 0 && icmsManual.valor === 0) {
+        mld.cst_icms = '40';
+        mld.mod_bc = '3';
+      }
+      vIcmsManualTotal += mVicms;
+      vBcManualTotal += mBc;
+      console.log('[SIEG-EMIT] ICMS MANUAL linha ' + mi + ': vBC=' + mBc + ' pICMS=' + mPicms + '% vICMS=' + mVicms);
+    }
+    console.log('[SIEG-EMIT] ICMS MANUAL ATIVO — alíquota=' + icmsManual.aliquota + '% BC=' + vBcManualTotal.toFixed(2) + ' vICMS=' + vIcmsManualTotal.toFixed(2));
+  }
+
   // 7. Build emission payload
   // vNF = vProd + vIPI (unico imposto que soma no valor da NF)
   // vProd = soma dos price_subtotal (sem IPI incluso)
@@ -440,7 +507,9 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
 
   // Determinar ICMS alíquota para infCpl
   var icmsAliquotaInfCpl = '';
-  if (isInterstate) {
+  if (icmsManual.ativo) {
+    icmsAliquotaInfCpl = 'ICMS informado manualmente: ' + icmsManual.aliquota + '%';
+  } else if (isInterstate) {
     icmsAliquotaInfCpl = String(picmsInterstate) + ' (interestadual)';
     if (difalTotal > 0) {
       icmsAliquotaInfCpl += ' Difal R$ ' + difalTotal.toFixed(2);
@@ -1441,17 +1510,17 @@ var IBGE_FALLBACK = {
   'BRUSQUE/SC': '4202909',
   'JOINVILLE/SC': '4209102',
   'FLORIANOPOLIS/SC': '4205407',
-  'SAO JOSE/SC': '4205407',
+  'SAO JOSE/SC': '4209602',
   'BLUMENAU/SC': '4202404',
   'ITAJAI/SC': '4208203',
-  'LAGES/SC': '4209102',
+  'LAGES/SC': '4209300',
   'CRICIUMA/SC': '4204608',
   'CHAPECO/SC': '4204200',
   'JARAGUA DO SUL/SC': '4208906',
-  'PALHOCAS/SC': '4211900',
+  'PALHOCA/SC': '4211900',
   'INDAIAL/SC': '4208502',
   'NAVEGANTES/SC': '4211405',
-  'ITAPENA/SC': '4208601',
+  'ITAPEMA/SC': '4208302',
   'CAMBORIU/SC': '4203204',
   'TIMBO/SC': '4218304',
   'POMERODE/SC': '4218650',
@@ -1460,9 +1529,9 @@ var IBGE_FALLBACK = {
   'MAFRA/SC': '4209607',
   'CANOINHAS/SC': '4203808',
   'CONCORDIA/SC': '4204707',
-  'CAÇADOR/SC': '4203103',
-  'JOACABA/SC': '4210600',
-  'Videira/SC': '4216003',
+  'CACADOR/SC': '4203103',
+  'JOACABA/SC': '4209003',
+  'VIDEIRA/SC': '4216003',
   'ARARANGUA/SC': '4201406',
   'TUBARAO/SC': '4214304',
   'IMBITUBA/SC': '4207104',
@@ -1683,6 +1752,26 @@ function statusOnError() {
  */
 async function writeStatusSafe(client, db, uid, pwd, moveId, tipo, vals) {
   var field = tipo === 'nfe' ? 'x_studio_nfe_status' : 'x_studio_nfse_status';
+  // GUARDA: NUNCA rebaixar 'autorizada' para 'erro'/'pendente' (corrida de pollers
+  // pode registrar erro de um processamento antigo POR CIMA de uma autorização real)
+  var newVal = vals[field];
+  if (newVal && newVal !== 'autorizada' && newVal !== 'cancelando' && newVal !== 'cancelada') {
+    try {
+      var cur = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], [field, tipo === 'nfe' ? 'x_studio_nfe_chave' : 'x_studio_nfse_numero']]);
+      if (cur && cur[0]) {
+        var curSt = cur[0][field] || '';
+        var hasKey = tipo === 'nfe' ? !!cur[0].x_studio_nfe_chave : !!cur[0].x_studio_nfse_numero;
+        if (curSt === 'autorizada' || hasKey) {
+          console.warn('[SIEG-EMIT] BLOQUEADO downgrade de status: fatura ' + moveId + ' ja AUTORIZADA' +
+            ' (tentou gravar "' + newVal + '") — status preservado');
+          delete vals[field]; // remove o status do vals, mantém outros campos se houver
+          if (!Object.keys(vals).length) return;
+        }
+      }
+    } catch (eGuard) {
+      console.warn('[SIEG-EMIT] Guard de status falhou (seguindo): ' + eGuard.message);
+    }
+  }
   try {
     await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId], vals]);
   } catch (e) {
