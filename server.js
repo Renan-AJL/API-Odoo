@@ -80,6 +80,7 @@ const nfeCertRoutes = require('./routes/nfe-cert');
 const consultflexRoutes = require('./routes/consultflex');
 const cepRoutes         = require('./routes/cep');
 const itauStatusRoutes  = require('./routes/itau-status');
+const odooAdminRoutes   = require('./routes/odoo-admin');
 
 app.use('/admin', adminRoutes);
 app.get('/', (req, res) => res.redirect('/admin'));
@@ -97,6 +98,7 @@ app.use('/api/v1/nfe', nfeCertRoutes);
 app.use('/api/v1/consultflex', consultflexRoutes);
 app.use('/api/v1/cep', cepRoutes);
 app.use('/api/v1/itau/status', itauStatusRoutes);
+app.use('/api/v1/admin', odooAdminRoutes);
 app.use('/callback/sieg', siegRoutes);
 
 // --- Root ---
