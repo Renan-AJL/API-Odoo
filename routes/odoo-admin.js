@@ -125,7 +125,7 @@ router.post('/apply-demandas', apiKeyAuth, async function(req, res) {
         'name': 'AJL: Vincular Vendedor ao Cliente',
         'model_id': partnerModelId[0],
         'state': 'code',
-        'code': 'for partner in records:\n    if not partner.x_studio_vendedor_cadastro:\n        partner.x_studio_vendedor_cadastro = env.uid\n    if not partner.user_id:\n        partner.user_id = env.uid',
+        'code': 'if not record.x_studio_vendedor_cadastro:\n    record["x_studio_vendedor_cadastro"] = env.uid\nif not record.user_id:\n    record["user_id"] = env.uid',
       }]);
       results.push({step:'sa_vendedor', ok:true, id:saId});
     } else {
@@ -140,7 +140,7 @@ router.post('/apply-demandas', apiKeyAuth, async function(req, res) {
         'name': 'AJL: Vendedor do Cliente na Venda',
         'model_id': soModelId[0],
         'state': 'code',
-        'code': 'for order in records:\n    if order.partner_id.x_studio_vendedor_cadastro and order.partner_id.x_studio_vendedor_cadastro != order.user_id:\n        order.user_id = order.partner_id.x_studio_vendedor_cadastro\n    elif order.partner_id.user_id and order.partner_id.user_id != order.user_id:\n        order.user_id = order.partner_id.user_id',
+        'code': 'if record.partner_id.x_studio_vendedor_cadastro and record.partner_id.x_studio_vendedor_cadastro != record.user_id:\n    record["user_id"] = record.partner_id.x_studio_vendedor_cadastro\nelif record.partner_id.user_id and record.partner_id.user_id != record.user_id:\n    record["user_id"] = record.partner_id.user_id',
       }]);
       results.push({step:'sa_vendedor_venda', ok:true, id:sa2Id});
     } else {
@@ -186,7 +186,7 @@ router.post('/apply-demandas', apiKeyAuth, async function(req, res) {
         'name': 'AJL: Calcular Status do Pedido',
         'model_id': soModelId[0],
         'state': 'code',
-        'code': 'from datetime import datetime\nfor order in records:\n    if order.invoice_status == "invoiced":\n        order.x_studio_status_pedido = "faturado"\n    elif order.state in ("draft", "sent"):\n        order.x_studio_status_pedido = "aberto"\n    elif order.state == "cancel":\n        order.x_studio_status_pedido = "cancelado"\n    elif order.state in ("sale", "done"):\n        mo_count = env["mrp.production"].search_count([("origin", "=", order.name), ("state", "in", ("confirmed", "progress", "to_close"))])\n        if mo_count > 0:\n            order.x_studio_status_pedido = "aprovado"\n    mos = env["mrp.production"].search([("origin", "=", order.name)])\n    if not mos:\n        order.x_studio_status_fabricacao = "sem_fabricacao"\n    else:\n        states = set(mo.state for mo in mos)\n        if states == {"done"}:\n            order.x_studio_status_fabricacao = "finalizada"\n        elif "progress" in states or "confirmed" in states:\n            order.x_studio_status_fabricacao = "em_producao"\n        elif "cancel" in states and len(states) == 1:\n            order.x_studio_status_fabricacao = "cancelada"\n        else:\n            order.x_studio_status_fabricacao = "parcial"\n    if order.state in ("draft", "sent") and order.create_date:\n        cd = order.create_date if isinstance(order.create_date, datetime) else fields.Datetime.from_string(order.create_date)\n        order.x_studio_dias_parados = max(0, (datetime.now() - cd).days)\n    else:\n        order.x_studio_dias_parados = 0',
+        'code': 'if record.invoice_status == "invoiced":\n    record["x_studio_status_pedido"] = "faturado"\nelif record.state in ("draft", "sent"):\n    record["x_studio_status_pedido"] = "aberto"\nelif record.state == "cancel":\n    record["x_studio_status_pedido"] = "cancelado"\nelif record.state in ("sale", "done"):\n    mo_count = env["mrp.production"].search_count([("origin", "=", record.name), ("state", "in", ("confirmed", "progress", "to_close"))])\n    if mo_count > 0:\n        record["x_studio_status_pedido"] = "aprovado"\nmos = env["mrp.production"].search([("origin", "=", record.name)])\nif not mos:\n    record["x_studio_status_fabricacao"] = "sem_fabricacao"\nelse:\n    all_done = all(mo.state == "done" for mo in mos)\n    has_progress = any(mo.state in ("progress", "confirmed") for mo in mos)\n    if all_done:\n        record["x_studio_status_fabricacao"] = "finalizada"\n    elif has_progress:\n        record["x_studio_status_fabricacao"] = "em_producao"\n    else:\n        record["x_studio_status_fabricacao"] = "parcial"',
       }]);
       results.push({step:'sa_status', ok:true, id:saId});
     } else {
@@ -226,7 +226,7 @@ router.post('/apply-demandas', apiKeyAuth, async function(req, res) {
         'name': 'AJL: Enviar Producao',
         'model_id': invModelId[0],
         'state': 'code',
-        'code': 'created_mos = []\nfor move in records:\n    if move.move_type != "out_invoice":\n        continue\n    for order in move.sale_order_ids:\n        for line in order.order_line:\n            if line.x_studio_fabricar and line.product_id:\n                existing = env["mrp.production"].search([("origin", "=", order.name), ("product_id", "=", line.product_id.id)], limit=1)\n                if not existing:\n                    bom = env["mrp.bom"]._bom_find(line.product_id)\n                    if bom:\n                        mo = env["mrp.production"].create({"product_id": line.product_id.id, "bom_id": bom.id, "product_qty": line.product_uom_qty, "origin": order.name})\n                        mo.action_confirm()\n                        created_mos.append(mo.name)\nmsg = "OF criadas: " + ", ".join(created_mos) if created_mos else "Nenhuma OF criada"\nrecords.message_post(body=msg)',
+        'code': 'created_mos = []\nif record.move_type == "out_invoice":\n    for order in record.sale_order_ids:\n        for line in order.order_line:\n            if line.x_studio_fabricar and line.product_id:\n                existing = env["mrp.production"].search([("origin", "=", order.name), ("product_id", "=", line.product_id.id)], limit=1)\n                if not existing:\n                    bom = env["mrp.bom"]._bom_find(line.product_id)\n                    if bom:\n                        mo = env["mrp.production"].create({"product_id": line.product_id.id, "bom_id": bom.id, "product_qty": line.product_uom_qty, "origin": order.name})\n                        mo.action_confirm()\n                        created_mos.append(mo.name)\nmsg = "OF criadas: " + ", ".join(created_mos) if created_mos else "Nenhuma OF criada"\nrecord.message_post(body=msg)',
       }]);
       results.push({step:'enviar_producao', ok:true, id:saId});
     } else {
@@ -234,56 +234,16 @@ router.post('/apply-demandas', apiKeyAuth, async function(req, res) {
     }
   } catch(e) { results.push({step:'enviar_producao', ok:false, error:e.message}); }
 
-  // === 6. IMPRESSAO SO - COMPACTAR PARA 1 PAGINA ===@===
+  // === 6. IMPRESSAO SO - COMPACTAR PARA 1 PAGINA ===
   try {
+    // Ler a view de SO report
     var soViews = await ekw('ir.ui.view', 'search_read', [[['key','=','sale.report_saleorder_document']]], {fields:['id','name'], limit:3});
     if (!soViews.length) {
       soViews = await ekw('ir.ui.view', 'search_read', [[['name','ilike','report_saleorder_document']]], {fields:['id','name'], limit:3});
     }
     if (soViews.length) {
       var viewId = soViews[0].id;
-      var archData = await ekw('ir.ui.view', 'read', [[viewId], ['arch']]);
-      var arch = archData[0].arch;
-      var originalLen = arch.length;
-      
-      // Aplicar compactacoes
-      var newArch = arch;
-      
-      // 1. Remover page breaks
-      newArch = newArch.replace(/page-break-after:\s*always/g, 'page-break-after: auto');
-      newArch = newArch.replace(/page-break-before:\s*always/g, 'page-break-before: auto');
-      
-      // 2. CSS compacto para 1 pagina + font 12
-      var compactCSS = `\n<style>
-    /* AJL: Layout compacto 1 pagina + font 12 */
-    body, table, th, td, p, span, div { font-size: 12px !important; line-height: 1.3 !important; }
-    .container { max-width: 100% !important; padding: 0 5mm !important; margin: 0 !important; }
-    table { line-height: 1.2 !important; border-collapse: collapse !important; }
-    th, td { padding: 1px 3px !important; }
-    h1 { font-size: 14px !important; margin: 2px 0 !important; }
-    h2 { font-size: 12px !important; margin: 2px 0 !important; }
-    h3 { font-size: 11px !important; margin: 1px 0 !important; }
-    p { margin: 1px 0 !important; }
-    .page { margin: 0 !important; padding: 5mm !important; }
-    @page { size: A4; margin: 5mm; }
-</style>`;
-      
-      if (newArch.indexOf('AJL: Layout compacto') === -1) {
-        newArch = newArch.replace('<t t-name', compactCSS + '\n<t t-name');
-      }
-      
-      // 3. Reduzir margins/padding inline
-      newArch = newArch.replace(/margin-top:\s*\d+px/g, 'margin-top:2px');
-      newArch = newArch.replace(/margin-bottom:\s*\d+px/g, 'margin-bottom:2px');
-      newArch = newArch.replace(/padding-top:\s*\d+px/g, 'padding-top:2px');
-      newArch = newArch.replace(/padding-bottom:\s*\d+px/g, 'padding-bottom:2px');
-      
-      if (newArch !== arch) {
-        await ekw('ir.ui.view', 'write', [[viewId], {'arch': newArch}]);
-        results.push({step:'so_print', ok:true, viewId:viewId, msg:'View atualizada para 1 pagina (font 12, margins reduzidos)', originalLen:originalLen, newLen:newArch.length});
-      } else {
-        results.push({step:'so_print', ok:true, msg:'Nenhuma mudanca necessaria'});
-      }
+      results.push({step:'so_print', ok:true, viewId:viewId, msg:'View encontrada - use update_sale_report.py para ajustar layout'});
     } else {
       results.push({step:'so_print', ok:false, msg:'View nao encontrada'});
     }
@@ -291,13 +251,18 @@ router.post('/apply-demandas', apiKeyAuth, async function(req, res) {
 
   // === 7. LOCAL DO ESTOQUE ===
   try {
-    var prodModelId = await ekw('ir.model', 'search', [[['model','=','product.product']]], {limit:1});
-    var existing = await ekw('ir.model.fields', 'search_count', [[['name','=','x_studio_local_armazenagem'],['model','=','product.product']]]);
-    if (!existing) {
-      await ekw('ir.model.fields', 'create', [{'name':'x_studio_local_armazenagem','model_id':prodModelId[0],'field_description':'Local do Estoque','ttype':'char','store':true}]);
-      results.push({step:'local_estoque', ok:true, msg:'Campo criado'});
+    var prodModelIds = await ekw('ir.model', 'search', [[['model','=','product.product']]], {limit:1});
+    var prodModelId = prodModelIds && prodModelIds.length ? prodModelIds[0] : false;
+    if (prodModelId) {
+      var existing = await ekw('ir.model.fields', 'search_count', [[['name','=','x_studio_local_armazenagem'],['model_id','=',prodModelId]]]);
+      if (!existing) {
+        await ekw('ir.model.fields', 'create', [{'name':'x_studio_local_armazenagem','model_id':prodModelId,'field_description':'Local do Estoque','ttype':'char','store':true}]);
+        results.push({step:'local_estoque', ok:true, msg:'Campo criado'});
+      } else {
+        results.push({step:'local_estoque', ok:true, msg:'Ja existe'});
+      }
     } else {
-      results.push({step:'local_estoque', ok:true, msg:'Ja existe'});
+      results.push({step:'local_estoque', ok:false, msg:'Model product.product nao encontrado'});
     }
   } catch(e) { results.push({step:'local_estoque', ok:false, error:e.message}); }
 
