@@ -31,6 +31,16 @@ var { IeService } = require('./ie.service');
 var _ieService = new IeService();
 
 // ============================================================
+// Helpers numéricos
+// ============================================================
+// round2: arredonda para 2 casas (usado no calculo de vNF/vIPI).
+// Ja existia em sieg-nfe-xml.js mas NAO era definido aqui — commit 5fc180f
+// passou a chamar round2() neste modulo sem importa-lo (ReferenceError).
+function round2(n) {
+  return Math.round((parseFloat(n) || 0) * 100) / 100;
+}
+
+// ============================================================
 // XML-RPC Helpers
 // ============================================================
 function createClient(url) {
