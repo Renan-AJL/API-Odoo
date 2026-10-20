@@ -744,6 +744,289 @@ router.post('/fix-ipi-sale', apiKeyAuth, async function(req, res) {
 });
 
 // ============================================================
+// POST /api/v1/admin/nfe-remontar
+// REMONTA a NF-e JA AUTORIZADA (NAO reemite!): busca o XML autorizado no
+// cofre SIEG, corrige <pag>/<cobr>/<infCpl> com a forma de pagamento correta
+// (campo x_studio_forma_de_pagamento da fatura), regera o DANFE e reanexa
+// XML+PDF na fatura do Odoo (novos anexos + mensagem no chatter).
+// Body: { move_id } OU { numero: 72853 } OU { chave: '44dig' }
+// ============================================================
+router.post('/nfe-remontar', apiKeyAuth, async function(req, res) {
+  var moveId = parseInt(req.body.move_id) || 0;
+  var numero = String(req.body.numero || '').replace(/\D/g, '');
+  var chaveParam = String(req.body.chave || '').replace(/\D/g, '');
+
+  try {
+    var odoo = config.odoo;
+    if (!odoo || !odoo.url || !odoo.enabled) {
+      return res.status(503).json({ success: false, error: 'Odoo nao configurado' });
+    }
+    var client = createClient(odoo.url);
+    var uid = await authenticate(client, odoo.db, odoo.user, odoo.password);
+    var ekw = function(model, method, args, kwargs) {
+      return executeKw(client, odoo.db, uid, odoo.password, model, method, args, kwargs);
+    };
+
+    // 1. Localizar a fatura
+    var domain;
+    if (moveId) domain = [['id', '=', moveId]];
+    else if (chaveParam) domain = [['x_studio_nfe_chave', '=', chaveParam]];
+    else if (numero) domain = [['x_studio_nfe_chave', 'ilike', numero]];
+    else return res.status(400).json({ success: false, error: 'informe move_id, numero ou chave' });
+
+    var ids = await ekw('account.move', 'search', [domain], { limit: 1 });
+    if (!ids.length) return res.status(404).json({ success: false, error: 'Fatura nao encontrada' });
+    moveId = ids[0];
+
+    var moves = await ekw('account.move', 'read', [[moveId], [
+      'name', 'partner_id', 'invoice_date', 'date', 'invoice_origin',
+      'x_studio_nfe_chave', 'x_studio_nfe_status', 'x_studio_forma_de_pagamento',
+      'x_studio_itau_resposta_json', 'x_studio_itau_nosso_numero', 'narration',
+    ]]);
+    var move = moves[0];
+    var chave = String(move.x_studio_nfe_chave || '').replace(/\D/g, '');
+    if (!chave || chave.length !== 44) {
+      return res.status(400).json({ success: false, error: 'Fatura sem chave de NF-e valida' });
+    }
+
+    // 2. Forma de pagamento (fatura -> fallback pedido de origem)
+    var forma = String(move.x_studio_forma_de_pagamento || '').trim();
+    if (!forma && move.invoice_origin) {
+      try {
+        var soIds = await ekw('sale.order', 'search', [[['name', '=', move.invoice_origin]]], { limit: 1 });
+        if (soIds.length) {
+          var soRecs = await ekw('sale.order', 'read', [[soIds[0]], ['x_studio_forma_de_pagamento']]);
+          if (soRecs[0] && soRecs[0].x_studio_forma_de_pagamento) forma = String(soRecs[0].x_studio_forma_de_pagamento);
+        }
+      } catch (eF) {}
+    }
+
+    // 3. Parcelas da fatura (payment_term lines)
+    var parcelasFatura = [];
+    try {
+      var termIds = await ekw('account.move.line', 'search', [[['move_id', '=', moveId], ['display_type', '=', 'payment_term']]], { order: 'date_maturity asc' });
+      if (termIds.length) {
+        var tLines = await ekw('account.move.line', 'read', [termIds, ['date_maturity', 'debit', 'credit']]);
+        for (var t = 0; t < tLines.length; t++) {
+          var v = parseFloat(tLines[t].debit) || parseFloat(tLines[t].credit) || 0;
+          if (v > 0) parcelasFatura.push({ vencimento: tLines[t].date_maturity || '', valor: v });
+        }
+      }
+    } catch (eT) {}
+
+    // 4. Boletos Itaú (se houver) para NN/linha digitavel
+    var itauBoletos = [];
+    try {
+      var rawJson = move.x_studio_itau_resposta_json || '';
+      if (rawJson) {
+        var parsed = JSON.parse(rawJson.replace(/'/g, '"').replace(/True/g, 'true').replace(/False/g, 'false').replace(/None/g, 'null'));
+        var pags = parsed.pagamentos || [];
+        for (var p2 = 0; p2 < pags.length; p2++) {
+          if (pags[p2].nosso_numero) {
+            itauBoletos.push({ nosso_numero: pags[p2].nosso_numero, linha_digitavel: pags[p2].linha_digitavel || '' });
+          }
+        }
+      }
+      if (!itauBoletos.length && move.x_studio_itau_nosso_numero) {
+        itauBoletos.push({ nosso_numero: move.x_studio_itau_nosso_numero, linha_digitavel: '' });
+      }
+    } catch (eB) {}
+
+    // 5. Buscar XML autorizado no SIEG (cofre)
+    var axios = require('axios');
+    var AdmZip = require('adm-zip');
+    var { getAuthHeaders } = require('../services/sieg-auth');
+    var headers = await getAuthHeaders();
+    var aamm = chave.slice(2, 6);
+    var ano = '20' + aamm.slice(0, 2);
+    var mes = aamm.slice(2, 4);
+    var dfDate = new Date(parseInt(ano), parseInt(mes), 0);
+    var body = {
+      TipoXml: 1, Take: 500, Skip: 0,
+      DataEmissaoInicio: ano + '-' + mes + '-01T00:00:00Z',
+      DataEmissaoFim: ano + '-' + mes + '-' + String(dfDate.getDate()).padStart(2, '0') + 'T23:59:59Z',
+    };
+    var resp = await axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+      headers: headers, timeout: 45000, responseType: 'arraybuffer',
+    });
+    var zip = new AdmZip(resp.data);
+    var entries = zip.getEntries();
+    var xmlAutorizado = '';
+    for (var ei = 0; ei < entries.length; ei++) {
+      if (entries[ei].isDirectory) continue;
+      var xmlStr = zip.readAsText(entries[ei]);
+      if (xmlStr.indexOf(chave) !== -1) { xmlAutorizado = xmlStr; break; }
+    }
+    if (!xmlAutorizado) {
+      return res.status(404).json({ success: false, error: 'XML da chave ' + chave + ' nao encontrado no cofre SIEG (NF pode estar cancelada/inexistente)' });
+    }
+    // Validar autorizacao no protocolo
+    var cStatMatch = xmlAutorizado.match(/<protNFe[^>]*>[\s\S]*?<cStat>(\d{3})<\/cStat>/);
+    var cStatProt = cStatMatch ? cStatMatch[1] : '';
+    if (cStatProt !== '100' && cStatProt !== '150') {
+      return res.status(400).json({ success: false, error: 'NF nao autorizada na SEFAZ (cStat ' + cStatProt + ') — remontagem indevida' });
+    }
+
+    // 6. Recalcular vNF a partir do XML (vProd - vDesc + vIPI) para o pagamento
+    function tagV(xml, tag) {
+      var m = xml.match(new RegExp('<' + tag + '>([-0-9.]+)</' + tag + '>'));
+      return m ? parseFloat(m[1]) : 0;
+    }
+    var vProdXml = tagV(xmlAutorizado, 'vProd');
+    var vDescXml = tagV(xmlAutorizado, 'vDesc');
+    var vIpiXml = tagV(xmlAutorizado, 'vIPI');
+    var vNFXml = Math.round((vProdXml - vDescXml + vIpiXml) * 100) / 100;
+    var vNfTag = xmlAutorizado.match(/<vNF>([-0-9.]+)<\/vNF>/);
+    if (vNfTag) vNFXml = parseFloat(vNfTag[1]);
+
+    // 7. Remontar pagamentos/cobranca/infCpl
+    var { buildPagamentoInfo } = require('../services/sieg-odoo-emit');
+    var pagInfo = buildPagamentoInfo({
+      forma: forma,
+      vNF: vNFXml,
+      parcelasFatura: parcelasFatura,
+      dataBase: move.invoice_date || move.date || '',
+      itauBoletos: itauBoletos,
+    });
+
+    // --- pag ---
+    var pagXml = '\n    <pag>';
+    for (var gp = 0; gp < pagInfo.pagamentos.length; gp++) {
+      var pg = pagInfo.pagamentos[gp];
+      pagXml += '\n      <detPag>';
+      if (pg.indPag) pagXml += '\n        <indPag>' + pg.indPag + '</indPag>';
+      pagXml += '\n        <tPag>' + pg.tPag + '</tPag>';
+      pagXml += '\n        <vPag>' + pg.vPag + '</vPag>';
+      pagXml += '\n      </detPag>';
+    }
+    pagXml += '\n    </pag>';
+
+    // --- cobr (somente a prazo) ---
+    var cobrXml = '';
+    if (pagInfo.duplicatas.length > 0) {
+      var vSoma = 0;
+      for (var gd = 0; gd < pagInfo.duplicatas.length; gd++) vSoma += Math.round(parseFloat(pagInfo.duplicatas[gd].vDup) * 100) / 100;
+      vSoma = Math.round(vSoma * 100) / 100;
+      cobrXml = '\n    <cobr>\n      <fat>\n        <nFat>' + escapeXmlText(move.name || '') + '</nFat>\n        <vOrig>' + vSoma.toFixed(2) + '</vOrig>\n        <vDesc>0.00</vDesc>\n        <vLiq>' + vSoma.toFixed(2) + '</vLiq>\n      </fat>';
+      for (var gd2 = 0; gd2 < pagInfo.duplicatas.length; gd2++) {
+        var d2 = pagInfo.duplicatas[gd2];
+        cobrXml += '\n      <dup>\n        <nDup>' + String(gd2 + 1).padStart(3, '0') + '</nDup>\n        <dVenc>' + (d2.dVenc || '') + '</dVenc>\n        <vDup>' + d2.vDup + '</vDup>\n      </dup>';
+      }
+      cobrXml += '\n    </cobr>';
+    }
+
+    // --- infCpl: troca apenas o segmento de pagamento (prefixo), mantendo
+    // Pedido/ICMS/Difal/observacoes ja presentes no XML autorizado ---
+    var infCplM = xmlAutorizado.match(/<infCpl>([\s\S]*?)<\/infCpl>/);
+    var oldInf = infCplM ? infCplM[1] : '';
+    var keepIdx = oldInf.indexOf('Pedido:');
+    if (keepIdx < 0) keepIdx = oldInf.indexOf('ICMS');
+    var tail = keepIdx >= 0 ? oldInf.substring(keepIdx) : '';
+    var novoPagText = '';
+    if (pagInfo.boletoDetalhes.length > 0) {
+      var parts = [];
+      for (var bi = 0; bi < pagInfo.boletoDetalhes.length; bi++) {
+        var bd = pagInfo.boletoDetalhes[bi];
+        var s = 'Boleto ' + (bd.parcela || ((bi + 1) + '/' + pagInfo.boletoDetalhes.length)) + ': R$ ' + bd.valor;
+        if (bd.vencimento) s += ' Venc: ' + bd.vencimento;
+        if (bd.nosso_numero) s += ' NN: ' + bd.nosso_numero;
+        if (bd.linha_digitavel) s += ' Linha: ' + bd.linha_digitavel;
+        parts.push(s);
+      }
+      novoPagText = parts.join(' | ') + '. ';
+    } else {
+      novoPagText = pagInfo.formaLabel + '. ';
+    }
+    var newInfCpl = novoPagText + tail;
+
+    // 8. Aplicar os patches no XML (somente blocos pag/cobr/infCpl)
+    var xmlPatched = xmlAutorizado;
+    xmlPatched = xmlPatched.replace(/<pag>[\s\S]*?<\/pag>/, pagXml);
+    if (cobrXml) {
+      if (/<cobr>[\s\S]*?<\/cobr>/.test(xmlPatched)) {
+        xmlPatched = xmlPatched.replace(/<cobr>[\s\S]*?<\/cobr>/, cobrXml);
+      } else {
+        xmlPatched = xmlPatched.replace(/<pag>/, cobrXml + '\n    <pag>');
+      }
+    }
+    if (infCplM) {
+      // novoPagText e texto novo (escapar); tail ja vem escapado do XML original
+      var infCplFinal = (escapeXmlText(novoPagText) + tail).substring(0, 2000);
+      xmlPatched = xmlPatched.replace(/<infCpl>[\s\S]*?<\/infCpl>/, '<infCpl>' + infCplFinal + '</infCpl>');
+    }
+
+    // 9. Regerar DANFE local a partir do XML remontado
+    var { gerarDanfe } = require('../services/danfe-pdf');
+    var saleOrderNumber = move.invoice_origin || '';
+    var pdfB64 = '';
+    try {
+      pdfB64 = await gerarDanfe(xmlPatched, {
+        saleOrderNumber: saleOrderNumber,
+        boletoData: itauBoletos,
+      });
+    } catch (eDanfe) {
+      console.warn('[NFE-REMONTAR] DANFE falhou (seguindo com XML): ' + eDanfe.message);
+    }
+
+    // 10. Anexar no Odoo (novos anexos, sem apagar os originais) + chatter
+    var safeName = (move.name || 'NF').replace(/[^a-zA-Z0-9\-_]/g, '_');
+    var attachIds = [];
+    try {
+      var xmlB64 = Buffer.from(xmlPatched, 'utf-8').toString('base64');
+      attachIds.push(await ekw('ir.attachment', 'create', [{
+        name: 'NF-e_' + safeName + '_remontada.xml',
+        raw: xmlB64,
+        res_model: 'account.move', res_id: moveId,
+        mimetype: 'application/xml',
+      }]));
+      if (pdfB64) {
+        attachIds.push(await ekw('ir.attachment', 'create', [{
+          name: 'DANFE_' + safeName + '_remontada.pdf',
+          raw: pdfB64,
+          res_model: 'account.move', res_id: moveId,
+          mimetype: 'application/pdf',
+        }]));
+      }
+    } catch (eAtt) {
+      return res.status(500).json({ success: false, error: 'Falha ao anexar no Odoo: ' + eAtt.message });
+    }
+
+    var corpoMsg = ('<b>NF-e Remontada (pagamento corrigido) — SEM reemissão</b><br/>'
+      + 'Forma de pagamento: ' + (forma || '(vazia)') + '<br/>'
+      + 'tPag: ' + pagInfo.tPag + ' | indPag: ' + pagInfo.indPag + '<br/>'
+      + 'Parcelas: ' + (pagInfo.duplicatas.length || 1) + '<br/>'
+      + 'XML e DANFE reanexados (originais preservados).').replace(/\n/g, '');
+    try {
+      var msgVals = { model: 'account.move', res_id: moveId, body: corpoMsg, message_type: 'comment' };
+      if (attachIds.length) msgVals.attachment_ids = [[6, 0, attachIds]];
+      await ekw('mail.message', 'create', [msgVals]);
+    } catch (eMsg) {}
+
+    res.json({
+      success: true,
+      move_id: moveId,
+      fatura: move.name,
+      chave: chave,
+      cStat_protocolo: cStatProt,
+      forma_pagamento: forma,
+      tPag: pagInfo.tPag,
+      indPag: pagInfo.indPag,
+      duplicatas: pagInfo.duplicatas,
+      infCpl_novo: newInfCpl.substring(0, 600),
+      anexos: attachIds.length,
+    });
+  } catch (e) {
+    console.error('[NFE-REMONTAR] Erro:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+function escapeXmlText(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ============================================================
 // POST /api/v1/admin/odoo-rpc
 // RPC generico controlado para diagnostico/correcao no Odoo.
 // Body: { model, method, args?, kwargs?, readOnly? }

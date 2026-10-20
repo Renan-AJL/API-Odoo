@@ -37,7 +37,192 @@ var _ieService = new IeService();
 // Ja existia em sieg-nfe-xml.js mas NAO era definido aqui — commit 5fc180f
 // passou a chamar round2() neste modulo sem importa-lo (ReferenceError).
 function round2(n) {
+
   return Math.round((parseFloat(n) || 0) * 100) / 100;
+}
+
+// ============================================================
+// buildPagamentoInfo — Forma de pagamento da NF-e
+// ============================================================
+// Fonte da verdade: campo x_studio_forma_de_pagamento da fatura
+// (fallback: pedido de venda). Mapeia o texto do campo para:
+//   - pagamentos[]  : { indPag, tPag, vPag }  (NF-e 4.00)
+//       indPag: 0 = a vista, 1 = a prazo
+//       tPag:   01 dinheiro, 02 cheque, 03 cartao credito, 04 cartao debito,
+//               13 boleto bancario, 14 deposito, 15 PIX, 16 transferencia,
+//               99 outros
+//   - duplicatas[]  : { dVenc (YYYY-MM-DD), vDup } — parcelas (a prazo)
+//   - boletoDetalhes[] : texto rico p/ infCpl (parcela, valor, venc, NN, LD)
+// Regras:
+//   * PIX / a vista -> indPag 0, sem duplicatas
+//   * BOLETO 28/56/84 -> 3 parcelas com venc = emissao + 28/56/84 dias
+//   * BOLETO 30D / BOLETO 7 DIAS / BOLETO 15DD -> 1 parcela (+N dias)
+//   * BOLETO 8X / 10X / 12X -> N parcelas mensais (30 em 30 dias)
+//   * Vencimentos/valores da invoice (payment_term lines) tem PRIORIDADE
+//     quando existem (>1 parcela real na fatura); valores sao reescalonados
+//     para bater com vNF (fiscal), nunca com o total contabil do Odoo.
+function buildPagamentoInfo(opts) {
+  var forma = String(opts.forma || '').trim();
+  var formaUp = forma.toUpperCase();
+  var vNF = round2(opts.vNF || 0);
+  var parcelasFatura = opts.parcelasFatura || [];
+  var dataBase = opts.dataBase || '';
+  var itauBoletos = opts.itauBoletos || [];
+
+  function addDays(isoDate, days) {
+    var d = isoDate ? new Date(isoDate + 'T12:00:00Z') : new Date();
+    if (isNaN(d.getTime())) d = new Date();
+    d.setUTCDate(d.getUTCDate() + (parseInt(days) || 0));
+    return d.toISOString().slice(0, 10);
+  }
+  function splitValores(total, n) {
+    // Divide total em n parcelas com ajuste de centavos na ultima
+    var out = [];
+    var base = Math.floor((total / n) * 100) / 100;
+    var acumulado = 0;
+    for (var i = 0; i < n; i++) {
+      if (i < n - 1) {
+        out.push(base);
+        acumulado = Math.round((acumulado + base) * 100) / 100;
+      } else {
+        out.push(Math.round((total - acumulado) * 100) / 100);
+      }
+    }
+    return out;
+  }
+
+  var pagamentos = [];
+  var duplicatas = [];
+  var boletoDetalhes = [];
+  var formaLabel = 'Pagamento a vista';
+
+  // --- Detecao do tipo de pagamento pelo texto do campo ---
+  var tipoPag = 'avista';
+  if (formaUp.indexOf('PIX') >= 0) tipoPag = 'pix';
+  else if (formaUp.indexOf('BOLETO') >= 0 || formaUp.indexOf('BOL ') >= 0) tipoPag = 'boleto';
+  else if (formaUp.indexOf('CHEQUE') >= 0) tipoPag = 'cheque';
+  else if (formaUp.indexOf('DÉBITO') >= 0 || formaUp.indexOf('DEBITO') >= 0 || formaUp.indexOf('DÉB') >= 0 || formaUp.indexOf('DEB') >= 0) tipoPag = 'debito';
+  else if (formaUp.indexOf('CRÉDITO') >= 0 || formaUp.indexOf('CREDITO') >= 0 || formaUp.indexOf('CRÉD') >= 0 || formaUp.indexOf('CRED') >= 0 || formaUp.indexOf('VISA') >= 0 || formaUp.indexOf('MASTER') >= 0 || formaUp.indexOf('ELO') >= 0 || formaUp.indexOf('AMEX') >= 0 || formaUp.indexOf('HIPERCARD') >= 0) tipoPag = 'credito';
+  else if (formaUp.indexOf('DEPOSITO') >= 0 || formaUp.indexOf('DEP ') >= 0 || formaUp.indexOf('DEP+') >= 0) tipoPag = 'deposito';
+  else if (formaUp.indexOf('TRANSFER') >= 0) tipoPag = 'transferencia';
+  else if (formaUp.indexOf('DIN') >= 0) tipoPag = 'dinheiro';
+  else if (formaUp.indexOf('A VISTA') >= 0) tipoPag = 'avista';
+
+  // Compatibilidade: fatura SEM forma de pagamento -> mantém o comportamento
+  // historico do middleware (tPag 15 = PIX, a vista, infCpl "Pagamento a vista").
+  if (!forma) tipoPag = 'pix';
+
+  var tPag = { avista: '01', pix: '15', boleto: '13', cheque: '02', credito: '03', debito: '04', deposito: '14', transferencia: '16', dinheiro: '01' }[tipoPag] || '99';
+
+  // --- Parcelas: dias/meses declarados na forma ---
+  var parcelas = [];
+  if (tipoPag === 'boleto') {
+    // BOLETO 28/56/84 | BOLETO 30/60/90 | 1+28/42/56 | 15/30/45DD ...
+    var numsMatch = formaUp.match(/(\d{1,3}(?:\s*\/\s*\d{1,3})+)/);
+    // BOLETO 8X / 10X / 12X (parcelas mensais)
+    var nxMatch = formaUp.match(/(\d{1,2})\s*X\b/);
+    // BOLETO 30D | BOLETO 7 DIAS | BOLETO 15DD | BOLETO 21DD ...
+    var dMatch = formaUp.match(/(\d{1,3})\s*(?:D|DD|DIAS|DIA)\b/);
+
+    if (numsMatch && !nxMatch) {
+      var parts = numsMatch[1].split(/\s*\/\s*/);
+      var temEntrada = /^\s*1\s*\+/.test(formaUp);
+      for (var pi = 0; pi < parts.length; pi++) {
+        var dias = parseInt(parts[pi].replace(/\D/g, '')) || 0;
+        if (dias > 0) parcelas.push(dias);
+      }
+      if (temEntrada && parcelas.length) parcelas.unshift(0); // entrada no dia
+    } else if (nxMatch) {
+      var nVezes = Math.min(parseInt(nxMatch[1]) || 1, 36);
+      for (var ni = 1; ni <= nVezes; ni++) parcelas.push(ni * 30);
+    } else {
+      // "1 + 30 BOLETO" -> entrada (dia 0) + boleto em N dias
+      var entradaMatch = formaUp.match(/^\s*1\s*\+\s*(\d{1,3})/);
+      var dMatch2 = formaUp.match(/(\d{1,3})\s*(?:D|DD|DIAS|DIA)\b/);
+      if (entradaMatch) {
+        parcelas.push(0);
+        parcelas.push(parseInt(entradaMatch[1]) || 0);
+      } else if (dMatch2) {
+        parcelas.push(parseInt(dMatch2[1]) || 0);
+      } else {
+        parcelas.push(0); // boleto a vista
+      }
+    }
+  }
+
+  // --- Valor e vencimento de cada parcela ---
+  var valores = [];
+  var vencimentos = [];
+  if (tipoPag === 'boleto') {
+    var n = Math.max(parcelas.length, 1);
+    if (parcelasFatura.length === n && n >= 1) {
+      // Fatura tem as N parcelas reais -> usar vencimentos da invoice,
+      // valores reescalonados para o vNF fiscal
+      var somaFatura = 0;
+      for (var fi = 0; fi < parcelasFatura.length; fi++) somaFatura += parcelasFatura[fi].valor;
+      if (somaFatura > 0 && Math.abs(somaFatura - vNF) > 0.02) {
+        valores = splitValores(vNF, n);
+      } else {
+        for (var fv = 0; fv < parcelasFatura.length; fv++) valores.push(round2(parcelasFatura[fv].valor));
+      }
+      for (var fv2 = 0; fv2 < parcelasFatura.length; fv2++) vencimentos.push(parcelasFatura[fv2].vencimento || addDays(dataBase, parcelas[fv2] || 0));
+    } else {
+      valores = splitValores(vNF, n);
+      for (var pv = 0; pv < parcelas.length; pv++) vencimentos.push(addDays(dataBase, parcelas[pv]));
+    }
+    formaLabel = forma || 'Boleto bancário';
+  } else {
+    // A vista / PIX / cartao / etc: 1 pagamento no valor total
+    valores = [vNF];
+    vencimentos = [(parcelasFatura.length ? parcelasFatura[0].vencimento : '') || addDays(dataBase, 0)];
+    formaLabel = forma || ({ pix: 'Pagamento a vista (PIX)', avista: 'Pagamento a vista', dinheiro: 'Pagamento a vista (dinheiro)', cheque: 'Pagamento em cheque', credito: 'Pagamento com cartão de crédito', debito: 'Pagamento com cartão de débito', deposito: 'Pagamento por depósito', transferencia: 'Pagamento por transferência' }[tipoPag] || 'Pagamento a vista');
+  }
+
+  var indPag = (valores.length > 1 || (tipoPag === 'boleto' && parseInt(parcelas[0] || 0) > 0)) ? '1' : '0';
+
+  for (var pg = 0; pg < valores.length; pg++) {
+    pagamentos.push({
+      indPag: indPag,
+      tPag: tPag,
+      vPag: valores[pg].toFixed(2),
+    });
+    // Duplicatas somente para pagamentos a prazo (boleto com dias/parcelas).
+    // A vista / PIX / cartao NAO tem cobr/dup.
+    if (tipoPag === 'boleto') {
+      duplicatas.push({
+        dVenc: vencimentos[pg] || '',
+        vDup: valores[pg].toFixed(2),
+      });
+    }
+  }
+
+  // --- boletoDetalhes p/ infCpl (texto rico) ---
+  if (tipoPag === 'boleto') {
+    for (var bd = 0; bd < valores.length; bd++) {
+      var det = {
+        parcela: String(bd + 1) + '/' + String(valores.length),
+        valor: valores[bd].toFixed(2),
+        vencimento: vencimentos[bd] || '',
+        nosso_numero: '',
+        linha_digitavel: '',
+      };
+      if (itauBoletos[bd]) {
+        det.nosso_numero = itauBoletos[bd].nosso_numero || '';
+        det.linha_digitavel = itauBoletos[bd].linha_digitavel || '';
+      }
+      boletoDetalhes.push(det);
+    }
+  }
+
+  return {
+    formaLabel: formaLabel,
+    indPag: indPag,
+    tPag: tPag,
+    pagamentos: pagamentos,
+    duplicatas: duplicatas,
+    boletoDetalhes: boletoDetalhes,
+    tipoPag: tipoPag,
+  };
 }
 
 // ============================================================
@@ -150,6 +335,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     'amount_total', 'narration',
     'x_studio_nfe_status', 'x_studio_nfse_status', 'payment_state',
     'x_studio_itau_nosso_numero', 'x_studio_itau_resposta_json', 'x_studio_boleto_cancelado',
+    'x_studio_forma_de_pagamento', 'invoice_payment_term_id',
     'invoice_line_ids', 'line_ids',
   ]]);
   if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
@@ -175,6 +361,30 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     console.log('[SIEG-EMIT] NFS-e ' + moveId + ' ja AUTORIZADA — SKIP');
     return { move_id: moveId, tipo: tipo, sucesso: true, skip: true, motivo: 'ja_autorizada' };
   }
+
+  // 1a-bis. FORMA DE PAGAMENTO (x_studio_forma_de_pagamento)
+  // Fonte: campo correto da FATURA; fallback: pedido de venda de origem.
+  var formaPagamento = String(move.x_studio_forma_de_pagamento || '').trim();
+  var saleOrderIdForForma = 0;
+  if (!formaPagamento) {
+    try {
+      var soForma = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], ['invoice_origin']]);
+      var originName = (soForma && soForma[0] && soForma[0].invoice_origin) || '';
+      if (originName) {
+        var soIds2 = await executeKw(client, db, uid, pwd, 'sale.order', 'search', [[['name', '=', originName]]], { limit: 1 });
+        if (soIds2 && soIds2.length) {
+          saleOrderIdForForma = soIds2[0];
+          var soRecs = await executeKw(client, db, uid, pwd, 'sale.order', 'read', [[soIds2[0]], ['x_studio_forma_de_pagamento']]);
+          if (soRecs && soRecs[0] && soRecs[0].x_studio_forma_de_pagamento) {
+            formaPagamento = String(soRecs[0].x_studio_forma_de_pagamento);
+          }
+        }
+      }
+    } catch (eForma) {
+      console.log('[SIEG-EMIT] Forma de pagamento: fallback pedido falhou: ' + eForma.message);
+    }
+  }
+  console.log('[SIEG-EMIT] Forma de pagamento: "' + (formaPagamento || '(vazia)') + '"');
 
   // 1b. Read sale order origin (invoice_origin / sale_order_ids) for pedido number
   var saleOrderNumber = '';
@@ -240,6 +450,35 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   }
   if (boletoInfo) {
     console.log('[SIEG-EMIT] Boleto info: ' + boletoInfo.substring(0, 200));
+  }
+
+  // 1d. PARCELAS / VENCIMENTOS da fatura (linhas de payment_term)
+  // "tem tudo na invoice": cada linha payment_term tem date_maturity (venc)
+  // e debit (valor da parcela). Usadas quando a forma de pagamento é boleto.
+  var parcelasFatura = [];
+  try {
+    var termLineIds = await executeKw(client, db, uid, pwd, 'account.move.line', 'search', [[
+      ['move_id', '=', moveId],
+      ['display_type', '=', 'payment_term'],
+    ]], { order: 'date_maturity asc' });
+    if (termLineIds && termLineIds.length) {
+      var termLines = await executeKw(client, db, uid, pwd, 'account.move.line', 'read', [termLineIds, [
+        'date_maturity', 'debit', 'credit', 'amount_residual', 'name',
+      ]]);
+      for (var tli = 0; tli < termLines.length; tli++) {
+        var tl = termLines[tli];
+        var vParc = parseFloat(tl.debit) || parseFloat(tl.credit) || 0;
+        if (vParc > 0) {
+          parcelasFatura.push({ vencimento: tl.date_maturity || '', valor: vParc });
+        }
+      }
+    }
+  } catch (eTerm) {
+    console.log('[SIEG-EMIT] Leitura de parcelas (payment_term) falhou: ' + eTerm.message);
+  }
+  if (parcelasFatura.length) {
+    console.log('[SIEG-EMIT] Parcelas na fatura: ' + parcelasFatura.length +
+      ' (venc1=' + parcelasFatura[0].vencimento + ')');
   }
 
   // 2. Read company
@@ -397,12 +636,20 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
         ld.picms = String(picmsInterstate);
         ld.vicms = String(Math.round(vbc * picmsInterstate / 100 * 100) / 100);
         console.log('[SIEG-EMIT] ICMS interestadual: pICMS ' + picmsOrig + '%→' + ld.picms + '%, vICMS=' + ld.vicms + ' (vBC=' + vbc + ')');
-        // Difal: calcular diferencial para infCpl
-        // difal = vBC * (aliqInterna - aliqInterestadual) / 100
-        var difalVal = Math.round(vbc * (icmsInternoPR - picmsInterstate) / 100 * 100) / 100;
+      }
+      // Difal: calcular diferencial para infCpl (SOMENTE texto informativo;
+      // Difal NUNCA soma no total da NF/cotação/pedido).
+      // Aliquota preferida: a do imposto DIFAL aplicado na linha (tax_ids,
+      // tabela por UF destino da Automação 2); fallback: interna PR - interestadual.
+      if (ld.cst_icms === '00' && !ld.difal) {
+        var vbcD = parseFloat(ld.vbc_icms || ld.vbc || 0);
+        var difalRate = (parseFloat(ld.difal_aliquota) > 0)
+          ? parseFloat(ld.difal_aliquota)
+          : (icmsInternoPR - picmsInterstate);
+        var difalVal = Math.round(vbcD * difalRate / 100 * 100) / 100;
         if (difalVal > 0) {
           ld.difal = difalVal;
-          console.log('[SIEG-EMIT] Difal: vBC=' + vbc + ' x (' + icmsInternoPR + '%-' + picmsInterstate + '%) = R$ ' + difalVal);
+          console.log('[SIEG-EMIT] Difal (informativo): vBC=' + vbcD + ' x ' + difalRate + '% = R$ ' + difalVal);
         }
       }
     }
@@ -468,41 +715,20 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   var vNFValue = round2(vProdSum + vIPISum);
   console.log('[SIEG-EMIT] vNF = vProd(' + vProdSum.toFixed(2) + ') + vIPI(' + vIPISum.toFixed(2) + ') = ' + vNFValue.toFixed(2));
 
-  // Pagamentos: NF-e 4.00 — vPag deve ser igual a vNF (total SEM IBS/CBS).
-  var pagamentos = [{
-    tPag: '15', // PIX
-    vPag: String(vNFValue.toFixed(2)),
-  }];
+  // Pagamentos + duplicatas a partir da FORMA DE PAGAMENTO do campo correto
+  // da fatura (x_studio_forma_de_pagamento). Somente IPI soma no vNF.
+  var pagInfo = buildPagamentoInfo({
+    forma: formaPagamento,
+    vNF: vNFValue,
+    parcelasFatura: parcelasFatura,
+    dataBase: move.invoice_date || move.date || '',
+    itauBoletos: boletoDataList || [],
+  });
 
-  // Calcular Difal total para infCpl
+  // Calcular Difal total para infCpl (Difal NAO soma no total — só informativo)
   var difalTotal = 0;
   for (var di = 0; di < linesData.length; di++) {
     if (linesData[di].difal) difalTotal += linesData[di].difal;
-  }
-  
-  // Montar boleto_detalhes com parcela, valor e vencimento
-  var boletoDetalhes = [];
-  try {
-    // Ler payment terms (condições de pagamento) da invoice para vencimentos
-    var movePay = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], ['invoice_payment_term_id', 'invoice_date_due']]);
-    var payTermId = (movePay && movePay[0] && movePay[0].invoice_payment_term_id) ? tupId(movePay[0].invoice_payment_term_id) : 0;
-    var dateDue = (movePay && movePay[0]) ? (movePay[0].invoice_date_due || '') : '';
-    
-    if (boletoDataList && boletoDataList.length > 0) {
-      // Tem boletos do Itaú
-      for (var bdi = 0; bdi < boletoDataList.length; bdi++) {
-        var bdItem = boletoDataList[bdi];
-        boletoDetalhes.push({
-          parcela: String(bdi + 1) + '/' + String(boletoDataList.length),
-          valor: String(vProdSum / boletoDataList.length),
-          vencimento: dateDue || '',
-          nosso_numero: bdItem.nosso_numero || '',
-          linha_digitavel: bdItem.linha_digitavel || '',
-        });
-      }
-    }
-  } catch (eBol) {
-    console.log('[SIEG-EMIT] Erro ao montar boleto_detalhes: ' + eBol.message);
   }
 
   // Determinar ICMS alíquota para infCpl
@@ -530,10 +756,13 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       sale_order_number: saleOrderNumber || '',
       boleto_info: boletoInfo || '',
       icms_aliquota: icmsAliquotaInfCpl,
-      boleto_detalhes: boletoDetalhes,
+      boleto_detalhes: pagInfo.boletoDetalhes,
+      forma_pagamento: formaPagamento || '',
+      forma_pagamento_label: pagInfo.formaLabel,
+      duplicatas: pagInfo.duplicatas,
     },
     lines: linesData,
-    pagamentos: pagamentos,
+    pagamentos: pagInfo.pagamentos,
     boletoData: boletoDataList || [],
     config: {
       serie: serie,
@@ -543,6 +772,9 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     },
     tipo: tipo,
   };
+  console.log('[SIEG-EMIT] Pagamento NF: ' + pagInfo.formaLabel + ' | tPag=' +
+    (pagInfo.pagamentos[0] || {}).tPag + ' | indPag=' + (pagInfo.pagamentos[0] || {}).indPag +
+    ' | parcelas=' + (pagInfo.duplicatas ? pagInfo.duplicatas.length : 0));
 
   // NFS-e: build service block from product x_studio_ fields
   if (tipo === 'nfse') {
@@ -1151,34 +1383,43 @@ async function buildLineData(client, db, uid, pwd, line, icmsInternoPR) {
   }
 
   // Tax extraction (inclui deteccao de IPI nos tax_ids do Odoo)
-  var tax = await extractTaxes(client, db, uid, pwd, line, icmsInternoPR);
+  // IMPOSTOS POR DENTRO (price_include=true): ICMS/Difal/PIS/COFINS etc. nao
+  // somam no total. O valor BRUTO da linha (vProd fiscal) = price_subtotal x
+  // PI(1 + aliquota/100) dos impostos incluidos. Todas as bases fiscais
+  // (vBC ICMS, vBC IPI, PIS/COFINS) usam o bruto — nunca o subtotal liquido.
+  var taxInfo = await readLineTaxesInfo(client, db, uid, pwd, line);
+  var grossSubtotal = taxInfo.gross;
+  var tax = await extractTaxes(client, db, uid, pwd, line, icmsInternoPR, taxInfo.taxes, grossSubtotal);
+
+  // Alíquota DIFAL declarada nos tax_ids da linha (ex: AUTO DIFAL DIFAL PR 5%)
+  // — usada apenas como texto informativo no infCpl; NUNCA soma no total.
+  var difalAliquota = 0;
+  for (var dxi = 0; dxi < taxInfo.taxes.length; dxi++) {
+    var dtx = taxInfo.taxes[dxi];
+    if (((dtx.name || dtx.description || '').toUpperCase().indexOf('DIFAL') >= 0) && parseFloat(dtx.amount) > 0) {
+      difalAliquota += parseFloat(dtx.amount);
+    }
+  }
 
   // IPI extraction: tentar 1) tax_ids da invoice line, 2) x_studio_ fields do produto
   var cstIpi = '', vbcIpi = '0.00', pipi = '0.00', vipi = '0.00', cenq = '999';
   var ipiFromTaxIds = false;
   
   // ESTRATÉGIA 1: Ler IPI dos tax_ids da invoice line (mais confiável)
-  var lineTaxIds = (line.tax_ids || []).map(function(t) { return Array.isArray(t) ? t[0] : t; }).filter(Boolean);
-  if (lineTaxIds.length > 0) {
-    try {
-      var lineTaxes = await executeKw(client, db, uid, pwd, 'account.tax', 'read', [lineTaxIds, [
-        'name', 'amount', 'amount_type', 'description',
-      ]]);
-      for (var txi = 0; txi < lineTaxes.length; txi++) {
-        var tx = lineTaxes[txi];
-        var txName = ((tx.name || tx.description || '').toUpperCase());
-        var txAmt = parseFloat(tx.amount) || 0;
-        if ((txName.indexOf('IPI') >= 0) && txAmt > 0) {
-          // Encontrou IPI nos tax_ids da invoice line!
-          pipi = String(txAmt);
-          cstIpi = '00'; // CST 00 = tributado
-          ipiFromTaxIds = true;
-          console.log('[SIEG-EMIT-IPI] IPI encontrado nos tax_ids: aliquota=' + txAmt + '% tax=' + txName);
-          break;
-        }
+  var lineTaxes = taxInfo.taxes;
+  if (lineTaxes.length > 0) {
+    for (var txi = 0; txi < lineTaxes.length; txi++) {
+      var tx = lineTaxes[txi];
+      var txName = ((tx.name || tx.description || '').toUpperCase());
+      var txAmt = parseFloat(tx.amount) || 0;
+      if ((txName.indexOf('IPI') >= 0) && txAmt > 0) {
+        // Encontrou IPI nos tax_ids da invoice line!
+        pipi = String(txAmt);
+        cstIpi = '00'; // CST 00 = tributado
+        ipiFromTaxIds = true;
+        console.log('[SIEG-EMIT-IPI] IPI encontrado nos tax_ids: aliquota=' + txAmt + '% tax=' + txName + ' price_include=' + !!tx.price_include);
+        break;
       }
-    } catch (eTxIpi) {
-      console.log('[SIEG-EMIT-IPI] Erro ao ler tax_ids para IPI: ' + eTxIpi.message);
     }
   }
   
@@ -1210,27 +1451,17 @@ async function buildLineData(client, db, uid, pwd, line, icmsInternoPR) {
   }
   
   // Calculate IPI values
+  // vBC do IPI = valor BRUTO do produto (vProd fiscal, sem IPI) — nunca o
+  // subtotal liquido do Odoo (que fica menor quando ha imposto por dentro).
   if (cstIpi && ['00','49','50','99'].includes(cstIpi.padStart(2, '0')) && parseFloat(pipi) > 0) {
-    // vBC do IPI = price_subtotal (sem IPI incluso, que é o preço do produto)
-    // Se o Odoo incluiu IPI no price_subtotal (tax included_in_price), precisamos
-    // calcular o vBC sem IPI: vBC = price_subtotal / (1 + pIPI/100)
-    var rawSubtotal = parseFloat(line.price_subtotal || (line.quantity * line.price_unit) || 0);
-    var pipiNum = parseFloat(pipi);
-    
-    // Verificar se o IPI está incluso no preço (price_subtotal& contém IPI)
-    // No Odoo, se o tax tem amount_type='percent' e está na invoice line,
-    // o price_subtotal NÃO inclui o IPI (é o valor sem impostos).
-    // Mas se amount_type='division', o IPI ESTÁ incluso.
-    // Por segurança, usamos price_subtotal como base (sem IPIC incluso).
-    vbcIpi = String(rawSubtotal);
-    vipi = String(round2(rawSubtotal * pipiNum / 100));
+    vbcIpi = String(grossSubtotal);
+    vipi = String(round2(grossSubtotal * parseFloat(pipi) / 100));
     console.log('[SIEG-EMIT-IPI] IPI calculado: vBC=' + vbcIpi + ' pIPI=' + pipi + '% vIPI=' + vipi);
   } else if (!cstIpi && parseFloat(pipi) > 0) {
     // Tem alíquota mas sem CST - usar CST 00 como default
     cstIpi = '00';
-    var rawSubtotal = parseFloat(line.price_subtotal || (line.quantity * line.price_unit) || 0);
-    vbcIpi = String(rawSubtotal);
-    vipi = String(round2(rawSubtotal * parseFloat(pipi) / 100));
+    vbcIpi = String(grossSubtotal);
+    vipi = String(round2(grossSubtotal * parseFloat(pipi) / 100));
     console.log('[SIEG-EMIT-IPI] IPI sem CST, usando CST 00: vBC=' + vbcIpi + ' pIPI=' + pipi + '% vIPI=' + vipi);
   }
 
@@ -1239,7 +1470,9 @@ async function buildLineData(client, db, uid, pwd, line, icmsInternoPR) {
     product_name: productName, xProd: productName,
     ncm: ncm, cfop: '5102', uom: uomName,
     qty: line.quantity || 0, price_unit: line.price_unit || 0,
-    price_subtotal: line.price_subtotal || (line.quantity * line.price_unit),
+    // price_subtotal aqui = valor BRUTO fiscal (vProd): subtotal Odoo x impostos
+    // por dentro. Somente IPI soma depois (vNF = vProd + vIPI).
+    price_subtotal: grossSubtotal || (line.price_subtotal || (line.quantity * line.price_unit)),
     detailed_type: detailedType,
     // Tributação Lucro Real (padrão) — sobrescrito se Odoo tiver impostos configurados
     csosn: tax.csosn || '',
@@ -1270,6 +1503,8 @@ async function buildLineData(client, db, uid, pwd, line, icmsInternoPR) {
     x_studio_ibge_code: prodStudio.ibge_code,
     // Peso unitário do produto (para cálculo peso total = peso_unitário × qtd)
     peso_unitario: prodStudio.peso_unitario || 0,
+    // DIFAL (informativo, nao soma no total)
+    difal_aliquota: difalAliquota,
   };
 
   // === LOG DETALHADO POR CAMPO (para debug de XML invalido) ===
@@ -1342,12 +1577,58 @@ function buildServiceBlock(linesData, move) {
 // ============================================================
 // Tax Extraction
 // ============================================================
-async function extractTaxes(client, db, uid, pwd, line, icmsInternoPR) {
+/**
+ * Le os impostos da linha UMA unica vez e calcula o valor BRUTO fiscal.
+ * Impostos com price_include=true (ICMS/Difal/PIS/COFINS...) estao dentro
+ * do preco e NAO somam no total. O bruto (vProd fiscal) reconstrói o valor
+ * de tabela: bruto = subtotal Odoo x PI(1 + aliquota/100) dos incluidos.
+ * Retorna { taxes: [...], includedFactor, gross }
+ */
+async function readLineTaxesInfo(client, db, uid, pwd, line) {
+  var lineTaxIds = (line.tax_ids || []).map(function(t) { return Array.isArray(t) ? t[0] : t; }).filter(Boolean);
+  var taxes = [];
+  var includedFactor = 1;
+  if (lineTaxIds.length > 0) {
+    try {
+      taxes = await executeKw(client, db, uid, pwd, 'account.tax', 'read', [lineTaxIds, [
+        'name', 'amount', 'amount_type', 'description',
+        'price_include', 'include_base_amount', 'sequence',
+      ]]);
+      // Ordena como o Odoo aplica (sequence, id) — compound na mesma ordem
+      taxes.sort(function(a, b) {
+        var s = (a.sequence || 0) - (b.sequence || 0);
+        return s !== 0 ? s : (a.id - b.id);
+      });
+      for (var i = 0; i < taxes.length; i++) {
+        var t = taxes[i];
+        if (t.price_include && t.amount_type === 'percent' && parseFloat(t.amount)) {
+          includedFactor *= (1 + parseFloat(t.amount) / 100);
+        }
+      }
+    } catch (e) {
+      console.warn('[SIEG-EMIT] Erro ao ler account.tax da linha: ' + e.message);
+      taxes = [];
+    }
+  }
+  var rawSubtotal = parseFloat(line.price_subtotal) || (parseFloat(line.quantity) * parseFloat(line.price_unit)) || 0;
+  var gross = round2(rawSubtotal * includedFactor);
+  if (includedFactor > 1.000001) {
+    console.log('[SIEG-EMIT] Linha c/ imposto por dentro: subtotal=' + rawSubtotal.toFixed(2) +
+      ' fator=' + includedFactor.toFixed(6) + ' -> bruto(vProd)=' + gross.toFixed(2));
+  }
+  return { taxes: taxes, includedFactor: includedFactor, gross: gross };
+}
+
+async function extractTaxes(client, db, uid, pwd, line, icmsInternoPR, lineTaxes, grossBase) {
   // Padrão: Lucro Real (CRT 3) — CST 00, ICMS conforme regra PR
   // Com IE → 12%, sem IE/CPF → 19.5%, interestadual → 12%/7% (Difal)
   // PIS/COFINS não-cumulativo com base no valor do produto
+  // BASE = valor BRUTO fiscal (grossBase) — impostos por dentro fazem parte
+  // do preço; ICMS "por dentro" incide sobre o valor cheio do produto.
   var defaultIcms = icmsInternoPR || 18; // fallback 18% se não informado
-  var base = parseFloat(line.price_subtotal) || 0;
+  var base = (typeof grossBase === 'number' && grossBase > 0)
+    ? grossBase
+    : (parseFloat(line.price_subtotal) || 0);
   // Arredondamento: SEFAZ exige 2 casas decimais por item.
   // Se nao arredondar aqui, o total pode divergir (cStat 602/603).
   var r2 = function(n) { return Math.round((parseFloat(n) || 0) * 100) / 100; };
@@ -1368,48 +1649,50 @@ async function extractTaxes(client, db, uid, pwd, line, icmsInternoPR) {
     vcofins: r2(base * 0.076),
   };
 
-  var taxIds = (line.tax_ids || []).map(function(t) { return Array.isArray(t) ? t[0] : t; }).filter(Boolean);
-  if (!taxIds.length) return result;
+  var taxes = (lineTaxes && lineTaxes.length) ? lineTaxes : [];
+  if (!taxes.length) {
+    var taxIds = (line.tax_ids || []).map(function(t) { return Array.isArray(t) ? t[0] : t; }).filter(Boolean);
+    if (!taxIds.length) return result;
+    try {
+      taxes = await executeKw(client, db, uid, pwd, 'account.tax', 'read', [taxIds, [
+        'name', 'amount', 'amount_type', 'description',
+      ]]);
+    } catch (e) { console.warn('[SIEG-EMIT] Erro ao extrair impostos:', e.message); taxes = []; }
+  }
+  if (!taxes || !taxes.length) return result;
 
-  try {
-    var taxes = await executeKw(client, db, uid, pwd, 'account.tax', 'read', [taxIds, [
-      'name', 'amount', 'amount_type', 'description',
-    ]]);
-    if (!taxes || !taxes.length) return result;
+  var totalIcms = 0, totalPis = 0, totalCofins = 0;
+  var foundCsosn = '';
 
-    var totalIcms = 0, totalPis = 0, totalCofins = 0;
-    var foundCsosn = '';
+  for (var i = 0; i < taxes.length; i++) {
+    var tax = taxes[i];
+    var n = ((tax.name || tax.description || '').toUpperCase());
+    var amt = parseFloat(tax.amount) || 0;
+    if (n.indexOf('ICMS') >= 0 || n.indexOf('CSOSN') >= 0) {
+      totalIcms += amt;
+      var m = n.match(/(10[0-9]|20[0-9]|300|400|500|900)/);
+      if (m) foundCsosn = m[1];
+    } else if (n.indexOf('PIS') >= 0) { totalPis += amt; }
+    else if (n.indexOf('COFINS') >= 0) { totalCofins += amt; }
+  }
 
-    for (var i = 0; i < taxes.length; i++) {
-      var tax = taxes[i];
-      var n = ((tax.name || tax.description || '').toUpperCase());
-      var amt = parseFloat(tax.amount) || 0;
-      if (n.indexOf('ICMS') >= 0 || n.indexOf('CSOSN') >= 0) {
-        totalIcms += amt;
-        var m = n.match(/(10[0-9]|20[0-9]|300|400|500|900)/);
-        if (m) foundCsosn = m[1];
-      } else if (n.indexOf('PIS') >= 0) { totalPis += amt; }
-      else if (n.indexOf('COFINS') >= 0) { totalCofins += amt; }
-    }
-
-    // Sobrescreve defaults apenas se o Odoo tiver impostos reais configurados (> 0)
-    if (foundCsosn) {
-      result.csosn = foundCsosn;
-      result.cst_icms = '';
-    }
-    if (totalIcms > 0) {
-      result.picms = totalIcms;
-      result.vicms = r2(base * (totalIcms / 100));
-    }
-    if (totalPis > 0) {
-      result.ppis = totalPis;
-      result.vpis = r2(base * (totalPis / 100));
-    }
-    if (totalCofins > 0) {
-      result.pcofins = totalCofins;
-      result.vcofins = r2(base * (totalCofins / 100));
-    }
-  } catch (e) { console.warn('[SIEG-EMIT] Erro ao extrair impostos:', e.message); }
+  // Sobrescreve defaults apenas se o Odoo tiver impostos reais configurados (> 0)
+  if (foundCsosn) {
+    result.csosn = foundCsosn;
+    result.cst_icms = '';
+  }
+  if (totalIcms > 0) {
+    result.picms = totalIcms;
+    result.vicms = r2(base * (totalIcms / 100));
+  }
+  if (totalPis > 0) {
+    result.ppis = totalPis;
+    result.vpis = r2(base * (totalPis / 100));
+  }
+  if (totalCofins > 0) {
+    result.pcofins = totalCofins;
+    result.vcofins = r2(base * (totalCofins / 100));
+  }
 
   return result;
 }
@@ -1920,4 +2203,4 @@ async function cancelOneInvoice(client, db, uid, pwd, moveId, cancelarNFe) {
   return { move_id: moveId, sucesso: resultado.sucesso, fatura: move.name, cStat: resultado.cStat };
 }
 
-module.exports = { processPendingEmissions, processPendingCancellations };
+module.exports = { processPendingEmissions, processPendingCancellations, buildPagamentoInfo };

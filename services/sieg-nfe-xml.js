@@ -590,16 +590,23 @@ ${xmlEndereco(partner, 'enderDest')}
     </transp>`;
 
   // === cobr (duplicatas) ===
-  if (dup.length > 0) {
+  // A prazo (boleto): parcelas vindas da fatura/forma de pagamento (venc+valor)
+  var dupAuto = data.duplicatas || [];
+  var dupList = dup.length > 0 ? dup : dupAuto;
+  if (dupList.length > 0) {
+    // vOrig/vLiq = soma das duplicatas (bater com vPag/vNF)
+    var vDupSoma = 0;
+    for (var di = 0; di < dupList.length; di++) vDupSoma += round2(parseFloat(dupList[di].vDup || 0));
+    var vFat = vDupSoma > 0 ? round2(vDupSoma) : round2(parseFloat(vNF));
     xml += `
     <cobr>
       <fat>
         <nFat>${esc(String(order.name || nNF))}</nFat>
-        <vOrig>${vNF}</vOrig>
+        <vOrig>${num(vFat)}</vOrig>
         <vDesc>0.00</vDesc>
-        <vLiq>${vNF}</vLiq>
+        <vLiq>${num(vFat)}</vLiq>
       </fat>`;
-    dup.forEach((d, i) => {
+    dupList.forEach((d, i) => {
       xml += `
       <dup>
         <nDup>${String(i + 1).padStart(3, '0')}</nDup>
@@ -615,7 +622,7 @@ ${xmlEndereco(partner, 'enderDest')}
     xml += `\n    <pag>`;
     pag.forEach(p => {
       xml += `
-      <detPag>
+      <detPag>${p.indPag ? `\n        <indPag>${p.indPag}</indPag>` : ''}
         <tPag>${p.tPag || '15'}</tPag>
         <vPag>${num(p.vPag)}</vPag>
       </detPag>`;
@@ -624,7 +631,11 @@ ${xmlEndereco(partner, 'enderDest')}
   }
 
   // === infAdic ===
+  // FORMA DE PAGAMENTO: sempre do campo correto da fatura
+  // (x_studio_forma_de_pagamento), com dados de boleto (parcelas, vencimentos
+  // e valores) ou PIX. Impostos (ICMS/Difal) NAO somam no total — só texto.
   var infCplText = stripHtml(order.note || order.infCpl || '');
+  var formaLabel = String(order.forma_pagamento_label || order.forma_pagamento || '').trim();
   // Incluir alíquota ICMS quando houver
   if (order.icms_aliquota && infCplText.indexOf('ICMS') === -1) {
     infCplText = 'ICMS ' + order.icms_aliquota + '%. ' + infCplText;
@@ -633,25 +644,29 @@ ${xmlEndereco(partner, 'enderDest')}
   if (order.sale_order_number && infCplText.indexOf('Pedido') === -1) {
     infCplText = 'Pedido: ' + order.sale_order_number + '. ' + infCplText;
   }
-  // Incluir dados do boleto com detalhes (parcela, valor, vencimento) ou pagamento à vista
+  // Pagamento: boleto com parcelas/vencimentos/valores, PIX, ou a vista
   if (order.boleto_detalhes && order.boleto_detalhes.length > 0) {
-    if (infCplText.indexOf('Boleto') === -1 && infCplText.indexOf('Pagamento') === -1) {
-      var boletoParts = [];
-      for (var bi = 0; bi < order.boleto_detalhes.length; bi++) {
-        var bd = order.boleto_detalhes[bi];
-        var part = 'Boleto ' + (bi + 1) + '/' + order.boleto_detalhes.length;
-        if (bd.valor) part += ': R$ ' + num(bd.valor);
-        if (bd.vencimento) part += ' Venc: ' + bd.vencimento;
-        if (bd.nosso_numero) part += ' NN: ' + bd.nosso_numero;
-        boletoParts.push(part);
-      }
-      infCplText = boletoParts.join(' | ') + '. ' + infCplText;
+    var boletoParts = [];
+    for (var bi = 0; bi < order.boleto_detalhes.length; bi++) {
+      var bd = order.boleto_detalhes[bi];
+      var part = 'Boleto ' + (bd.parcela || ((bi + 1) + '/' + order.boleto_detalhes.length));
+      if (bd.valor) part += ': R$ ' + num(bd.valor);
+      if (bd.vencimento) part += ' Venc: ' + bd.vencimento;
+      if (bd.nosso_numero) part += ' NN: ' + bd.nosso_numero;
+      if (bd.linha_digitavel) part += ' Linha: ' + bd.linha_digitavel;
+      boletoParts.push(part);
     }
+    infCplText = boletoParts.join(' | ') + '. ' + infCplText;
+    if (formaLabel && infCplText.indexOf(formaLabel) === -1 && formaLabel.indexOf('Boleto') === -1 && formaLabel.toUpperCase().indexOf('BOLETO') === -1) {
+      infCplText = 'Forma de pagamento: ' + formaLabel + '. ' + infCplText;
+    }
+  } else if (formaLabel) {
+    infCplText = formaLabel + '. ' + infCplText;
   } else if (order.boleto_info && infCplText.indexOf('Boleto') === -1) {
     // Fallback: boleto info simples (NN, LD, CB)
     infCplText = order.boleto_info + ' ' + infCplText;
-  } else if (!order.boleto_info && (!order.boleto_detalhes || order.boleto_detalhes.length === 0) && infCplText.indexOf('Pagamento') === -1) {
-    // Sem boleto = pagamento à vista
+  } else if (infCplText.indexOf('Pagamento') === -1 && infCplText.indexOf('pagamento') === -1) {
+    // Sem informacao de pagamento = pagamento a vista
     infCplText = 'Pagamento a vista. ' + infCplText;
   }
   if (infCplText) {
