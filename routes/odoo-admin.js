@@ -323,6 +323,34 @@ router.post('/apply-demandas', apiKeyAuth, async function(req, res) {
   res.json({ success: true, results: results });
 });
 
+// GET /api/v1/admin/read-so-print
+// Le o arch da view de SO para debug
+router.get('/read-so-print', apiKeyAuth, async function(req, res) {
+  const odoo = config.odoo;
+  try {
+    var client = createClient(odoo.url);
+    var uid2 = await authenticate(client, odoo.db, odoo.user, odoo.password);
+    function ekw2(model, method, args, kwargs) {
+      return executeKw(client, odoo.db, uid2, odoo.password, model, method, args, kwargs);
+    }
+    var soViews = await ekw2('ir.ui.view', 'search_read', [[['key','=','sale.report_saleorder_document']]], {fields:['id','name'], limit:3});
+    if (!soViews.length) soViews = await ekw2('ir.ui.view', 'search_read', [[['name','ilike','report_saleorder_document']]], {fields:['id','name'], limit:3});
+    if (!soViews.length) return res.json({ success: false, error: 'View nao encontrada' });
+    var viewId = soViews[0].id;
+    var archData = await ekw2('ir.ui.view', 'read', [[viewId], ['arch_db', 'arch']]);
+    var arch = archData[0].arch_db || archData[0].arch || '';
+    // Return first 3000 chars and last 1000 chars + stats
+    return res.json({ 
+      success: true, viewId: viewId, len: arch.length,
+      first3000: arch.substring(0, 3000),
+      last1000: arch.substring(arch.length - 1000),
+      hasPageBreak: arch.indexOf('page-break') !== -1,
+      hasAtPage: arch.indexOf('@page') !== -1,
+      hasFontSize: arch.indexOf('font-size') !== -1,
+    });
+  } catch(e) { return res.status(500).json({ success: false, error: e.message }); }
+});
+
 module.exports = router;
 
 // POST /api/v1/admin/compact-so-print
