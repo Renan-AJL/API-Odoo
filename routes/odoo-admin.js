@@ -1028,13 +1028,14 @@ function escapeXmlText(s) {
 
 // ============================================================
 // POST /api/v1/admin/recompute-draft-so
-// Forca o recompute das linhas de pedidos em rascunho (draft/sent) para que
-// os totais (amount_untaxed/amount_tax/amount_total) reflitam os impostos
-// com price_include corrigido (nao-IPI por dentro, nao soma no total).
-// Body: { limit? } (default 400 linhas por chamada; chamar repetidamente)
+// Forca o recompute das linhas de pedidos em rascunho (draft/sent) OU de
+// faturas em rascunho para que os totais reflitam os impostos com
+// price_include corrigido (nao-IPI por dentro, nao soma no total).
+// Body: { limit?, modelo? } — modelo: 'sale' (default) | 'invoice'
 // ============================================================
 router.post('/recompute-draft-so', apiKeyAuth, async function(req, res) {
   var limit = parseInt(req.body.limit) || 400;
+  var modelo = req.body.modelo === 'invoice' ? 'invoice' : 'sale';
   try {
     var odoo = config.odoo;
     if (!odoo || !odoo.url || !odoo.enabled) {
@@ -1046,21 +1047,42 @@ router.post('/recompute-draft-so', apiKeyAuth, async function(req, res) {
       return executeKw(client, odoo.db, uid, odoo.password, model, method, args, kwargs);
     };
 
-    var lineIds = await ekw('sale.order.line', 'search', [[
-      ['display_type', 'in', [false, 'product']],
-      ['order_id.state', 'in', ['draft', 'sent']],
-      ['price_unit', '>', 0],
-    ]], { limit: limit, order: 'id' });
+    var lineDomain, lineModel, orderModel, orderDomain, orderFields;
+    if (modelo === 'invoice') {
+      lineModel = 'account.move.line';
+      lineDomain = [
+        ['display_type', 'in', ['product', false]],
+        ['move_id.state', '=', 'draft'],
+        ['move_id.move_type', '=', 'out_invoice'],
+        ['price_unit', '>', 0],
+      ];
+      orderModel = 'account.move';
+      orderDomain = [['state', '=', 'draft'], ['move_type', '=', 'out_invoice']];
+      orderFields = ['name', 'amount_untaxed', 'amount_tax', 'amount_total'];
+    } else {
+      lineModel = 'sale.order.line';
+      lineDomain = [
+        ['display_type', 'in', [false, 'product']],
+        ['order_id.state', 'in', ['draft', 'sent']],
+        ['price_unit', '>', 0],
+      ];
+      orderModel = 'sale.order';
+      orderDomain = [['state', 'in', ['draft', 'sent']]];
+      orderFields = ['name', 'amount_untaxed', 'amount_tax', 'amount_total'];
+    }
+
+    var lineIds = await ekw(lineModel, 'search', [lineDomain], { limit: limit, order: 'id' });
 
     var recomputed = 0;
+    var taxField = (modelo === 'invoice') ? 'tax_ids' : 'tax_ids';
     for (var i = 0; i < lineIds.length; i++) {
       try {
         // Reafirmar tax_ids (mesmos ids) invalida o calculo de amount_* —
         // com price_include corrigido, o total volta a ser o valor do produto
         // (imposto por dentro nao soma no total; somente IPI soma).
-        var rec = await ekw('sale.order.line', 'read', [[lineIds[i]], ['tax_ids']]);
-        var tids = (rec[0] && rec[0].tax_ids) || [];
-        await ekw('sale.order.line', 'write', [[lineIds[i]], { tax_ids: [[6, 0, tids]] }]);
+        var rec = await ekw(lineModel, 'read', [[lineIds[i]], [taxField]]);
+        var tids = (rec[0] && rec[0][taxField]) || [];
+        await ekw(lineModel, 'write', [[lineIds[i]], { tax_ids: [[6, 0, tids]] }]);
         recomputed++;
       } catch (eL) {
         console.warn('[RECOMPUTE-SO] linha ' + lineIds[i] + ': ' + eL.message);
@@ -1068,10 +1090,10 @@ router.post('/recompute-draft-so', apiKeyAuth, async function(req, res) {
     }
 
     // Totais apos recompute (amostra)
-    var orders = await ekw('sale.order', 'search_read', [[['state', 'in', ['draft', 'sent']]]],
-      { fields: ['name', 'amount_untaxed', 'amount_tax', 'amount_total'], order: 'id desc', limit: 12 });
+    var orders = await ekw(orderModel, 'search_read', [orderDomain],
+      { fields: orderFields, order: 'id desc', limit: 12 });
 
-    res.json({ success: true, linhas_no_domain: lineIds.length, recomputadas: recomputed, amostra_pedidos: orders });
+    res.json({ success: true, modelo: modelo, linhas_no_domain: lineIds.length, recomputadas: recomputed, amostra_pedidos: orders });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
