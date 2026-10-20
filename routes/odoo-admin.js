@@ -351,8 +351,6 @@ router.get('/read-so-print', apiKeyAuth, async function(req, res) {
   } catch(e) { return res.status(500).json({ success: false, error: e.message }); }
 });
 
-module.exports = router;
-
 // POST /api/v1/admin/compact-so-print
 // Rota dedicada para compactar o report de SO para 1 pagina
 router.post('/compact-so-print', apiKeyAuth, async function(req, res) {
@@ -454,3 +452,295 @@ router.post('/compact-so-print', apiKeyAuth, async function(req, res) {
     return res.status(500).json({ success: false, error: e.message });
   }
 });
+
+// GET /api/v1/admin/ipi-status
+// Verifica estado atual do IPI nos pedidos (taxes, products, sale orders)
+router.get('/ipi-status', apiKeyAuth, async function(req, res) {
+  const odoo = config.odoo;
+  if (!odoo || !odoo.url || !odoo.enabled) {
+    return res.status(503).json({ success: false, error: 'Odoo nao configurado' });
+  }
+
+  try {
+    var client = createClient(odoo.url);
+    var uid2 = await authenticate(client, odoo.db, odoo.user, odoo.password);
+    var db = odoo.db;
+    var pwd = odoo.password;
+
+    function ekw2(model, method, args, kwargs) {
+      return executeKw(client, db, uid2, pwd, model, method, args, kwargs);
+    }
+
+    var result = {};
+
+    // 1. Search IPI taxes in account.tax
+    var ipiTaxes = await ekw2('account.tax', 'search_read',
+      [['|', ['name', 'ilike', 'IPI'], ['name', 'ilike', 'ipi']], ['type_tax_use', '=', 'sale'], ['active', '=', true]],
+      {fields: ['id', 'name', 'amount', 'amount_type', 'price_include', 'tax_group_id'], limit: 20}
+    );
+    result.ipiTaxes = ipiTaxes;
+
+    // 2. All sale taxes for reference
+    var allSaleTaxes = await ekw2('account.tax', 'search_read',
+      [['type_tax_use', '=', 'sale'], ['active', '=', true]],
+      {fields: ['id', 'name', 'amount', 'amount_type', 'price_include'], limit: 30}
+    );
+    result.allSaleTaxes = allSaleTaxes;
+
+    // 3. Recent sale orders with breakdown
+    var recentOrders = await ekw2('sale.order', 'search_read',
+      [],
+      {fields: ['id', 'name', 'amount_untaxed', 'amount_tax', 'amount_total', 'state'], order: 'id desc', limit: 5}
+    );
+    result.recentOrders = [];
+    for (var i = 0; i < recentOrders.length; i++) {
+      var order = recentOrders[i];
+      var lines = await ekw2('sale.order.line', 'search_read',
+        [['order_id', '=', order.id]],
+        {fields: ['id', 'name', 'product_id', 'price_unit', 'price_subtotal', 'price_total', 'tax_id', 'product_uom_qty']}
+      );
+      var orderInfo = {
+        id: order.id, name: order.name, state: order.state,
+        amount_untaxed: order.amount_untaxed, amount_tax: order.amount_tax, amount_total: order.amount_total,
+        lines: lines.map(function(l) {
+          return {
+            product: l.product_id ? l.product_id[1] : 'N/A',
+            qty: l.product_uom_qty, price_unit: l.price_unit,
+            subtotal: l.price_subtotal, total: l.price_total,
+            tax_ids: l.tax_id
+          };
+        })
+      };
+      // Get tax details for first line
+      if (lines.length > 0 && lines[0].tax_id && lines[0].tax_id.length > 0) {
+        var taxDetails = await ekw2('account.tax', 'read', [lines[0].tax_id, ['name', 'amount', 'amount_type']]);
+        orderInfo.sampleTaxes = taxDetails;
+      }
+      result.recentOrders.push(orderInfo);
+    }
+
+    // 4. Products with x_studio_aliquota_ipi
+    try {
+      var productsWithIpi = await ekw2('product.template', 'search_read',
+        [['x_studio_aliquota_ipi', '>', 0]],
+        {fields: ['id', 'name', 'x_studio_aliquota_ipi', 'x_studio_cst_ipi', 'taxes_id'], limit: 15}
+      );
+      result.productsWithIpi = productsWithIpi.map(function(p) {
+        return {
+          id: p.id, name: p.name, aliquota_ipi: p.x_studio_aliquota_ipi,
+          cst_ipi: p.x_studio_cst_ipi, tax_ids: p.taxes_id
+        };
+      });
+    } catch(e) {
+      result.productsWithIpiError = e.message;
+    }
+
+    // 5. Tax groups
+    var taxGroups = await ekw2('account.tax.group', 'search_read',
+      [],
+      {fields: ['id', 'name'], limit: 20}
+    );
+    result.taxGroups = taxGroups;
+
+    return res.json({ success: true, result: result });
+  } catch(e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/v1/admin/fix-ipi-sale
+// Cria impostos IPI e adiciona aos produtos para contabilizar no pedido
+router.post('/fix-ipi-sale', apiKeyAuth, async function(req, res) {
+  const odoo = config.odoo;
+  if (!odoo || !odoo.url || !odoo.enabled) {
+    return res.status(503).json({ success: false, error: 'Odoo nao configurado' });
+  }
+
+  try {
+    var client = createClient(odoo.url);
+    var uid2 = await authenticate(client, odoo.db, odoo.user, odoo.password);
+    var db = odoo.db;
+    var pwd = odoo.password;
+
+    function ekw2(model, method, args, kwargs) {
+      return executeKw(client, db, uid2, pwd, model, method, args, kwargs);
+    }
+
+    var results = [];
+    var dryRun = req.body.dry_run !== false; // default true for safety
+
+    // === 1. FIND OR CREATE IPI TAX GROUP ===
+    var ipiGroupIds = await ekw2('account.tax.group', 'search', [[['name', '=', 'IPI']]]);
+    var ipiGroupId;
+    if (!ipiGroupIds.length) {
+      ipiGroupId = await ekw2('account.tax.group', 'create', [{'name': 'IPI'}]);
+      results.push({step: 'ipi_group', ok: true, id: ipiGroupId, msg: 'Criado'});
+    } else {
+      ipiGroupId = ipiGroupIds[0];
+      results.push({step: 'ipi_group', ok: true, id: ipiGroupId, msg: 'Ja existe'});
+    }
+
+    // === 2. FIND OR CREATE IPI TAXES (common rates: 0%, 5%, 10%, 12%, 15%, 20%, 25%) ===
+    var ipiRates = [0, 5, 10, 12, 15, 20, 25];
+    var ipiTaxMap = {}; // rate -> tax_id
+
+    for (var r = 0; r < ipiRates.length; r++) {
+      var rate = ipiRates[r];
+      var taxName = 'IPI ' + rate + '%';
+      
+      var existing = await ekw2('account.tax', 'search_read',
+        [['name', '=', taxName], ['type_tax_use', '=', 'sale']],
+        {fields: ['id', 'name', 'amount'], limit: 1}
+      );
+      
+      if (existing.length) {
+        ipiTaxMap[rate] = existing[0].id;
+        results.push({step: 'ipi_tax_' + rate, ok: true, id: existing[0].id, msg: 'Ja existe'});
+      } else {
+        if (dryRun) {
+          results.push({step: 'ipi_tax_' + rate, ok: true, msg: '[DRY RUN] Criaria ' + taxName});
+        } else {
+          try {
+            // Get company
+            var companyIds = await ekw2('res.company', 'search', [[]], {limit: 1});
+            var companyId = companyIds.length ? companyIds[0] : false;
+            
+            var taxVals = {
+              'name': taxName,
+              'amount_type': 'percent',
+              'amount': rate,
+              'type_tax_use': 'sale',
+              'price_include': false,  // IPI is NOT included in price - added on top
+              'tax_group_id': ipiGroupId,
+              'active': true,
+              'sequence': 50 + r,  // After ICMS/PIS/COFINS
+            };
+            if (companyId) taxVals['company_id'] = companyId;
+            
+            var newTaxId = await ekw2('account.tax', 'create', [taxVals]);
+            ipiTaxMap[rate] = newTaxId;
+            results.push({step: 'ipi_tax_' + rate, ok: true, id: newTaxId, msg: 'Criado'});
+          } catch(e) {
+            results.push({step: 'ipi_tax_' + rate, ok: false, error: e.message});
+          }
+        }
+      }
+    }
+
+    // === 3. ADD IPI TAXES TO PRODUCTS WITH x_studio_aliquota_ipi ===
+    try {
+      var productsWithIpi = await ekw2('product.template', 'search_read',
+        [['x_studio_aliquota_ipi', '>', 0]],
+        {fields: ['id', 'name', 'x_studio_aliquota_ipi', 'x_studio_cst_ipi', 'taxes_id'], limit: 200}
+      );
+      
+      var updatedCount = 0;
+      var skippedCount = 0;
+      var alreadyHasCount = 0;
+      
+      for (var p = 0; p < productsWithIpi.length; p++) {
+        var prod = productsWithIpi[p];
+        var aliquota = Math.round(prod.x_studio_aliquota_ipi); // Round to nearest integer
+        
+        // Find the matching IPI tax
+        var ipiTaxId = ipiTaxMap[aliquota];
+        if (!ipiTaxId) {
+          // Try exact rate
+          ipiTaxId = ipiTaxMap[prod.x_studio_aliquota_ipi];
+        }
+        
+        if (!ipiTaxId) {
+          skippedCount++;
+          if (p < 5) results.push({step: 'product_' + prod.id, ok: false, msg: 'Sem IPI tax para ' + prod.x_studio_aliquota_ipi + '%', product: prod.name});
+          continue;
+        }
+        
+        // Check if product already has this IPI tax
+        var currentTaxes = prod.taxes_id || [];
+        if (currentTaxes.indexOf(ipiTaxId) !== -1) {
+          alreadyHasCount++;
+          continue;
+        }
+        
+        // Add IPI tax to product (use write to append to taxes_id)
+        if (dryRun) {
+          if (p < 5) results.push({step: 'product_' + prod.id, ok: true, msg: '[DRY RUN] Adicionaria IPI ' + aliquota + '% a ' + prod.name});
+          updatedCount++;
+        } else {
+          try {
+            // Write using (4, id) to add to Many2many
+            await ekw2('product.template', 'write', [[prod.id], {'taxes_id': [[4, ipiTaxId]]}]);
+            updatedCount++;
+          } catch(e) {
+            if (p < 5) results.push({step: 'product_' + prod.id, ok: false, error: e.message});
+          }
+        }
+      }
+      
+      results.push({
+        step: 'products_ipi', ok: true,
+        total: productsWithIpi.length,
+        updated: updatedCount,
+        alreadyHas: alreadyHasCount,
+        skipped: skippedCount,
+        dryRun: dryRun
+      });
+    } catch(e) {
+      results.push({step: 'products_ipi', ok: false, error: e.message});
+    }
+
+    // === 4. RECOMPUTE RECENT SALE ORDERS ===
+    if (!dryRun) {
+      try {
+        // Trigger recomputation on draft/sent orders by writing a no-op
+        var draftOrders = await ekw2('sale.order', 'search',
+          [['state', 'in', ['draft', 'sent']]],
+          {limit: 50}
+        );
+        
+        if (draftOrders.length > 0) {
+          // Use _onchange_tax_id to recompute lines - but via API we can only use write
+          // Instead, we trigger recompute by touching the order
+          for (var o = 0; o < Math.min(draftOrders.length, 10); o++) {
+            try {
+              // Read order lines
+              var solIds = await ekw2('sale.order.line', 'search', [[['order_id', '=', draftOrders[o]]]], {limit: 50});
+              for (var l = 0; l < solIds.length; l++) {
+                // Trigger tax recomputation by writing tax_id with current value
+                var lineTaxes = await ekw2('sale.order.line', 'read', [[solIds[l]], ['tax_id']]);
+                var currentLineTaxes = lineTaxes[0].tax_id || [];
+                // Find product for this line
+                var lineProduct = await ekw2('sale.order.line', 'read', [[solIds[l]], ['product_id']]);
+                if (lineProduct[0].product_id) {
+                  var prodId = lineProduct[0].product_id[0];
+                  // Get product template taxes
+                  var ppTaxes = await ekw2('product.product', 'read', [[prodId], ['taxes_id']]);
+                  var newTaxes = ppTaxes[0].taxes_id || [];
+                  if (JSON.stringify(currentLineTaxes) !== JSON.stringify(newTaxes)) {
+                    // Update line taxes
+                    await ekw2('sale.order.line', 'write', [[solIds[l]], {'tax_id': [[6, 0, newTaxes]]}]);
+                  }
+                }
+              }
+            } catch(e) {
+              // Skip this order
+            }
+          }
+          results.push({step: 'recompute', ok: true, msg: 'Pedidos abertos recomputados (max 10)', count: draftOrders.length});
+        } else {
+          results.push({step: 'recompute', ok: true, msg: 'Nenhum pedido aberto para recomputar'});
+        }
+      } catch(e) {
+        results.push({step: 'recompute', ok: false, error: e.message});
+      }
+    } else {
+      results.push({step: 'recompute', ok: true, msg: '[DRY RUN] Recomputaria pedidos abertos'});
+    }
+
+    return res.json({ success: true, results: results, dryRun: dryRun });
+  } catch(e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+module.exports = router;
