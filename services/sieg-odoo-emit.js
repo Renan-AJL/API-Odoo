@@ -380,20 +380,21 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   }
 
   // 7. Build emission payload
-  // Nota: usar amount_untaxed (sem impostos) para NF-e com CSOSN 103
-  // pois vNF deve ser igual a soma dos componentes (vProd + vICMS + ...)
-  // e para CSOSN 103 o ICMS e 0, entao vNF = vProd
+  // vNF = vProd + vIPI (unico imposto que soma no valor da NF)
+  // vProd = soma dos price_subtotal (sem IPI incluso)
   var vProdSum = 0;
+  var vIPISum = 0;
   for (var li = 0; li < linesData.length; li++) {
     vProdSum += parseFloat(linesData[li].price_subtotal) || 0;
+    vIPISum += parseFloat(linesData[li].vipi || 0);
   }
+  var vNFValue = round2(vProdSum + vIPISum);
+  console.log('[SIEG-EMIT] vNF = vProd(' + vProdSum.toFixed(2) + ') + vIPI(' + vIPISum.toFixed(2) + ') = ' + vNFValue.toFixed(2));
 
   // Pagamentos: NF-e 4.00 — vPag deve ser igual a vNF (total SEM IBS/CBS).
-  // IBS/CBS sao tributos "por fora" e nao entram no bloco <pag>.
-  // Se vPag > vNF sem vTroco declarado -> cStat 866.
   var pagamentos = [{
     tPag: '15', // PIX
-    vPag: String(vProdSum.toFixed(2)),
+    vPag: String(vNFValue.toFixed(2)),
   }];
 
   // Calcular Difal total para infCpl
@@ -445,7 +446,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       name: move.name,
       number: String(nextNum),
       date_order: move.invoice_date || move.date,
-      amount_total: vProdSum, // vNF (sem IBS/CBS) — o XML calcula vNFTot internamente
+      amount_total: vNFValue, // vNF = vProd + vIPI (somente IPI soma)
       note: move.narration || '',
       sale_order_number: saleOrderNumber || '',
       boleto_info: boletoInfo || '',
@@ -1062,22 +1063,49 @@ async function buildLineData(client, db, uid, pwd, line) {
     } catch (e) { console.warn('[SIEG-EMIT] Erro ao ler produto ' + productId + ':', e.message); }
   }
 
-  // Tax extraction
+  // Tax extraction (inclui deteccao de IPI nos tax_ids do Odoo)
   var tax = await extractTaxes(client, db, uid, pwd, line, icmsInternoPR);
 
-  // IPI extraction from product x_studio_ fields
+  // IPI extraction: tentar 1) tax_ids da invoice line, 2) x_studio_ fields do produto
   var cstIpi = '', vbcIpi = '0.00', pipi = '0.00', vipi = '0.00', cenq = '999';
-  if (productId) {
+  var ipiFromTaxIds = false;
+  
+  // ESTRATÉGIA 1: Ler IPI dos tax_ids da invoice line (mais confiável)
+  var lineTaxIds = (line.tax_ids || []).map(function(t) { return Array.isArray(t) ? t[0] : t; }).filter(Boolean);
+  if (lineTaxIds.length > 0) {
+    try {
+      var lineTaxes = await executeKw(client, db, uid, pwd, 'account.tax', 'read', [lineTaxIds, [
+        'name', 'amount', 'amount_type', 'description',
+      ]]);
+      for (var txi = 0; txi < lineTaxes.length; txi++) {
+        var tx = lineTaxes[txi];
+        var txName = ((tx.name || tx.description || '').toUpperCase());
+        var txAmt = parseFloat(tx.amount) || 0;
+        if ((txName.indexOf('IPI') >= 0) && txAmt > 0) {
+          // Encontrou IPI nos tax_ids da invoice line!
+          pipi = String(txAmt);
+          cstIpi = '00'; // CST 00 = tributado
+          ipiFromTaxIds = true;
+          console.log('[SIEG-EMIT-IPI] IPI encontrado nos tax_ids: aliquota=' + txAmt + '% tax=' + txName);
+          break;
+        }
+      }
+    } catch (eTxIpi) {
+      console.log('[SIEG-EMIT-IPI] Erro ao ler tax_ids para IPI: ' + eTxIpi.message);
+    }
+  }
+  
+  // ESTRATÉGIA 2: Se não encontrou nos tax_ids, ler x_studio_ fields do produto
+  if (!ipiFromTaxIds && productId) {
     try {
       var ipiFields = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
         'x_studio_cst_ipi', 'x_studio_aliquota_ipi',
       ]]);
       if (ipiFields && ipiFields[0]) {
-        cstIpi = String(ipiFields[0].x_studio_cst_ipi || '').replace(/\D/g, '');
-        pipi = String(ipiFields[0].x_studio_aliquota_ipi || '0');
+        if (!cstIpi) cstIpi = String(ipiFields[0].x_studio_cst_ipi || '').replace(/\D/g, '');
+        if (!ipiFromTaxIds) pipi = String(ipiFields[0].x_studio_aliquota_ipi || '0');
       }
     } catch (eIpi) {
-      // Try product.template IPI fields
       try {
         var tmplIpi = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], ['product_tmpl_id']]);
         if (tmplIpi && tmplIpi[0] && tmplIpi[0].product_tmpl_id) {
@@ -1086,17 +1114,37 @@ async function buildLineData(client, db, uid, pwd, line) {
             'x_studio_cst_ipi', 'x_studio_aliquota_ipi',
           ]]);
           if (tmplIpiFields && tmplIpiFields[0]) {
-            cstIpi = String(tmplIpiFields[0].x_studio_cst_ipi || '').replace(/\D/g, '');
-            pipi = String(tmplIpiFields[0].x_studio_aliquota_ipi || '0');
+            if (!cstIpi) cstIpi = String(tmplIpiFields[0].x_studio_cst_ipi || '').replace(/\D/g, '');
+            if (!ipiFromTaxIds) pipi = String(tmplIpiFields[0].x_studio_aliquota_ipi || '0');
           }
         }
       } catch (e2) {}
     }
-    // Calculate IPI values if CST is taxable (00, 49, 50, 99)
-    if (cstIpi && ['00','49','50','99'].includes(cstIpi.padStart(2, '0'))) {
-      vbcIpi = String(line.price_subtotal || (line.quantity * line.price_unit) || 0);
-      vipi = String(round2(parseFloat(vbcIpi) * parseFloat(pipi || 0) / 100));
-    }
+  }
+  
+  // Calculate IPI values
+  if (cstIpi && ['00','49','50','99'].includes(cstIpi.padStart(2, '0')) && parseFloat(pipi) > 0) {
+    // vBC do IPI = price_subtotal (sem IPI incluso, que é o preço do produto)
+    // Se o Odoo incluiu IPI no price_subtotal (tax included_in_price), precisamos
+    // calcular o vBC sem IPI: vBC = price_subtotal / (1 + pIPI/100)
+    var rawSubtotal = parseFloat(line.price_subtotal || (line.quantity * line.price_unit) || 0);
+    var pipiNum = parseFloat(pipi);
+    
+    // Verificar se o IPI está incluso no preço (price_subtotal& contém IPI)
+    // No Odoo, se o tax tem amount_type='percent' e está na invoice line,
+    // o price_subtotal NÃO inclui o IPI (é o valor sem impostos).
+    // Mas se amount_type='division', o IPI ESTÁ incluso.
+    // Por segurança, usamos price_subtotal como base (sem IPIC incluso).
+    vbcIpi = String(rawSubtotal);
+    vipi = String(round2(rawSubtotal * pipiNum / 100));
+    console.log('[SIEG-EMIT-IPI] IPI calculado: vBC=' + vbcIpi + ' pIPI=' + pipi + '% vIPI=' + vipi);
+  } else if (!cstIpi && parseFloat(pipi) > 0) {
+    // Tem alíquota mas sem CST - usar CST 00 como default
+    cstIpi = '00';
+    var rawSubtotal = parseFloat(line.price_subtotal || (line.quantity * line.price_unit) || 0);
+    vbcIpi = String(rawSubtotal);
+    vipi = String(round2(rawSubtotal * parseFloat(pipi) / 100));
+    console.log('[SIEG-EMIT-IPI] IPI sem CST, usando CST 00: vBC=' + vbcIpi + ' pIPI=' + pipi + '% vIPI=' + vipi);
   }
 
   var lineData = {
