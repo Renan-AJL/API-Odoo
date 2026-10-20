@@ -19,6 +19,20 @@ const { criarExtrato } = require('../services/odoo-bank-statement');
 const config = require('../config');
 const bwipjs = require('bwip-js');
 
+// === AJL 21/10/2026: numero do documento do boleto SEM o prefixo NF-e/NFe ===
+// Pedido do usuario: no boleto deve sair "72642-01/03", nao "NF-e 72642-01/03".
+// ex: 'NFe 00072642' -> '72642' | parcelado: '72642' + '-01/03'
+function limpaNumeroDoc(nome) {
+  var n = String(nome || '').trim().replace(/^NF-?e\s*/i, '').trim();
+  n = n.replace(/^0+(?=\d)/, ''); // tira zeros a esquerda
+  return n || String(nome || '').trim();
+}
+function sufixoParcela(num, total) {
+  var p = String(parseInt(num || 1, 10)).padStart(2, '0');
+  var t = String(parseInt(total || 1, 10)).padStart(2, '0');
+  return '-' + p + '/' + t;
+}
+
 // === Lock anti-concorrencia PIX ===
 // Impede que o Odoo dispare multiplas requisicoes PIX simultaneas pra mesma fatura
 var _pixLocks = {};     // faturaId -> Promise (in-flight)
@@ -503,7 +517,7 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
     var basePayload = {
       cpfCnpjPagador: pag.cpf_cnpj || d.pagador_cpf || '',
       nomePagador: pag.nome || d.pagador_nome || '',
-      numeroPedido: fat.seu_numero || fat.name || d.fatura_name || '',
+      numeroPedido: limpaNumeroDoc(fat.seu_numero || fat.name || d.fatura_name || ''),
       dataVencimento: dataVencBase,
       logradouro: pag.street || d.pagador_street || '',
       cidade: pag.city || d.pagador_city || '',
@@ -527,7 +541,7 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
       var pPayload = Object.assign({}, basePayload);
       pPayload.valor = valorParc;
       pPayload.dataVencimento = dataVenc;
-      pPayload.numeroPedido = basePayload.numeroPedido + (totalP > 1 ? '-P' + parc.numero : '');
+      pPayload.numeroPedido = basePayload.numeroPedido + (totalP > 1 ? sufixoParcela(parc.numero, totalP) : '');
 
       var resultado = await emitirBoleto(pPayload);
       var dados = (resultado.dados && resultado.dados.data) ? resultado.dados.data : {};
@@ -872,7 +886,7 @@ router.post('/gerar', async function(req, res) {
     }, BOLETO_LOCK_TTL);
 
     var basePayload = {
-      cpfCnpjPagador: pagCpf, nomePagador: pagNome, numeroPedido: fatName,
+      cpfCnpjPagador: pagCpf, nomePagador: pagNome, numeroPedido: limpaNumeroDoc(fatName),
       dataVencimento: fatVenc, logradouro: pagStreet, cidade: pagCity,
       estado: pagState, cep: pagZip
     };
@@ -893,7 +907,7 @@ router.post('/gerar', async function(req, res) {
       var pPayload = Object.assign({}, basePayload);
       pPayload.valor = valorParc;
       pPayload.dataVencimento = dataVenc;
-      pPayload.numeroPedido = fatName + (totalP > 1 ? '-P' + parc.numero : '');
+      pPayload.numeroPedido = limpaNumeroDoc(fatName) + (totalP > 1 ? sufixoParcela(parc.numero, totalP) : '');
 
       var resultado = await emitirBoleto(pPayload);
       var dados = (resultado.dados && resultado.dados.data) ? resultado.dados.data : {};

@@ -1119,7 +1119,7 @@ router.post('/odoo-rpc', apiKeyAuth, async function(req, res) {
   var args = Array.isArray(req.body.args) ? req.body.args : [];
   var kwargs = (req.body.kwargs && typeof req.body.kwargs === 'object') ? req.body.kwargs : null;
 
-  if (!model || /^[a-z_.]+$/.test(model) === false) {
+  if (!model || /^[a-z0-9_.]+$/.test(model) === false) {
     return res.status(400).json({ success: false, error: 'model invalido' });
   }
   if (RPC_ALLOWED_METHODS.indexOf(method) < 0) {

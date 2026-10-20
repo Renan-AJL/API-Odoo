@@ -95,6 +95,11 @@ function montaPayloadBolecode(dadosBoleto) {
   };
   tipoPessoaObj[campoPessoa] = cpfCnpj;
 
+  // AJL 21/10/2026: numeroPedido chega sem o prefixo NF-e (ex: '72642' ou '72642-01/03').
+  // texto_seu_numero (Itaú, max 10): pega '72642-01' do formato parcelado; senão trunc.
+  var mSN = String(dadosBoleto.numeroPedido || '').match(/^(\d+)-(\d{2})\/(\d{2})$/);
+  var textoSeuNumero = mSN ? (mSN[1] + '-' + mSN[2]) : String(dadosBoleto.numeroPedido || '000001');
+
   const payload = {
     etapa_processo_boleto: etapa,
     beneficiario: {
@@ -103,7 +108,7 @@ function montaPayloadBolecode(dadosBoleto) {
     dado_boleto: {
       descricao_instrumento_cobranca: 'boleto_pix',
       tipo_boleto: 'a vista',
-      texto_seu_numero: String(dadosBoleto.numeroPedido || '000001').substring(0, 10),
+      texto_seu_numero: textoSeuNumero.substring(0, 10),
       codigo_carteira: dadosBoleto.codigoCarteira || codigoCarteira,
       codigo_especie: '01',
       data_emissao: getDataHoje(),
@@ -127,7 +132,7 @@ function montaPayloadBolecode(dadosBoleto) {
           data_vencimento: dataVencimento,
           texto_uso_beneficiario: String(dadosBoleto.numeroPedido || '000001').substring(0, 25),
           valor_titulo: formatarValorItau(dadosBoleto.valor),
-          texto_seu_numero: String(dadosBoleto.numeroPedido || '000001').substring(0, 10),
+          texto_seu_numero: textoSeuNumero.substring(0, 10),
           data_limite_pagamento: dataVencimento
         }
       ]
