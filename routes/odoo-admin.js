@@ -236,14 +236,68 @@ router.post('/apply-demandas', apiKeyAuth, async function(req, res) {
 
   // === 6. IMPRESSAO SO - COMPACTAR PARA 1 PAGINA ===
   try {
-    // Ler a view de SO report
     var soViews = await ekw('ir.ui.view', 'search_read', [[['key','=','sale.report_saleorder_document']]], {fields:['id','name'], limit:3});
     if (!soViews.length) {
       soViews = await ekw('ir.ui.view', 'search_read', [[['name','ilike','report_saleorder_document']]], {fields:['id','name'], limit:3});
     }
     if (soViews.length) {
       var viewId = soViews[0].id;
-      results.push({step:'so_print', ok:true, viewId:viewId, msg:'View encontrada - use update_sale_report.py para ajustar layout'});
+      // Ler arch_db (campo real do QWeb)
+      var archData = await ekw('ir.ui.view', 'read', [[viewId], ['arch_db']]);
+      var arch = archData[0].arch_db || archData[0].arch || '';
+      var originalLen = arch.length;
+      
+      var newArch = arch;
+      
+      // 1. Remover page breaks
+      newArch = newArch.replace(/page-break-after:\s*always/g, 'page-break-after: avoid');
+      newArch = newArch.replace(/page-break-before:\s*always/g, 'page-break-before: avoid');
+      newArch = newArch.replace(/page-break-inside:\s*avoid/g, 'page-break-inside: auto');
+      
+      // 2. Reduzir margins (conservador)
+      newArch = newArch.replace(/margin-top:\s*20px/g, 'margin-top:5px');
+      newArch = newArch.replace(/margin-bottom:\s*20px/g, 'margin-bottom:5px');
+      newArch = newArch.replace(/margin-top:\s*15px/g, 'margin-top:3px');
+      newArch = newArch.replace(/margin-bottom:\s*15px/g, 'margin-bottom:3px');
+      newArch = newArch.replace(/margin-top:\s*10px/g, 'margin-top:2px');
+      newArch = newArch.replace(/margin-bottom:\s*10px/g, 'margin-bottom:2px');
+      
+      // 3. @page A4 margem minima
+      if (newArch.indexOf('@page') === -1) {
+        var stylePos = newArch.indexOf('<style');
+        if (stylePos !== -1) {
+          var styleEnd = newArch.indexOf('>', stylePos) + 1;
+          newArch = newArch.substring(0, styleEnd) + '\n@page { size: A4; margin: 5mm; }\n' + newArch.substring(styleEnd);
+        }
+      } else {
+        newArch = newArch.replace(/@page\s*\{[^}]*\}/g, '@page { size: A4; margin: 5mm; }');
+      }
+      
+      // 4. Font 12px global
+      if (newArch.indexOf('font-size: 12px') === -1 && newArch.indexOf('font-size:12px') === -1) {
+        var stylePos = newArch.indexOf('<style');
+        if (stylePos !== -1) {
+          var styleEnd = newArch.indexOf('>', stylePos) + 1;
+          newArch = newArch.substring(0, styleEnd) + '\nbody, table, th, td, p, span { font-size: 12px; line-height: 1.3; }\n' + newArch.substring(styleEnd);
+        }
+      }
+      
+      if (newArch !== arch) {
+        try {
+          await ekw('ir.ui.view', 'write', [[viewId], {'arch_db': newArch}]);
+          results.push({step:'so_print', ok:true, viewId:viewId, msg:'View compactada: page breaks off, margins reduzidos, @page A4 5mm, font 12px', originalLen:originalLen, newLen:newArch.length});
+        } catch(e2) {
+          // Fallback: tentar com 'arch'
+          try {
+            await ekw('ir.ui.view', 'write', [[viewId], {'arch': newArch}]);
+            results.push({step:'so_print', ok:true, viewId:viewId, msg:'View compactada (fallback arch)', originalLen:originalLen, newLen:newArch.length});
+          } catch(e3) {
+            results.push({step:'so_print', ok:false, error:'arch_db e arch falharam: ' + e3.message});
+          }
+        }
+      } else {
+        results.push({step:'so_print', ok:true, msg:'Nenhuma mudanca necessaria'});
+      }
     } else {
       results.push({step:'so_print', ok:false, msg:'View nao encontrada'});
     }
