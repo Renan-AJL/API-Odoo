@@ -18,6 +18,7 @@
 const axios = require('axios');
 const { getAuthHeaders } = require('./sieg-auth');
 const { gerarXmlNFe } = require('./sieg-nfe-xml');
+const { corrigirCmunNoXml } = require('./nfe-xml-sanitize');
 const { gerarXmlDPS } = require('./sieg-nfse-xml');
 const { autorizarNFe } = require('./sefaz-client');
 const { gerarDanfePdf } = require('./danfe-pdf');
@@ -40,12 +41,21 @@ async function importarXmlSieg(xmlAutorizado) {
 }
 
 /**
- * Emissao propria: gera XML -> assina com A1 -> autoriza na SEFAZ.
+ * Emissao propria: gera XML -> corrige cMun -> assina com A1 -> autoriza na SEFAZ.
  * Retorna o mesmo formato de resultado consumido por sieg-odoo-emit.
  */
 async function emitirNFePropria(dadosOdoo) {
-  const xml = gerarXmlNFe(dadosOdoo);
-  console.log('[NFE] Emissao propria — XML gerado (' + xml.length + ' chars)');
+  const xmlMontado = gerarXmlNFe(dadosOdoo);
+  // AJL 21/10/2026 (pedido Renan): ao finalizar a montagem do XML, o middleware
+  // ABRIR o XML pronto, troca o cMun errado pelo codigo correto da tabela IBGE
+  // e continua (assinatura + SEFAZ). Roda ANTES de assinar — depois quebraria
+  // o digest. Fix permanente da rejeicao 274 (Codigo Municipio inexistente).
+  const fixCmun = corrigirCmunNoXml(xmlMontado);
+  const xml = fixCmun.xml;
+  if (fixCmun.correcoes.length) {
+    console.log('[NFE] cMun corrigido no XML pos-montagem: ' + JSON.stringify(fixCmun.correcoes));
+  }
+  console.log('[NFE] Emissao propria — XML gerado (' + xml.length + ' chars, ' + fixCmun.correcoes.length + ' correcao(oes) cMun)');
 
   let r;
   try {
@@ -102,7 +112,12 @@ async function emitirNFePropria(dadosOdoo) {
  * So eh usado com NFE_EMISSAO_MODO=sieg.
  */
 async function enviarNFeViaSieg(dadosOdoo) {
-  const xml = gerarXmlNFe(dadosOdoo);
+  // Mesma rede de seguranca pos-montagem do caminho proprio (cMun x tabela IBGE)
+  const fixCmunSieg = corrigirCmunNoXml(gerarXmlNFe(dadosOdoo));
+  const xml = fixCmunSieg.xml;
+  if (fixCmunSieg.correcoes.length) {
+    console.log('[SIEG-API] cMun corrigido no XML pos-montagem: ' + JSON.stringify(fixCmunSieg.correcoes));
+  }
   const xmlMin = xml.replace(/>\s+</g, '><');
 
   if (xmlMin.indexOf('<Signature') === -1 || xmlMin.indexOf('<protNFe') === -1) {
