@@ -166,3 +166,27 @@ Stage Summary:
 - Setup PIX sales 100% completo no Odoo (campos + Server Action + Automated Actions)
 - Middleware (odoo-push.js) agora grava campos x_studio_itau_* no sale.order automaticamente
 - Deploy acionado via push para main (Render auto-deploy)
+
+---
+Task ID: 4
+Agent: main
+Task: URGENTE 20/10 - Fix icmsInternoPR is not defined (NF-e 00072846) + IPI no total (S01472) + visual pedido venda
+
+Work Log:
+- Diagnosticado erro 'icmsInternoPR is not defined' que bloqueava emissao NF-e (faturas 146/147, pedido S01522)
+- Root cause: variavel icmsInternoPR declarada em processOne() mas referenciada dentro de buildLineData() (scopes diferentes) — ReferenceError apos descoberta de NCM
+- Fix: buildLineData() agora recebe icmsInternoPR como parametro (processOne passa) + fallback defensivo 12% se undefined
+- Diagnostico Odoo S01472: amount_total=65047.50 JA inclui IPI 3.25% (tax 481) no banco — o problema era a VIEW
+- Root cause view: Studio view 3513 tinha <field name="amount_total" string="Sub total"/> e <field name="x_studio_total"/> (related=amount_untaxed) — rotulos invertidos
+- Fix view 3513 (aplicado via XML-RPC): amount_untaxed string="Sub total" + amount_total string="Total" — agora Sub total=63.000,00 / Total=65.047,50 (c/ IPI)
+- Fix report 1126 report_saleorder_document (aplicado via XML-RPC): bloco <style> AJL-FONT12 — fonte 12px global, @page A4 10mm/8mm, padding 3px 5px, word-wrap, imagens max-height 60px, page-breaks neutralizados
+- Verificado: 0 produtos com x_studio_aliquota_ipi > 0 — IPI vem dos taxes_id dos produtos (1018 tem apenas ICMS 19.5%; IPI 3.25% foi adicionado manualmente na linha S01472)
+- Verificado: 767 linhas de pedidos em rascunho — todas com IPI correto, nada a corrigir
+- Fatura 146 nao existe mais (deletada); fatura 147 = NFe 00072846 (posted, nfe_status=erro, untaxed 2016, tax 241.92 ICMS 12%, total 2257.92)
+- Poller SIEG so processa x_studio_nfe_status='pendente' — fatura 147 sera reativada para 'pendente' apos deploy
+
+Stage Summary:
+- services/sieg-odoo-emit.js: icmsInternoPR passado como parametro para buildLineData (fix NF-e)
+- Odoo view 3513: Sub total/Total corrigidos (IPI agora aparece no Total)
+- Odoo report 1126: fonte 12px + containers ajustados
+- Pendente observacao: fatura 147 total Odoo = 2257.92 (ICMS 12% soma no total do Odoo pois price_include=false) — XML NF-e ignora ICMS no vNF (vNF = vProd + vIPI), correto fiscalmente; avaliar com cliente se ICMS deve virar price_include (afetaria vBC/vProd do XML)

@@ -340,7 +340,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     console.log('[SIEG-EMIT] Operacao INTERNA: ' + ufEmit + ' → ' + ufDest + ' — CFOP 5xxx, pICMS=' + icmsInternoPR + '%');
   }
   for (var i = 0; i < invoiceLines.length; i++) {
-    var ld = await buildLineData(client, db, uid, pwd, invoiceLines[i]);
+    var ld = await buildLineData(client, db, uid, pwd, invoiceLines[i], icmsInternoPR);
     // Ajustar CFOP: se interestadual, 5xxx → 6xxx
     if (isInterstate && ld.cfop && /^5\d{3}$/.test(ld.cfop)) {
       var cfopOrig = ld.cfop;
@@ -927,7 +927,15 @@ function extractNcmFromRef(ref) {
 // ============================================================
 // Build Line Data (with product x_studio_ fields for NFS-e)
 // ============================================================
-async function buildLineData(client, db, uid, pwd, line) {
+async function buildLineData(client, db, uid, pwd, line, icmsInternoPR) {
+  // icmsInternoPR: aliquota ICMS interna do emitente (PR: IE=12%, sem IE/CPF=19.5%)
+  // Fallback defensivo caso chamador nao passe (evita ReferenceError)
+  if (typeof icmsInternoPR === 'undefined' || icmsInternoPR === null || isNaN(parseFloat(icmsInternoPR))) {
+    icmsInternoPR = 12; // PR com IE (caso mais comum das vendas AJL)
+    console.warn('[SIEG-EMIT] buildLineData sem icmsInternoPR — usando fallback 12%');
+  } else {
+    icmsInternoPR = parseFloat(icmsInternoPR);
+  }
   var productId = tupId(line.product_id);
   var productName = Array.isArray(line.product_id) ? line.product_id[1] : (line.name || 'Item');
   var defaultCode = '', barcode = '', ncm = '', detailedType = 'product', uomName = 'UN';
