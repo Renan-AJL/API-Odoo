@@ -241,14 +241,16 @@ async function postBoletoBlockedChatter(faturaId, motivo) {
   }
 }
 
-// === VALOR DA COBRANCA = vProd + vIPI (igual NF) ===
-// Regra AJL: APENAS o IPI soma no valor. ICMS/Difal e outros impostos nao
-// somam (por dentro / informativos). O Server Action "Processar Pgto Itau"
-// pode enviar valor sem IPI (amount_untaxed); aqui garantimos o valor fiscal
-// correto lendo a fatura no Odoo: amount_untaxed + soma das linhas de IPI.
+// === VALOR DA COBRANCA = VALOR DA NF (vNF) ===
+// Regra AJL (21/10/2026): valor de NF = valor do boleto, parcelado ou a vista.
+// O valor autorizado na NF-e (vNF no XML) e exatamente o amount_total da
+// fatura no Odoo (vProd com ICMS por dentro + IPI por fora + outros).
+// A regra antiga (amount_untaxed + IPI) errava quando a fatura tem ICMS
+// "por fora" (ex: NF 72864: boleto saiu 616,07 e a NF 690,00).
+// Aqui garantimos o valor fiscal correto lendo a fatura no Odoo: amount_total.
 // So atua para FATURAS (nome 'NFe ...'); pedidos de venda ('S...') passam direto.
 var _valorIpiCache = {};
-async function corrigirValorComIpi(faturaName, faturaId, valorInformado) {
+async function corrigirValorFatura(faturaName, faturaId, valorInformado) {
   var informado = Math.round((parseFloat(valorInformado) || 0) * 100) / 100;
   try {
     var oc = config.odoo;
@@ -283,29 +285,23 @@ async function corrigirValorComIpi(faturaName, faturaId, valorInformado) {
                     : [['id', '=', faturaId], ['move_type', '=', 'out_invoice']];
     var ids = await ekwV('account.move', 'search', [domain], { limit: 1 });
     if (!ids || !ids.length) return informado;
-    var inv = await ekwV('account.move', 'read', [ids, ['amount_untaxed']]);
-    var untaxed = parseFloat((inv && inv[0] && inv[0].amount_untaxed) || 0) || 0;
-    var taxLines = await ekwV('account.move.line', 'search_read',
-      [[['move_id', '=', ids[0]], ['tax_line_id', 'ilike', 'IPI']]],
-      { fields: ['balance'] });
-    var ipi = 0;
-    for (var ti = 0; ti < taxLines.length; ti++) {
-      ipi += Math.abs(parseFloat(taxLines[ti].balance) || 0);
-    }
-    var valor = Math.round((untaxed + ipi) * 100) / 100;
+    var inv = await ekwV('account.move', 'read', [ids, ['amount_total']]);
+    var total = parseFloat((inv && inv[0] && inv[0].amount_total) || 0) || 0;
+    var valor = Math.round(total * 100) / 100;
     if (valor <= 0) return informado;
     if (Math.abs(valor - informado) > 0.01) {
-      console.log('[VALOR-IPI] ' + nm + ': valor informado R$ ' + informado.toFixed(2) +
-        ' -> corrigido p/ R$ ' + valor.toFixed(2) + ' (vProd ' + untaxed.toFixed(2) +
-        ' + IPI ' + ipi.toFixed(2) + ')');
+      console.log('[VALOR-NF] ' + nm + ': valor informado R$ ' + informado.toFixed(2) +
+        ' -> corrigido p/ R$ ' + valor.toFixed(2) + ' (amount_total = vNF)');
     }
     _valorIpiCache[cacheKey] = { ts: Date.now(), valor: valor };
     return valor;
   } catch (eV) {
-    console.warn('[VALOR-IPI] Correcao falhou (usando valor informado):', eV.message);
+    console.warn('[VALOR-NF] Correcao falhou (usando valor informado):', eV.message);
     return informado;
   }
 }
+// Alias retrocompatibilidade
+var corrigirValorComIpi = corrigirValorFatura;
 
 // --- Deteccao de cartao por bandeira ---
 var BANDEIRAS = ['VISA', 'MASTER', 'ELO', 'AMEX', 'HIPERCARD', 'HIPER'];
@@ -339,7 +335,7 @@ async function handleCartao(req, res, d, cartaoInfo) {
   var fat = d.fatura || {};
   var faturaName = fat.name || fat.seu_numero || d.fatura_name || '';
   var faturaId = (fat.id || d.fatura_id) ? parseInt(String(fat.id || d.fatura_id)) : 0;
-  // AJL: valor = vProd + vIPI (igual NF) — apenas IPI soma
+  // AJL: valor = vNF (amount_total da fatura) — igual NF, a vista ou parcelado
   var valorTotal = await corrigirValorComIpi(faturaName, faturaId, parseFloat(fat.valor_nominal || d.fatura_valor) || 0);
   var pag = d.pagador || {};
 
@@ -454,7 +450,7 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
     var fatNameFromFlat = d.fatura_name || d.invoice_name || '';
     var faturaName = fatNameFromNested || fatNameFromFlat;
     var faturaId = (fat.id || d.fatura_id || d.invoice_id) ? parseInt(String(fat.id || d.fatura_id || d.invoice_id)) : 0;
-    // AJL: valor do boleto = vProd + vIPI (igual NF) — apenas IPI soma
+    // AJL: valor do boleto = vNF (amount_total) — igual NF, a vista ou parcelado
     var valorTotal = await corrigirValorComIpi(faturaName, faturaId, parseFloat(fat.valor_nominal || d.fatura_valor) || 0);
     var dataVencBase = fat.data_vencimento || d.fatura_vencimento || '';
 
@@ -740,7 +736,7 @@ router.post('/gerar', async function(req, res) {
   try {
     var formaPag = req.body.forma_pagamento || '';
     var fatName = req.body.fatura_name || '';
-    // AJL: valor = vProd + vIPI (igual NF) — apenas IPI soma (so faturas 'NFe ...')
+    // AJL: valor = vNF (amount_total) — igual NF (so faturas 'NFe ...')
     var fatValor = await corrigirValorComIpi(fatName, parseInt(req.body.fatura_id || req.body.invoice_id) || 0, parseFloat(req.body.fatura_valor) || 0);
     var fatVenc = req.body.fatura_vencimento || '';
 
@@ -1010,7 +1006,7 @@ async function handlePix(req, res, d) {
   var fat = d.fatura || {};
   var faturaName = fat.name || fat.seu_numero || d.fatura_name || '';
   var faturaId = (fat.id || d.fatura_id) ? parseInt(String(fat.id || d.fatura_id)) : 0;
-  // AJL: valor do PIX = vProd + vIPI (igual NF) — apenas IPI soma
+  // AJL: valor do PIX = vNF (amount_total) — igual NF, a vista ou parcelado
   var valorTotal = await corrigirValorComIpi(faturaName, faturaId, parseFloat(fat.valor_nominal || d.fatura_valor) || 0);
   var pag = d.pagador || {};
   var pagNome = pag.nome || d.pagador_nome || '';
