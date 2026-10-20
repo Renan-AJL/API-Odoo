@@ -743,4 +743,45 @@ router.post('/fix-ipi-sale', apiKeyAuth, async function(req, res) {
   }
 });
 
+// ============================================================
+// POST /api/v1/admin/odoo-rpc
+// RPC generico controlado para diagnostico/correcao no Odoo.
+// Body: { model, method, args?, kwargs?, readOnly? }
+//   - model/method obrigatorios (method limitado a uma whitelist segura)
+//   - args: array de argumentos posicionais; kwargs: dicionario opcional
+// Ex: { model: 'account.move', method: 'read', args: [[147], ['amount_total']] }
+// ============================================================
+var RPC_ALLOWED_METHODS = ['search', 'search_read', 'read', 'search_count', 'fields_get', 'write', 'create', 'exists', 'name_get', 'read_group'];
+
+router.post('/odoo-rpc', apiKeyAuth, async function(req, res) {
+  const odoo = config.odoo;
+  if (!odoo || !odoo.url || !odoo.enabled) {
+    return res.status(503).json({ success: false, error: 'Odoo nao configurado' });
+  }
+  var model = String(req.body.model || '');
+  var method = String(req.body.method || '');
+  var args = Array.isArray(req.body.args) ? req.body.args : [];
+  var kwargs = (req.body.kwargs && typeof req.body.kwargs === 'object') ? req.body.kwargs : null;
+
+  if (!model || /^[a-z_.]+$/.test(model) === false) {
+    return res.status(400).json({ success: false, error: 'model invalido' });
+  }
+  if (RPC_ALLOWED_METHODS.indexOf(method) < 0) {
+    return res.status(400).json({ success: false, error: 'metodo nao permitido: ' + method });
+  }
+  // write/create exigem flag explicita
+  if ((method === 'write' || method === 'create') && !req.body.allowWrite) {
+    return res.status(400).json({ success: false, error: 'write/create exige allowWrite=true no body' });
+  }
+
+  try {
+    var client = createClient(odoo.url);
+    var uid = await authenticate(client, odoo.db, odoo.user, odoo.password);
+    var result = await executeKw(client, odoo.db, uid, odoo.password, model, method, args, kwargs || undefined);
+    res.json({ success: true, model: model, method: method, count: Array.isArray(result) ? result.length : undefined, result: result });
+  } catch (e) {
+    res.status(500).json({ success: false, error: model + '.' + method + ': ' + e.message });
+  }
+});
+
 module.exports = router;
