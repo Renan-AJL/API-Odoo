@@ -237,3 +237,23 @@ Stage Summary:
 - Cotacao/pedido sem ICMS automatico (manual ok); Difal automatico reativado e nao soma no total; IPI somando
 - DANFE mostra FORMA DE PAGAMENTO
 - Arquivos: routes/itau-api.js, services/sieg-odoo-emit.js, services/danfe-pdf.js, scripts/ajl_20261020_night.py, scripts/remove-default-icms-products.py
+
+---
+Task ID: 7
+Agent: main (sessão IM AJL)
+Task: 21/10 — Layout de impressão (Cotação/Venda) igual à Matriz em TODAS as filiais + colunas de dados do produto maiores + boleto segue valor da NF (IPI soma, ICMS não) + regras fiscais (Difal auto / ICMS manual / IPI manual) confirmadas para todas as unidades
+
+Work Log:
+- Confirmado: boleto/PIX sempre seguem o valor da NF — corrigirValorComIpi() presente nos 4 pontos (routes/itau-api.js: /pagar, /gerar, /pagar boleto, PIX) + SA 1166 com _valor_cobranca = vProd + vIPI; ICMS/Difal não entram (ilike IPI apenas)
+- Diagnóstico empresas: Matriz (1) = external_layout_standard + Lato + #190a1e/#010101; Pinhais (3) = cores cinza #898989/#131313; Ponta Grossa (2) e Ivaiporã (4) sem layout/cores definidos -> por isso imprimiam diferente
+- Aplicado layout da Matriz em TODAS as filiais (2, 3, 4): external_report_layout_id=209 (external_layout_standard), font=Lato, primary_color=#190a1e, secondary_color=#010101 (scripts/ajl_20261021_apply.py, idempotente)
+- View sale.report_saleorder_document (1126) — relatório "Cotação por PDF" (cotação E pedido, compartilhado por todas as empresas): removida class w-100 do td do nome do produto (forçava 100% de largura e espremia as colunas numéricas) + CSS AJL-COLW com larguras maiores: quantidade 10%, valor unitário 12%, desconto 6%, impostos 10%, valor total 12%; nome do produto absorve o restante
+- Regras fiscais por filial — verificadas GLOBALmente (nada a aplicar): base.automation 15 "Automação 2: Impostos" ativa e sem filtro de empresa (Difal automático em todas as unidades); SA 1186 usa pedido.company_id (dinâmico, sem condições fixas de Matriz); 0 produtos com imposto de saída padrão em TODAS as empresas -> ICMS nunca automático na cotação/pedido (manual na fatura), IPI manual do vendedor
+- Validação pós-escrita: 3 filiais idênticas à Matriz (True/True/True); view 1126 com marca AJL-COLW e sem w-100; relatório continua 1 página (AJL-FONT12 preservado)
+
+Stage Summary:
+- Cotação/Pedido de TODAS as filiais imprimem com o mesmo layout da Matriz (mesmo cabeçalho/rodapé/cores/fonte)
+- Colunas de dados do produto (quantidade, valor, desconto, impostos, total) maiores — sem quebra de números
+- Boleto = valor da NF (IPI soma; ICMS/Difal não somam) — confirmado nos 4 pontos + SA 1166
+- Difal automático / ICMS manual (só fatura) / IPI manual — valendo para todas as unidades
+- Arquivos: scripts/ajl_20261021_apply.py, scripts/ajl_20261021_diag.py, scripts/ajl_20261021_diag2.py, scripts/ajl_20261021_diag3.py
