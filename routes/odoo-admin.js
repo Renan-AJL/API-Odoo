@@ -1055,9 +1055,12 @@ router.post('/recompute-draft-so', apiKeyAuth, async function(req, res) {
     var recomputed = 0;
     for (var i = 0; i < lineIds.length; i++) {
       try {
-        var rec = await ekw('sale.order.line', 'read', [[lineIds[i]], ['price_unit']]);
-        var pu = rec[0].price_unit || 0;
-        await ekw('sale.order.line', 'write', [[lineIds[i]], { price_unit: pu }]);
+        // Reafirmar tax_ids (mesmos ids) invalida o calculo de amount_* —
+        // com price_include corrigido, o total volta a ser o valor do produto
+        // (imposto por dentro nao soma no total; somente IPI soma).
+        var rec = await ekw('sale.order.line', 'read', [[lineIds[i]], ['tax_ids']]);
+        var tids = (rec[0] && rec[0].tax_ids) || [];
+        await ekw('sale.order.line', 'write', [[lineIds[i]], { tax_ids: [[6, 0, tids]] }]);
         recomputed++;
       } catch (eL) {
         console.warn('[RECOMPUTE-SO] linha ' + lineIds[i] + ': ' + eL.message);
