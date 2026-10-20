@@ -257,6 +257,34 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     console.log('[SIEG-EMIT] [DEST-IE] IE ja preenchida no Odoo: ' + partner.inscr_est);
   }
 
+  // 3c. Ler aliquota_icms do parceiro Odoo e determinar regra ICMS PR
+  // REGRAS DENTRO DO ESTADO PR:
+  //   - Com IE (Inscricao Estadual) → 12%
+  //   - CNPJ sem IE ou CPF → 19.5%
+  // FORA DO ESTADO (interestadual) → Difal (nao altera preco)
+  var partnerAliquotaIcms = '';
+  var partnerHasIe = !!(partner.inscr_est && String(partner.inscr_est).trim() !== '' && String(partner.inscr_est).trim() !== 'ISENTO');
+  try {
+    var aliRecs = await executeKw(client, db, uid, pwd, 'res.partner', 'read', [[partnerId], ['aliquota_icms', 'has_ie']]);
+    if (aliRecs && aliRecs[0]) {
+      partnerAliquotaIcms = String(aliRecs[0].aliquota_icms || '');
+      if (aliRecs[0].has_ie) partnerHasIe = true;
+    }
+  } catch (eAli) {
+    console.log('[SIEG-EMIT] Campo aliquota_icms nao disponivel no parceiro: ' + eAli.message);
+  }
+  // Determinar ICMS interno para PR
+  var icmsInternoPR = 19.5; // default: sem IE
+  if (partnerHasIe || partnerAliquotaIcms === '12') {
+    icmsInternoPR = 12;
+  }
+  // Para CPF (consumidor final) sem CNPJ → 19.5%
+  var partnerCnpjLimpo = (partner.cnpj_cpf || '').replace(/\D/g, '');
+  if (partnerCnpjLimpo.length === 11) {
+    icmsInternoPR = 19.5; // CPF = consumidor final
+  }
+  console.log('[SIEG-EMIT] [ICMS-PR] aliquota_icms=' + partnerAliquotaIcms + ' has_ie=' + partnerHasIe + ' cnpj_len=' + partnerCnpjLimpo.length + ' → icmsInternoPR=' + icmsInternoPR + '%');
+
   // 4. Read invoice lines diretamente de account.move.line (evita computed field)
   var allLineIds = await executeKw(client, db, uid, pwd, 'account.move.line', 'search', [[
     ['move_id', '=', moveId],
@@ -307,9 +335,9 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   var ICMS_INTERSTATE_SUL_SE = ['PR','SC','RS','SP','MG','RJ','ES'];
   var picmsInterstate = ICMS_INTERSTATE_SUL_SE.includes(ufDest) ? 12 : 7;
   if (isInterstate) {
-    console.log('[SIEG-EMIT] Operacao INTERESTADUAL: ' + ufEmit + ' → ' + ufDest + ' — CFOP 5xxx→6xxx, pICMS→' + picmsInterstate + '%');
+    console.log('[SIEG-EMIT] Operacao INTERESTADUAL: ' + ufEmit + ' → ' + ufDest + ' — CFOP 5xxx→6xxx, pICMS→' + picmsInterstate + '% (Difal aplicavel)');
   } else {
-    console.log('[SIEG-EMIT] Operacao INTERNA: ' + ufEmit + ' → ' + ufDest + ' — CFOP 5xxx');
+    console.log('[SIEG-EMIT] Operacao INTERNA: ' + ufEmit + ' → ' + ufDest + ' — CFOP 5xxx, pICMS=' + icmsInternoPR + '%');
   }
   for (var i = 0; i < invoiceLines.length; i++) {
     var ld = await buildLineData(client, db, uid, pwd, invoiceLines[i]);
@@ -319,13 +347,34 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       ld.cfop = '6' + ld.cfop.substring(1);
       console.log('[SIEG-EMIT] CFOP ajustado para interestadual: ' + ld.cfop + ' (original: ' + cfopOrig + ')');
     }
-    // Ajustar ICMS para operacao interestadual (CST 00 com pICMS interno → interestadual)
-    if (isInterstate && ld.cst_icms === '00' && parseFloat(ld.picms) > picmsInterstate) {
-      var picmsOrig = ld.picms;
-      var vbc = parseFloat(ld.vbc_icms || ld.vbc || 0);
-      ld.picms = String(picmsInterstate);
-      ld.vicms = String(Math.round(vbc * picmsInterstate / 100 * 100) / 100);
-      console.log('[SIEG-EMIT] ICMS interestadual: pICMS ' + picmsOrig + '%→' + ld.picms + '%, vICMS=' + ld.vicms + ' (vBC=' + vbc + ')');
+    // Ajustar ICMS baseado na regra PR
+    if (!isInterstate) {
+      // INTERNO PR: IE→12%, sem IE/CPF→19.5% (sobrescrever o default 18%)
+      if (ld.cst_icms === '00' && parseFloat(ld.picms) !== icmsInternoPR) {
+        var picmsOrigInt = ld.picms;
+        var vbcInt = parseFloat(ld.vbc_icms || ld.vbc || 0);
+        ld.picms = String(icmsInternoPR);
+        ld.vicms = String(Math.round(vbcInt * icmsInternoPR / 100 * 100) / 100);
+        console.log('[SIEG-EMIT] ICMS interno PR: pICMS ' + picmsOrigInt + '%→' + ld.picms + '%, vICMS=' + ld.vicms + ' (vBC=' + vbcInt + ')');
+      }
+    } else {
+      // INTERESTADUAL: CST 00 com pICMS interno → interestadual + Difal
+      // Difal: nao altera preco. pICMS = aliquota interestadual
+      // Diferencial partilhado entre UF origem e UF destino
+      if (ld.cst_icms === '00' && parseFloat(ld.picms) > picmsInterstate) {
+        var picmsOrig = ld.picms;
+        var vbc = parseFloat(ld.vbc_icms || ld.vbc || 0);
+        ld.picms = String(picmsInterstate);
+        ld.vicms = String(Math.round(vbc * picmsInterstate / 100 * 100) / 100);
+        console.log('[SIEG-EMIT] ICMS interestadual: pICMS ' + picmsOrig + '%→' + ld.picms + '%, vICMS=' + ld.vicms + ' (vBC=' + vbc + ')');
+        // Difal: calcular diferencial para infCpl
+        // difal = vBC * (aliqInterna - aliqInterestadual) / 100
+        var difalVal = Math.round(vbc * (icmsInternoPR - picmsInterstate) / 100 * 100) / 100;
+        if (difalVal > 0) {
+          ld.difal = difalVal;
+          console.log('[SIEG-EMIT] Difal: vBC=' + vbc + ' x (' + icmsInternoPR + '%-' + picmsInterstate + '%) = R$ ' + difalVal);
+        }
+      }
     }
     linesData.push(ld);
   }
@@ -347,6 +396,48 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     vPag: String(vProdSum.toFixed(2)),
   }];
 
+  // Calcular Difal total para infCpl
+  var difalTotal = 0;
+  for (var di = 0; di < linesData.length; di++) {
+    if (linesData[di].difal) difalTotal += linesData[di].difal;
+  }
+  
+  // Montar boleto_detalhes com parcela, valor e vencimento
+  var boletoDetalhes = [];
+  try {
+    // Ler payment terms (condições de pagamento) da invoice para vencimentos
+    var movePay = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], ['invoice_payment_term_id', 'invoice_date_due']]);
+    var payTermId = (movePay && movePay[0] && movePay[0].invoice_payment_term_id) ? tupId(movePay[0].invoice_payment_term_id) : 0;
+    var dateDue = (movePay && movePay[0]) ? (movePay[0].invoice_date_due || '') : '';
+    
+    if (boletoDataList && boletoDataList.length > 0) {
+      // Tem boletos do Itaú
+      for (var bdi = 0; bdi < boletoDataList.length; bdi++) {
+        var bdItem = boletoDataList[bdi];
+        boletoDetalhes.push({
+          parcela: String(bdi + 1) + '/' + String(boletoDataList.length),
+          valor: String(vProdSum / boletoDataList.length),
+          vencimento: dateDue || '',
+          nosso_numero: bdItem.nosso_numero || '',
+          linha_digitavel: bdItem.linha_digitavel || '',
+        });
+      }
+    }
+  } catch (eBol) {
+    console.log('[SIEG-EMIT] Erro ao montar boleto_detalhes: ' + eBol.message);
+  }
+
+  // Determinar ICMS alíquota para infCpl
+  var icmsAliquotaInfCpl = '';
+  if (isInterstate) {
+    icmsAliquotaInfCpl = String(picmsInterstate) + ' (interestadual)';
+    if (difalTotal > 0) {
+      icmsAliquotaInfCpl += ' Difal R$ ' + difalTotal.toFixed(2);
+    }
+  } else {
+    icmsAliquotaInfCpl = String(icmsInternoPR);
+  }
+
   var emitData = {
     company: company,
     partner: partner,
@@ -358,6 +449,8 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       note: move.narration || '',
       sale_order_number: saleOrderNumber || '',
       boleto_info: boletoInfo || '',
+      icms_aliquota: icmsAliquotaInfCpl,
+      boleto_detalhes: boletoDetalhes,
     },
     lines: linesData,
     pagamentos: pagamentos,
@@ -942,6 +1035,7 @@ async function buildLineData(client, db, uid, pwd, line) {
       try {
         var prods2 = await executeKw(client, db, uid, pwd, 'product.product', 'read', [[productId], [
           'x_studio_c_trib_nac', 'x_studio_c_nbs', 'x_studio_aliquota_iss', 'x_studio_ibge_code',
+          'x_studio_peso', 'weight',
         ]]);
         if (prods2 && prods2[0]) {
           var pr2 = prods2[0];
@@ -950,6 +1044,7 @@ async function buildLineData(client, db, uid, pwd, line) {
             c_nbs: pr2.x_studio_c_nbs || '',
             aliquota_iss: pr2.x_studio_aliquota_iss || '',
             ibge_code: pr2.x_studio_ibge_code || '',
+            peso_unitario: pr2.x_studio_peso || pr2.weight || 0,
           };
         }
       } catch (e2) {
@@ -968,7 +1063,7 @@ async function buildLineData(client, db, uid, pwd, line) {
   }
 
   // Tax extraction
-  var tax = await extractTaxes(client, db, uid, pwd, line);
+  var tax = await extractTaxes(client, db, uid, pwd, line, icmsInternoPR);
 
   // IPI extraction from product x_studio_ fields
   var cstIpi = '', vbcIpi = '0.00', pipi = '0.00', vipi = '0.00', cenq = '999';
@@ -1038,6 +1133,8 @@ async function buildLineData(client, db, uid, pwd, line) {
     x_studio_c_nbs: prodStudio.c_nbs,
     x_studio_aliquota_iss: prodStudio.aliquota_iss,
     x_studio_ibge_code: prodStudio.ibge_code,
+    // Peso unitário do produto (para cálculo peso total = peso_unitário × qtd)
+    peso_unitario: prodStudio.peso_unitario || 0,
   };
 
   // === LOG DETALHADO POR CAMPO (para debug de XML invalido) ===
@@ -1110,9 +1207,11 @@ function buildServiceBlock(linesData, move) {
 // ============================================================
 // Tax Extraction
 // ============================================================
-async function extractTaxes(client, db, uid, pwd, line) {
-  // Padrão: Lucro Real (CRT 3) — CST 00, ICMS 18% PR interno
+async function extractTaxes(client, db, uid, pwd, line, icmsInternoPR) {
+  // Padrão: Lucro Real (CRT 3) — CST 00, ICMS conforme regra PR
+  // Com IE → 12%, sem IE/CPF → 19.5%, interestadual → 12%/7% (Difal)
   // PIS/COFINS não-cumulativo com base no valor do produto
+  var defaultIcms = icmsInternoPR || 18; // fallback 18% se não informado
   var base = parseFloat(line.price_subtotal) || 0;
   // Arredondamento: SEFAZ exige 2 casas decimais por item.
   // Se nao arredondar aqui, o total pode divergir (cStat 602/603).
@@ -1122,8 +1221,8 @@ async function extractTaxes(client, db, uid, pwd, line) {
     cst_icms: '00',
     mod_bc: '3',
     vbc: r2(base),
-    vicms: r2(base * 0.18),
-    picms: 18.00,
+    vicms: r2(base * (defaultIcms / 100)),
+    picms: defaultIcms,
     cst_pis: '01',
     vbc_pis: r2(base),
     ppis: 1.65,

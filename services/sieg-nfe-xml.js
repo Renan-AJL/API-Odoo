@@ -510,7 +510,11 @@ ${xmlEndereco(partner, 'enderDest')}
   var vTotTrib = 0;
   // (loop removido: vTrib por item nao e permitido no schema com IBSCBS)
 
-  const vNF = num(order.amount_total || vProdTotal);
+  // REGRA: vNF = vProd + vIPI (unico imposto que soma no valor da NF)
+  // IRPJ, CSLL, PIS, COFINS NAO somam no valor da NF.
+  // Se usarmos amount_total do Odoo, ele inclui IRPJ/CSLL e infla o valor.
+  const vNF = num(round2(vProdTotal + vIPI_total));
+  console.log('[NFE-XML] vNF calculado: vProd=' + num(vProdTotal) + ' + vIPI=' + num(vIPI_total) + ' = ' + vNF + ' (amount_total original: ' + (order.amount_total || 'N/A') + ')');
   xml += `
     <total>
       <ICMSTot>
@@ -558,11 +562,30 @@ ${xmlEndereco(partner, 'enderDest')}
   // === transp ===
   const modFrete = String(cfg.modFrete || '9');
   const hasVolume = cfg.qVol != null && Number(cfg.qVol) > 0;
+  // Peso total: soma peso_unitario * quantidade de cada linha
+  var pesoBrutoTotal = 0;
+  var pesoLiqTotal = 0;
+  if (lines && lines.length > 0) {
+    lines.forEach(function(line) {
+      var pesoUnit = parseFloat(line.peso_unitario || 0);
+      var qty = parseFloat(line.qty || 1);
+      if (pesoUnit > 0) {
+        pesoBrutoTotal += round2(pesoUnit * qty);
+        pesoLiqTotal += round2(pesoUnit * qty);
+      }
+    });
+  }
+  // Se veio peso total do emit, usar
+  if (order.peso_bruto && order.peso_bruto > 0) pesoBrutoTotal = order.peso_bruto;
+  if (order.peso_liquido && order.peso_liquido > 0) pesoLiqTotal = order.peso_liquido;
+  
   xml += `
     <transp>
       <modFrete>${modFrete}</modFrete>${hasVolume ? `
       <vol>
-        <qVol>${Math.trunc(Number(cfg.qVol))}</qVol>
+        <qVol>${Math.trunc(Number(cfg.qVol))}</qVol>${pesoBrutoTotal > 0 ? `
+        <pesoB>${num(pesoBrutoTotal)}</pesoB>
+        <pesoL>${num(pesoLiqTotal)}</pesoL>` : ''}
       </vol>` : ''}
     </transp>`;
 
@@ -602,13 +625,34 @@ ${xmlEndereco(partner, 'enderDest')}
 
   // === infAdic ===
   var infCplText = stripHtml(order.note || order.infCpl || '');
+  // Incluir alíquota ICMS quando houver
+  if (order.icms_aliquota && infCplText.indexOf('ICMS') === -1) {
+    infCplText = 'ICMS ' + order.icms_aliquota + '%. ' + infCplText;
+  }
   // Incluir numero do pedido de venda (sale order origin)
   if (order.sale_order_number && infCplText.indexOf('Pedido') === -1) {
     infCplText = 'Pedido: ' + order.sale_order_number + '. ' + infCplText;
   }
-  // Incluir dados do boleto no infCpl para DANFE
-  if (order.boleto_info && infCplText.indexOf('Boleto') === -1) {
+  // Incluir dados do boleto com detalhes (parcela, valor, vencimento) ou pagamento à vista
+  if (order.boleto_detalhes && order.boleto_detalhes.length > 0) {
+    if (infCplText.indexOf('Boleto') === -1 && infCplText.indexOf('Pagamento') === -1) {
+      var boletoParts = [];
+      for (var bi = 0; bi < order.boleto_detalhes.length; bi++) {
+        var bd = order.boleto_detalhes[bi];
+        var part = 'Boleto ' + (bi + 1) + '/' + order.boleto_detalhes.length;
+        if (bd.valor) part += ': R$ ' + num(bd.valor);
+        if (bd.vencimento) part += ' Venc: ' + bd.vencimento;
+        if (bd.nosso_numero) part += ' NN: ' + bd.nosso_numero;
+        boletoParts.push(part);
+      }
+      infCplText = boletoParts.join(' | ') + '. ' + infCplText;
+    }
+  } else if (order.boleto_info && infCplText.indexOf('Boleto') === -1) {
+    // Fallback: boleto info simples (NN, LD, CB)
     infCplText = order.boleto_info + ' ' + infCplText;
+  } else if (!order.boleto_info && (!order.boleto_detalhes || order.boleto_detalhes.length === 0) && infCplText.indexOf('Pagamento') === -1) {
+    // Sem boleto = pagamento à vista
+    infCplText = 'Pagamento a vista. ' + infCplText;
   }
   if (infCplText) {
     xml += `\n    <infAdic>
