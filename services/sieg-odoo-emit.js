@@ -759,6 +759,22 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     linesData.push(ld);
   }
 
+  // 6a-bis. CONSISTENCIA SEFAZ (rejeicao 629): o XML envia vUnCom com 4 decimais
+  // (TDec_1204) e a SEFAZ calcula vProd = qCom x vUnCom com os valores EFETIVOS
+  // do XML. Normaliza: qCom 3 dec, vUnCom 4 dec, vProd derivado dos enviados.
+  for (var ln = 0; ln < linesData.length; ln++) {
+    var ldn = linesData[ln];
+    var qty3 = Math.round((parseFloat(ldn.qty) || 0) * 1000) / 1000;
+    var vUn4 = Math.round((parseFloat(ldn.price_unit) || 0) * 10000) / 10000;
+    var vProdCons = Math.round(qty3 * vUn4 * 100) / 100;
+    if (parseFloat(ldn.qty) !== qty3 || parseFloat(ldn.price_unit) !== vUn4 || parseFloat(ldn.price_subtotal) !== vProdCons) {
+      console.log('[SIEG-EMIT] Consistencia 629 item ' + (ln + 1) + ' (' + (ldn.cProd || '?') + '): qCom=' + ldn.qty + ' vUnCom=' + ldn.price_unit + ' vProd=' + ldn.price_subtotal + ' -> qCom=' + qty3 + ' vUnCom=' + vUn4 + ' vProd=' + vProdCons);
+    }
+    ldn.qty = qty3;
+    ldn.price_unit = vUn4;
+    ldn.price_subtotal = vProdCons;
+  }
+
   // 6b. ICMS MANUAL — campos x_studio na fatura (fallback quando o cálculo
   // automático não serve: usuário informa alíquota/BC/valor e a NF sai com eles)
   //   x_studio_icms_manual   (Boolean)  -> ativa o modo manual
@@ -1097,9 +1113,10 @@ async function readCompany(client, db, uid, pwd, companyId) {
   // MANDA como cMun — APENAS para emitente do PARANA. Prioridade maxima,
   // acima da tabela e do Odoo (deterministico, sem depender de nome de cidade).
   var campoMunEmp = String(p.x_studio_codigo_municipio || '').replace(/\D/g, '');
-  if ((stateCode || 'PR').toUpperCase() === 'PR' && campoMunEmp.length === 7) {
+  var ufEmp = (stateCode || 'PR').toUpperCase();
+  if ((ufEmp === 'PR' || ufEmp === 'SC') && campoMunEmp.length === 7) {
     if (cityIbge !== campoMunEmp) {
-      console.log('[SIEG-EMIT] cMun EMITENTE pelo campo do cadastro (PR): %s -> %s', cityIbge || '(vazio)', campoMunEmp);
+      console.log('[SIEG-EMIT] cMun EMITENTE pelo campo do cadastro (' + ufEmp + '): %s -> %s', cityIbge || '(vazio)', campoMunEmp);
     }
     cityIbge = campoMunEmp;
   }
@@ -1325,9 +1342,10 @@ async function readPartner(client, db, uid, pwd, partnerId) {
   // do cliente MANDA como cMun — APENAS para PARANA. Prioridade maxima,
   // acima da tabela IBGE e do codigo vindo do Odoo (deterministico).
   var campoMunDest = String(p.x_studio_codigo_municipio || '').replace(/\D/g, '');
-  if (stateCode === 'PR' && campoMunDest.length === 7) {
+  var ufDest = String(stateCode || '').toUpperCase();
+  if ((ufDest === 'PR' || ufDest === 'SC') && campoMunDest.length === 7) {
     if (cityIbge !== campoMunDest) {
-      console.log('[SIEG-EMIT] cMun DEST pelo campo do cadastro (PR): %s/%s %s -> %s', p.city, stateCode, cityIbge || '(vazio)', campoMunDest);
+      console.log('[SIEG-EMIT] cMun DEST pelo campo do cadastro (' + ufDest + '): %s/%s %s -> %s', p.city, stateCode, cityIbge || '(vazio)', campoMunDest);
     }
     cityIbge = campoMunDest;
   }
@@ -1948,7 +1966,7 @@ var IBGE_FALLBACK = {
   'BRUSQUE/SC': '4202909',
   'JOINVILLE/SC': '4209102',
   'FLORIANOPOLIS/SC': '4205407',
-  'SAO JOSE/SC': '4209602',
+  'SAO JOSE/SC': '4216602', // fix 21/10: 4209602 e Chapeco; Sao Jose/SC = 4216602 (rejeicao 274)
   'BLUMENAU/SC': '4202404',
   'ITAJAI/SC': '4208203',
   'LAGES/SC': '4209300',

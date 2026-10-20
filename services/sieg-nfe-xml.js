@@ -480,12 +480,12 @@ ${xmlEndereco(partner, 'enderDest')}
         <CFOP>${esc(String(line.cfop || '5102'))}</CFOP>
         <uCom>${esc(line.uom || 'UN')}</uCom>
         <qCom>${num3(line.qty)}</qCom>
-        <vUnCom>${num3(line.price_unit)}</vUnCom>
+        <vUnCom>${num4(line.price_unit)}</vUnCom>
         <vProd>${vProd}</vProd>
         <cEANTrib>SEM GTIN</cEANTrib>
         <uTrib>${esc(line.uom || 'UN')}</uTrib>
         <qTrib>${num3(line.qty)}</qTrib>
-        <vUnTrib>${num3(line.price_unit)}</vUnTrib>
+        <vUnTrib>${num4(line.price_unit)}</vUnTrib>
         <indTot>1</indTot>
       </prod>${xmlImpostoItem(line, company.crt || '1', ibsItem)}${ibsItem ? `
       <vItem>${vProd}</vItem>` : ''}
