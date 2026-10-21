@@ -302,7 +302,35 @@ function executeKw(client, db, uid, password, model, method, args, kwargs) {
 // ============================================================
 // Main: Process Pending Emissions
 // ============================================================
-async function processPendingEmissions() {
+// AJL 22/10/2026 — MUTEX DE EMISSAO (fix emissao duplicada):
+// corrida entre poller (setInterval 15/30s), webhook e chamadas manuais de
+// /process-pending fazia DOIS ciclos rodarem em paralelo e emitirem a MESMA
+// fatura 2x na SEFAZ (incidente 21/10/2026: fatura 269 autorizada 3x —
+// NFs 72962/72963/72964). Agora o ciclo roda em SERIE: se ja existe um ciclo
+// em andamento, o novo fica enfileirado e roda logo apos o atual terminar.
+var _emitRunning = false;
+var _emitQueued = false;
+function processPendingEmissions() {
+  if (_emitRunning) {
+    _emitQueued = true;
+    console.log('[SIEG-EMIT] Ciclo ja em andamento — novo ciclo ENFILEIRADO (mutex)');
+    return Promise.resolve({ processed: 0, queued: true, reason: 'already_running' });
+  }
+  _emitRunning = true;
+  return _runPendingEmissionsOnce().finally(function () {
+    _emitRunning = false;
+    if (_emitQueued) {
+      _emitQueued = false;
+      setTimeout(function () {
+        processPendingEmissions().catch(function (e) {
+          console.error('[SIEG-EMIT] Ciclo enfileirado falhou:', e.message);
+        });
+      }, 1500);
+    }
+  });
+}
+
+async function _runPendingEmissionsOnce() {
   var odoo = config.odoo;
   if (!odoo || !odoo.enabled || !odoo.url) {
     console.log('[SIEG-EMIT] Odoo nao configurado');
@@ -365,6 +393,7 @@ async function processPendingEmissions() {
 // Process Single Invoice
 // ============================================================
 async function processOne(client, db, uid, pwd, moveId, tipo) {
+  var t0 = Date.now();
   console.log('[SIEG-EMIT] --- Fatura ID: ' + moveId + ' | Tipo: ' + tipo + ' ---');
 
   // 1. Read account.move (sem invoice_line_ids — pode ser computed nao-stored no Odoo 19)
@@ -379,7 +408,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   ]]);
   if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
   var move = moves[0];
-  console.log('[SIEG-EMIT] Fatura: ' + move.name + ' | R$ ' + (move.amount_total || 0));
+  console.log('[SIEG-EMIT] Fatura: ' + move.name + ' | R$ ' + (move.amount_total || 0) + ' (leituras iniciais ' + (Date.now() - t0) + 'ms)');
 
   // 1c-2. DIARIO DE TRANSFERENCIA (ex: "Transferência entre Filiais" / FAT1)
   // AJL 21/10/2026: NF do diario de transferencia sai com CFOP 5152 (interna) /
@@ -452,13 +481,47 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       }
     }
     if (currentNfeStatus === 'autorizada' || currentKey) {
+      // AJL 22/10/2026 — AUTO-CURA DA FILA: fatura com chave JA autorizada mas
+      // status 'pendente' (write perdido em corrida/reset manual) ocupava um
+      // slot do limit 5 PARA SEMPRE e bloqueava as faturas novas na fila
+      // (incidente 21/10/2026: 5 faturas antigas travavam 4 emissões do dia).
+      // Reconcilia o status -> sai da fila na proxima busca.
+      if (currentNfeStatus !== 'autorizada') {
+        try {
+          await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId],
+            { x_studio_nfe_status: 'autorizada' }]);
+          console.log('[SIEG-EMIT] AUTO-CURA: fatura ' + moveId + ' status ' +
+            (currentNfeStatus || '(vazio)') + ' -> autorizada (chave ja existia)');
+        } catch (eHeal) {
+          console.warn('[SIEG-EMIT] Falha ao reconciliar status (segue skip): ' + eHeal.message);
+        }
+      }
       console.log('[SIEG-EMIT] Fatura ' + moveId + ' ja AUTORIZADA (status=' + currentNfeStatus +
         ', chave=' + (currentKey || 'n/d') + ') — SKIP, não reemitir');
-      return { move_id: moveId, tipo: tipo, sucesso: true, skip: true, motivo: 'ja_autorizada' };
+      return { move_id: moveId, tipo: tipo, sucesso: true, skip: true, motivo: 'ja_autorizada', duracao_ms: Date.now() - t0 };
     }
   } else if ((move.x_studio_nfse_status || '') === 'autorizada') {
     console.log('[SIEG-EMIT] NFS-e ' + moveId + ' ja AUTORIZADA — SKIP');
     return { move_id: moveId, tipo: tipo, sucesso: true, skip: true, motivo: 'ja_autorizada' };
+  }
+
+  // AJL 22/10/2026 — GUARDA 'processando': outro ciclo ja pegou esta fatura
+  // (ou um ciclo anterior caiu no meio). NAO reemitir — evita duplicacao.
+  // Fatura presa em 'processando' apos queda volta a 'pendente' pelo botao
+  // "Emitir NF" ou manualmente pelo financeiro.
+  if (currentNfeStatus === 'processando') {
+    console.log('[SIEG-EMIT] Fatura ' + moveId + ' ja em PROCESSAMENTO — SKIP (nao duplicar)');
+    return { move_id: moveId, tipo: tipo, sucesso: true, skip: true, motivo: 'ja_em_processamento', duracao_ms: Date.now() - t0 };
+  }
+
+  // AJL 22/10/2026 — marca 'processando' ANTES das leituras pesadas (20s+):
+  // encurta a janela de corrida entre instancias durante deploy do Render
+  // (a escrita tardia, so antes do SEFAZ, deixava ~20s de janela aberta).
+  try {
+    await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId],
+      tipo === 'nfe' ? { x_studio_nfe_status: 'processando' } : { x_studio_nfse_status: 'processando' }]);
+  } catch (eProc) {
+    console.warn('[SIEG-EMIT] Nao marcou processando (segue): ' + eProc.message);
   }
 
   // 1a-bis. FORMA DE PAGAMENTO (x_studio_forma_de_pagamento)
@@ -1044,6 +1107,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     }
     break;
   }
+  console.log('[SIEG-EMIT] SEFAZ/SIEG concluido em ' + (Date.now() - t0) + 'ms (sucesso=' + info.sucesso + ')');
 
   var rawXmlAuth = resultado.resposta && (resultado.resposta.Xml || resultado.resposta.xml || resultado.resposta.xmlBase64);
   if (rawXmlAuth) {
@@ -1105,7 +1169,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   }
 
   await writeStatusSafe(client, db, uid, pwd, moveId, tipo, updateVals);
-  console.log('[SIEG-EMIT] Fatura atualizada');
+  console.log('[SIEG-EMIT] Fatura atualizada (' + (Date.now() - t0) + 'ms desde o inicio)');
 
   // 12. Post XML + PDF to Chatter (moveName pode ter sido renomeado — usar o
   // nome final para o anexo ficar consistente com o numero da NF)
@@ -1114,6 +1178,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   return {
     move_id: moveId, sucesso: info.sucesso, tipo: tipo,
     chave: info.chave, numero: nextNum, serie: serie,
+    duracao_ms: Date.now() - t0,
   };
 }
 

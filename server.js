@@ -203,9 +203,11 @@ function runCfPoll() {
 }
 
 // ============================================================
-// SIEG AUTO-POLLING: checa faturas pendentes a cada 30s
-// ============================================================
-const SIEG_POLL_INTERVAL_MS = parseInt(process.env.SIEG_POLL_INTERVAL_MS, 10) || 30000;
+// SIEG AUTO-POLLING: checa faturas pendentes a cada 15s
+// (AJL 22/10/2026: reduzido de 30s p/ 15s — encurta a espera ate o proximo
+// tick quando o disparo imediato por webhook nao acontecer. O mutex em
+// sieg-odoo-emit.js impede sobreposicao de ciclos.)
+const SIEG_POLL_INTERVAL_MS = parseInt(process.env.SIEG_POLL_INTERVAL_MS, 10) || 15000;
 var siegPollTimer = null;
 
 function startSiegPolling() {

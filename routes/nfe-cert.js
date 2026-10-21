@@ -59,6 +59,33 @@ router.post('/consultar-chave', apiKeyAuth, async function (req, res) {
   }
 });
 
+// AJL 22/10/2026: CANCELAMENTO DIRETO POR CHAVE (sem fatura no Odoo).
+// Usado para limpar NFs DUPLICADAS autorizadas por corrida de processamento
+// (ex: incidente 21/10/2026 — fatura 269 autorizou 3x: NFs 72962/63/64; as
+// duplicatas ficam orfas, sem fatura para o botao "Cancelar NF-e" do Odoo).
+// POST /api/v1/nfe/cancelar-chave  body: { chave, protocolo, cnpj?, justificativa? }
+router.post('/cancelar-chave', apiKeyAuth, async function (req, res) {
+  try {
+    var body = req.body || {};
+    var chave = String(body.chave || '').replace(/\D/g, '');
+    if (chave.length !== 44) {
+      return res.status(400).json({ sucesso: false, erro: 'Chave deve ter 44 digitos (recebido: ' + chave.length + ').' });
+    }
+    var cancelarNFe = require('../services/nfe-cancelamento').cancelarNFe;
+    var resultado = await cancelarNFe({
+      chave: chave,
+      protocolo: String(body.protocolo || ''),
+      cnpj: String(body.cnpj || ''),
+      justificativa: String(body.justificativa || 'Cancelamento de NF-e emitida em duplicidade'),
+    });
+    console.log('[NFE-CERT] cancelar-chave ' + chave.slice(-10) + ' -> ' + JSON.stringify(resultado).slice(0, 300));
+    res.json(resultado);
+  } catch (err) {
+    console.error('[NFE-CERT] Erro cancelar-chave: ' + err.message);
+    res.status(500).json({ sucesso: false, erro: err.message });
+  }
+});
+
 // Testa conexao mTLS com a SEFAZ usando o certificado carregado
 router.get('/sefaz/status', apiKeyAuth, async function (req, res) {
   try {
