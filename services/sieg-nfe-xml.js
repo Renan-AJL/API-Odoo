@@ -101,6 +101,9 @@ function calcIcmsUfDestItem(line, company, partner, cfg, indIEDest) {
   const vBcUfDest = round2(parseFloat(line.vbc_icms || line.vbc || line.price_subtotal || 0));
   const pIcmsInterPart = 100; // 2019+: 100% do diferencial para a UF de destino
   const vIcmsUfDest = round2(vBcUfDest * (pIcmsUfDest - pIcmsInter) * pIcmsInterPart / 10000);
+  // vICMSUFRemet (OBRIGATORIO no XSD, min=1): ICMS que permanece na UF de origem
+  // (base x aliq interestadual). vICMSUFDest + vICMSUFRemet = ICMS teorico a aliq interna.
+  const vIcmsUfRemet = round2(vBcUfDest * pIcmsInter / 100);
   return {
     vBCUFDest: vBcUfDest,
     pFCPUFDest: 0, // produto fora da lista do Fundo de Combate a Pobreza da UF destino
@@ -109,6 +112,7 @@ function calcIcmsUfDestItem(line, company, partner, cfg, indIEDest) {
     pICMSInterPart: pIcmsInterPart,
     vFCPUFDest: 0,
     vICMSUFDest: vIcmsUfDest < 0 ? 0 : vIcmsUfDest,
+    vICMSUFRemet: vIcmsUfRemet,
   };
 }
 
@@ -180,9 +184,17 @@ function xmlImpostoItem(line, crt, ibsInfo, difal) {
     icmsBlock = `<ICMS><ICMSSN102><orig>${orig}</orig><CSOSN>103</CSOSN></ICMSSN102></ICMS>`;
   }
 
-  // --- DIFAL (AJL 21/10/2026, cStat 694): ICMSUFDest DENTRO do grupo ICMS ---
+  // --- DIFAL (AJL 21/10/2026, cStat 694): grupo ICMSUFDest ---
+  // ATENCAO (22/10/2026): ICMSUFDest NAO fica dentro do grupo <ICMS> (rejeicao 225,
+  // cvc-complex-type.2.4.d "Invalid content was found starting with element
+  // 'ICMSUFDest'. No child element is expected at this point").
+  // Ordem do XSD oficial 4.00 atualizado (PROCERGS 2025) e pl10v130:
+  //   imposto = vTotTrib?, choice(ICMS+IPI+II | ISSQN)?, PIS?, PISST?, COFINS?,
+  //             COFINSST?, ICMSUFDest?, IS?, IBSCBS?
+  // Ou seja: ICMSUFDest vem DEPOIS de COFINS (irmao do ICMS), nunca dentro de <ICMS>.
+  let difalBlock = '';
   if (difal) {
-    const difalBlock = `<ICMSUFDest>`
+    difalBlock = `<ICMSUFDest>`
       + `<vBCUFDest>${num(difal.vBCUFDest)}</vBCUFDest>`
       + `<pFCPUFDest>${num(difal.pFCPUFDest)}</pFCPUFDest>`
       + `<pICMSUFDest>${num(difal.pICMSUFDest)}</pICMSUFDest>`
@@ -190,8 +202,8 @@ function xmlImpostoItem(line, crt, ibsInfo, difal) {
       + `<pICMSInterPart>${num(difal.pICMSInterPart)}</pICMSInterPart>`
       + `<vFCPUFDest>${num(difal.vFCPUFDest)}</vFCPUFDest>`
       + `<vICMSUFDest>${num(difal.vICMSUFDest)}</vICMSUFDest>`
+      + `<vICMSUFRemet>${num(difal.vICMSUFRemet)}</vICMSUFRemet>`
       + `</ICMSUFDest>`;
-    icmsBlock = icmsBlock.replace(/<\/ICMS>$/, difalBlock + '</ICMS>');
   }
 
   // --- PIS ---
@@ -249,8 +261,8 @@ function xmlImpostoItem(line, crt, ibsInfo, difal) {
 
   // NT2024/004 (IBSCBS): o schema PR-v4_9_86 nao aceita <vTrib> como filho de <imposto>
   // quando IBSCBS esta presente. A informacao de tributos flui pelo proprio IBS/CBS.
-  // Ordem exigida pelo XSD: ICMS → IPI → PIS → COFINS → IBSCBS
-  return `<imposto>${icmsBlock}${ipiBlock}${pisBlock}${cofinsBlock}${ibsBlock}</imposto>`;
+  // Ordem exigida pelo XSD: ICMS → IPI → PIS → COFINS → ICMSUFDest (DIFAL) → IBSCBS
+  return `<imposto>${icmsBlock}${ipiBlock}${pisBlock}${cofinsBlock}${difalBlock}${ibsBlock}</imposto>`;
 }
 
 /**
@@ -519,8 +531,8 @@ ${xmlEndereco(partner, 'enderDest')}
 
   // === det (items) ===
   const ibsTot = { vBC: 0, vIBSUF: 0, vIBSMun: 0, vIBS: 0, vCBS: 0 };
-  // DIFAL (cStat 694): acumuladores dos totais vFCPUFDest/vICMSUFDest do ICMSTot
-  let vFCPUFDest_total = 0, vICMSUFDest_total = 0;
+  // DIFAL (cStat 694): acumuladores dos totais vFCPUFDest/vICMSUFDest/vICMSUFRemet do ICMSTot
+  let vFCPUFDest_total = 0, vICMSUFDest_total = 0, vICMSUFRemet_total = 0;
   lines.forEach((line, idx) => {
     const nItem = String(idx + 1);
     const vProdNum = round2(line.price_subtotal || (line.qty * line.price_unit));
@@ -539,8 +551,9 @@ ${xmlEndereco(partner, 'enderDest')}
     if (difalItem) {
       vFCPUFDest_total += difalItem.vFCPUFDest;
       vICMSUFDest_total += difalItem.vICMSUFDest;
-      console.log('[NFE-XML] [DIFAL] item %s: vBCUFDest=%s pICMSUFDest=%s pICMSInter=%s vICMSUFDest=%s',
-        nItem, num(difalItem.vBCUFDest), num(difalItem.pICMSUFDest), num(difalItem.pICMSInter), num(difalItem.vICMSUFDest));
+      vICMSUFRemet_total += difalItem.vICMSUFRemet;
+      console.log('[NFE-XML] [DIFAL] item %s: vBCUFDest=%s pICMSUFDest=%s pICMSInter=%s vICMSUFDest=%s vICMSUFRemet=%s',
+        nItem, num(difalItem.vBCUFDest), num(difalItem.pICMSUFDest), num(difalItem.pICMSInter), num(difalItem.vICMSUFDest), num(difalItem.vICMSUFRemet));
     }
 
     xml += `
@@ -596,6 +609,7 @@ ${xmlEndereco(partner, 'enderDest')}
         <vICMSDeson>0.00</vICMSDeson>
         <vFCPUFDest>${num(round2(vFCPUFDest_total))}</vFCPUFDest>
         <vICMSUFDest>${num(round2(vICMSUFDest_total))}</vICMSUFDest>
+        <vICMSUFRemet>${num(round2(vICMSUFRemet_total))}</vICMSUFRemet>
         <vFCP>0.00</vFCP>
         <vBCST>0.00</vBCST>
         <vST>0.00</vST>
