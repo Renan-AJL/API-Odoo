@@ -307,8 +307,19 @@ var corrigirValorComIpi = corrigirValorFatura;
 // Le os campos x_studio da fatura (copiados do pedido pela automacao 115):
 //   x_studio_valor_entrada (Monetary) — entrada paga a vista (NAO vira boleto)
 //   x_studio_qtd_parcelas  (Integer)  — numero de parcelas mensais no Itau
-// Retorna { entrada, qtdParcelas, financiado } onde financiado = vNF - entrada.
-// So o VALOR FINANCIADO e enviado ao Itau, em N boletos mensais.
+//   x_studio_parcela_ids   (O2M x_fatura.parcela) — CONFIGURACAO editavel pelo financeiro:
+//       data (x_data) e valor (x_valor) de cada parcela. Quando existe, TEM PRIORIDADE
+//       sobre o calculo automatico 30/60/90 (demanda 22/10/2026 — so vale para E+P).
+// Retorna { entrada, qtdParcelas, financiado, parcelasConfig? } onde financiado = vNF - entrada.
+function dataIsoEP(v) {
+  if (!v) return '';
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return '';
+    return v.toISOString().slice(0, 10);
+  }
+  var mEP = String(v).match(/\d{4}-\d{2}-\d{2}/);
+  return mEP ? mEP[0] : '';
+}
 var _epCache = {};
 async function lerFaturaEntradaParcelamento(faturaName, faturaId, valorNF) {
   var out = { entrada: 0, qtdParcelas: 0, financiado: Math.round((parseFloat(valorNF) || 0) * 100) / 100 };
@@ -342,7 +353,7 @@ async function lerFaturaEntradaParcelamento(faturaName, faturaId, valorNF) {
       : [['id', '=', faturaId], ['move_type', '=', 'out_invoice']];
     var idsEP = await ekwEP('account.move', 'search', [domainEP], { limit: 1 });
     if (idsEP && idsEP.length) {
-      var invEP = await ekwEP('account.move', 'read', [idsEP, ['amount_total', 'x_studio_valor_entrada', 'x_studio_qtd_parcelas']]);
+      var invEP = await ekwEP('account.move', 'read', [idsEP, ['amount_total', 'x_studio_valor_entrada', 'x_studio_qtd_parcelas', 'x_studio_parcela_ids']]);
       var rec = (invEP && invEP[0]) || {};
       out.entrada = Math.round((parseFloat(rec.x_studio_valor_entrada) || 0) * 100) / 100;
       out.qtdParcelas = parseInt(rec.x_studio_qtd_parcelas) || 0;
@@ -353,7 +364,25 @@ async function lerFaturaEntradaParcelamento(faturaName, faturaId, valorNF) {
         out.entrada = 0;
       }
       out.financiado = Math.round((totalNF - out.entrada) * 100) / 100;
-      console.log('[E+P] ' + cacheKey + ': vNF=R$ ' + totalNF.toFixed(2) + ' entrada=R$ ' + out.entrada.toFixed(2) + ' financiado=R$ ' + out.financiado.toFixed(2) + ' x ' + (out.qtdParcelas || 1) + ' parcelas');
+      // === CONFIGURACAO das parcelas editada pelo financeiro (x_fatura.parcela) ===
+      var parcIdsEP = rec.x_studio_parcela_ids || [];
+      if (parcIdsEP && parcIdsEP.length) {
+        try {
+          var parcRecs = await ekwEP('x_fatura.parcela', 'read', [parcIdsEP, ['x_numero', 'x_data', 'x_valor']]);
+          var cfgEP = [];
+          (parcRecs || []).forEach(function(pEP) {
+            var dISO = dataIsoEP(pEP.x_data);
+            var vP = Math.round((parseFloat(pEP.x_valor) || 0) * 100) / 100;
+            if (dISO && vP > 0) cfgEP.push({ numero: parseInt(pEP.x_numero) || 0, data: dISO, valor: vP });
+          });
+          cfgEP.sort(function(aEP, bEP) { return (aEP.numero || 999) - (bEP.numero || 999); });
+          cfgEP.forEach(function(pEP, ixEP) { if (!pEP.numero) pEP.numero = ixEP + 1; });
+          if (cfgEP.length) out.parcelasConfig = cfgEP;
+        } catch (eCfg) {
+          console.warn('[E+P] Falha ao ler configuracao das parcelas (usando 30/60/90): ' + eCfg.message);
+        }
+      }
+      console.log('[E+P] ' + cacheKey + ': vNF=R$ ' + totalNF.toFixed(2) + ' entrada=R$ ' + out.entrada.toFixed(2) + ' financiado=R$ ' + out.financiado.toFixed(2) + ' x ' + (out.qtdParcelas || 1) + ' parcelas' + (out.parcelasConfig ? ' [CONFIG: ' + out.parcelasConfig.length + ' parcela(s) editada(s)]' : ' [30/60/90]'));
     }
     _epCache[cacheKey] = { ts: Date.now(), dados: out };
     return out;
@@ -526,15 +555,24 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
 
     var plano = parseFormaPagamento(formaPag);
     if (isEntradaParceladaPagar) {
-      // E+P: N boletos MENSais do VALOR FINANCIADO (vNF - entrada).
+      // E+P: N boletos do VALOR FINANCIADO (vNF - entrada).
       // A entrada nao vira boleto — e paga a vista na emissao.
+      // Demanda 22/10/2026: se o financeiro configurou data/valor por parcela na fatura
+      // (x_fatura.parcela), usa a CONFIGURACAO; senao mantem 30/60/90 automatico.
       var nParcEP = Math.max(1, Math.min(parseInt(epDadosPagar.qtdParcelas) || 1, 60));
       var parcelasEP = [];
-      for (var epi = 1; epi <= nParcEP; epi++) {
-        parcelasEP.push({ numero: epi, dias: epi * 30, valor_pct: 100 / nParcEP });
+      if (epDadosPagar.parcelasConfig && epDadosPagar.parcelasConfig.length) {
+        parcelasEP = epDadosPagar.parcelasConfig.map(function(pcEP, ixEP) {
+          return { numero: pcEP.numero || (ixEP + 1), dias: 0, valor_pct: 0, valorFixo: pcEP.valor, dataFixa: pcEP.data };
+        });
+        console.log('[API/BOLETO] E+P CONFIG: ' + parcelasEP.length + ' boleto(s) conforme data/valor configurados na fatura pelo financeiro');
+      } else {
+        for (var epi = 1; epi <= nParcEP; epi++) {
+          parcelasEP.push({ numero: epi, dias: epi * 30, valor_pct: 100 / nParcEP });
+        }
       }
       plano = { tipo: 'boleto', parcelas: parcelasEP, baseValor: epDadosPagar.financiado, epBaseHoje: true };
-      console.log('[API/BOLETO] E+P: ' + nParcEP + ' boletos mensais do FINANCIADO R$ ' + epDadosPagar.financiado.toFixed(2) + ' (entrada R$ ' + epDadosPagar.entrada.toFixed(2) + ' nao vai pro Itau)');
+      console.log('[API/BOLETO] E+P: ' + parcelasEP.length + ' boletos do FINANCIADO R$ ' + epDadosPagar.financiado.toFixed(2) + ' (entrada R$ ' + epDadosPagar.entrada.toFixed(2) + ' nao vai pro Itau)');
     }
     console.log('[API] Plano parsed:', JSON.stringify(plano));
 
@@ -607,15 +645,24 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
 
     for (var i = 0; i < totalP; i++) {
       var parc = plano.parcelas[i];
-      var valorParc = Math.round((baseValorPag * parc.valor_pct / 100) * 100) / 100;
-      if (i === totalP - 1) {
-        var soma = 0;
-        for (var j = 0; j < totalP - 1; j++) soma += Math.round((baseValorPag * plano.parcelas[j].valor_pct / 100) * 100) / 100;
-        valorParc = Math.round((baseValorPag - soma) * 100) / 100;
+      var valorParc;
+      if (typeof parc.valorFixo === 'number' && parc.valorFixo > 0) {
+        // E+P CONFIG: valor exato configurado na fatura pelo financeiro
+        valorParc = Math.round(parc.valorFixo * 100) / 100;
+      } else {
+        valorParc = Math.round((baseValorPag * parc.valor_pct / 100) * 100) / 100;
+        if (i === totalP - 1) {
+          var soma = 0;
+          for (var j = 0; j < totalP - 1; j++) soma += Math.round((baseValorPag * plano.parcelas[j].valor_pct / 100) * 100) / 100;
+          valorParc = Math.round((baseValorPag - soma) * 100) / 100;
+        }
       }
 
-      // E+P: vencimento mensal a partir de HOJE (30, 60, 90... dias da emissao)
-      var dataVenc = calcDataVenc(plano.epBaseHoje ? '' : dataVencBase, parc.dias);
+      // E+P CONFIG: vencimento = data configurada na fatura (YYYY-MM-DD).
+      // Fallback: mensal a partir de HOJE (30, 60, 90... dias da emissao).
+      var dataVenc = (parc.dataFixa && /^\d{4}-\d{2}-\d{2}$/.test(parc.dataFixa))
+        ? parc.dataFixa
+        : calcDataVenc(plano.epBaseHoje ? '' : dataVencBase, parc.dias);
       var pPayload = Object.assign({}, basePayload);
       pPayload.valor = valorParc;
       pPayload.dataVencimento = dataVenc;
@@ -914,15 +961,24 @@ router.post('/gerar', async function(req, res) {
     // === BOLETO ===
     var plano = parseFormaPagamento(formaPag);
     if (isEntradaParcelada) {
-      // E+P: N boletos MENSais do VALOR FINANCIADO (vNF - entrada).
+      // E+P: N boletos do VALOR FINANCIADO (vNF - entrada).
       // A entrada nao vira boleto — e paga a vista na emissao.
+      // Demanda 22/10/2026: se o financeiro configurou data/valor por parcela na fatura
+      // (x_fatura.parcela), usa a CONFIGURACAO; senao mantem 30/60/90 automatico.
       var nParcEP = Math.max(1, Math.min(parseInt(epDados.qtdParcelas) || 1, 60));
       var parcelasEP = [];
-      for (var epi = 1; epi <= nParcEP; epi++) {
-        parcelasEP.push({ numero: epi, dias: epi * 30, valor_pct: 100 / nParcEP });
+      if (epDados.parcelasConfig && epDados.parcelasConfig.length) {
+        parcelasEP = epDados.parcelasConfig.map(function(pcGE, ixGE) {
+          return { numero: pcGE.numero || (ixGE + 1), dias: 0, valor_pct: 0, valorFixo: pcGE.valor, dataFixa: pcGE.data };
+        });
+        console.log('[API/GERAR] E+P CONFIG: ' + parcelasEP.length + ' boleto(s) conforme data/valor configurados na fatura pelo financeiro');
+      } else {
+        for (var epi = 1; epi <= nParcEP; epi++) {
+          parcelasEP.push({ numero: epi, dias: epi * 30, valor_pct: 100 / nParcEP });
+        }
       }
       plano = { tipo: 'boleto', parcelas: parcelasEP, baseValor: epDados.financiado, epBaseHoje: true };
-      console.log('[API/GERAR] E+P: ' + nParcEP + ' boletos mensais do valor FINANCIADO R$ ' + epDados.financiado.toFixed(2) + ' (entrada R$ ' + epDados.entrada.toFixed(2) + ' nao vai pro Itau)');
+      console.log('[API/GERAR] E+P: ' + parcelasEP.length + ' boletos do valor FINANCIADO R$ ' + epDados.financiado.toFixed(2) + ' (entrada R$ ' + epDados.entrada.toFixed(2) + ' nao vai pro Itau)');
     }
     if (plano.tipo !== 'boleto' || plano.parcelas.length === 0) {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -998,16 +1054,25 @@ router.post('/gerar', async function(req, res) {
 
     for (var i = 0; i < totalP; i++) {
       var parc = plano.parcelas[i];
-      var valorParc = Math.round((baseValorBol * parc.valor_pct / 100) * 100) / 100;
-      if (i === totalP - 1) {
-        var soma = 0;
-        for (var j = 0; j < totalP - 1; j++) soma += Math.round((baseValorBol * plano.parcelas[j].valor_pct / 100) * 100) / 100;
-        valorParc = Math.round((baseValorBol - soma) * 100) / 100;
+      var valorParc;
+      if (typeof parc.valorFixo === 'number' && parc.valorFixo > 0) {
+        // E+P CONFIG: valor exato configurado na fatura pelo financeiro
+        valorParc = Math.round(parc.valorFixo * 100) / 100;
+      } else {
+        valorParc = Math.round((baseValorBol * parc.valor_pct / 100) * 100) / 100;
+        if (i === totalP - 1) {
+          var soma = 0;
+          for (var j = 0; j < totalP - 1; j++) soma += Math.round((baseValorBol * plano.parcelas[j].valor_pct / 100) * 100) / 100;
+          valorParc = Math.round((baseValorBol - soma) * 100) / 100;
+        }
       }
 
-      // E+P: vencimento mensal a partir de HOJE (30, 60, 90... dias da emissao).
+      // E+P CONFIG: vencimento = data configurada na fatura (YYYY-MM-DD).
+      // Fallback: mensal a partir de HOJE (30, 60, 90... dias da emissao).
       // Demais formas: mantem a base fatura_vencimento do Odoo.
-      var dataVenc = calcDataVenc(plano.epBaseHoje ? '' : fatVenc, parc.dias);
+      var dataVenc = (parc.dataFixa && /^\d{4}-\d{2}-\d{2}$/.test(parc.dataFixa))
+        ? parc.dataFixa
+        : calcDataVenc(plano.epBaseHoje ? '' : fatVenc, parc.dias);
       var pPayload = Object.assign({}, basePayload);
       pPayload.valor = valorParc;
       pPayload.dataVencimento = dataVenc;
