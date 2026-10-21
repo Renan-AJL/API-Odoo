@@ -64,10 +64,59 @@ function xmlEndereco(end, tagPrefix) {
 }
 
 /**
+ * AJL 21/10/2026 — DIFAL (rejeicao cStat 694 "Nao informado o grupo de ICMS
+ * para a UF de destino"): venda INTERESTADUAL para NAO contribuinte (indIEDest=9,
+ * consumidor final) EXIGE o grupo <ICMSUFDest> por item + vFCPUFDest/vICMSUFDest
+ * no ICMSTot (NT 2015.003 / Convênio ICMS 93/2015).
+ * Tabela de aliquota interna de ICMS por UF de destino (valores padrao 2026).
+ * Override opcional: cfg.pICMSUFDest (por emissao).
+ */
+const ICMS_INTERNO_UF = {
+  PR: 19.5, SC: 17, RS: 17, SP: 18, MG: 18, RJ: 20, ES: 17,
+  MS: 17, MT: 17, GO: 19, DF: 18,
+  BA: 18, SE: 19, AL: 19, PE: 18, PB: 19, RN: 18, CE: 18, PI: 19, MA: 22,
+  PA: 17, AM: 18, AP: 18, RR: 19, AC: 17.5, TO: 19, RO: 19.5,
+};
+// ICMS interestadual: 12% Sul/Sudeste, 7% Norte/Nordeste/Centro-Oeste (mesma regra do emissor)
+const UFS_SUL_SUDESTE = ['PR', 'SC', 'RS', 'SP', 'MG', 'RJ', 'ES'];
+
+/**
+ * Calcula os dados do grupo ICMSUFDest para UMA linha, quando aplicavel:
+ * operacao interestadual + destinatario nao contribuinte (indIEDest=9) +
+ * linha tributada (pICMS>0 ou CSOSN; isentas 40/41/50/51 nao levam DIFAL).
+ * Retorna null quando NAO aplicavel.
+ */
+function calcIcmsUfDestItem(line, company, partner, cfg, indIEDest) {
+  const ufEmit = String(company.state || company.UF || '').toUpperCase();
+  const ufDest = String(partner.state || partner.UF || '').toUpperCase();
+  if (!ufEmit || !ufDest || ufEmit === ufDest) return null;
+  if (indIEDest !== '9') return null; // DIFAL so p/ nao contribuinte
+  const cstNum = String(line.cst_icms || '').replace(/\D/g, '');
+  const comIcms = parseFloat(line.picms || 0) > 0 || String(line.csosn || '') !== '';
+  if (!comIcms || ['40', '41', '50', '51'].includes(cstNum)) return null;
+  const pIcmsUfDest = parseFloat(cfg.pICMSUFDest) || ICMS_INTERNO_UF[ufDest] || 18;
+  const pIcmsInter = parseFloat(line.picms || 0) > 0
+    ? parseFloat(line.picms)
+    : (UFS_SUL_SUDESTE.includes(ufDest) ? 12 : 7);
+  const vBcUfDest = round2(parseFloat(line.vbc_icms || line.vbc || line.price_subtotal || 0));
+  const pIcmsInterPart = 100; // 2019+: 100% do diferencial para a UF de destino
+  const vIcmsUfDest = round2(vBcUfDest * (pIcmsUfDest - pIcmsInter) * pIcmsInterPart / 10000);
+  return {
+    vBCUFDest: vBcUfDest,
+    pFCPUFDest: 0, // produto fora da lista do Fundo de Combate a Pobreza da UF destino
+    pICMSUFDest: pIcmsUfDest,
+    pICMSInter: pIcmsInter,
+    pICMSInterPart: pIcmsInterPart,
+    vFCPUFDest: 0,
+    vICMSUFDest: vIcmsUfDest < 0 ? 0 : vIcmsUfDest,
+  };
+}
+
+/**
  * Gera bloco de impostos por item — dinâmico baseado nos dados reais do Odoo
  * Suporta: ICMS (Simples Nacional CSOSN / Regime Normal CST), PIS, COFINS
  */
-function xmlImpostoItem(line, crt, ibsInfo) {
+function xmlImpostoItem(line, crt, ibsInfo, difal) {
   const csosn  = line.csosn  || '';
   const cstIcms = line.cst_icms || '';
   const orig   = line.orig   || '0';
@@ -129,6 +178,20 @@ function xmlImpostoItem(line, crt, ibsInfo) {
   } else {
     // Fallback CSOSN 103
     icmsBlock = `<ICMS><ICMSSN102><orig>${orig}</orig><CSOSN>103</CSOSN></ICMSSN102></ICMS>`;
+  }
+
+  // --- DIFAL (AJL 21/10/2026, cStat 694): ICMSUFDest DENTRO do grupo ICMS ---
+  if (difal) {
+    const difalBlock = `<ICMSUFDest>`
+      + `<vBCUFDest>${num(difal.vBCUFDest)}</vBCUFDest>`
+      + `<pFCPUFDest>${num(difal.pFCPUFDest)}</pFCPUFDest>`
+      + `<pICMSUFDest>${num(difal.pICMSUFDest)}</pICMSUFDest>`
+      + `<pICMSInter>${num(difal.pICMSInter)}</pICMSInter>`
+      + `<pICMSInterPart>${num(difal.pICMSInterPart)}</pICMSInterPart>`
+      + `<vFCPUFDest>${num(difal.vFCPUFDest)}</vFCPUFDest>`
+      + `<vICMSUFDest>${num(difal.vICMSUFDest)}</vICMSUFDest>`
+      + `</ICMSUFDest>`;
+    icmsBlock = icmsBlock.replace(/<\/ICMS>$/, difalBlock + '</ICMS>');
   }
 
   // --- PIS ---
@@ -456,6 +519,8 @@ ${xmlEndereco(partner, 'enderDest')}
 
   // === det (items) ===
   const ibsTot = { vBC: 0, vIBSUF: 0, vIBSMun: 0, vIBS: 0, vCBS: 0 };
+  // DIFAL (cStat 694): acumuladores dos totais vFCPUFDest/vICMSUFDest do ICMSTot
+  let vFCPUFDest_total = 0, vICMSUFDest_total = 0;
   lines.forEach((line, idx) => {
     const nItem = String(idx + 1);
     const vProdNum = round2(line.price_subtotal || (line.qty * line.price_unit));
@@ -468,6 +533,14 @@ ${xmlEndereco(partner, 'enderDest')}
       ibsTot.vIBSMun += ibsItem.vIBSMunNum;
       ibsTot.vIBS    += ibsItem.vIBSNum;
       ibsTot.vCBS    += ibsItem.vCBSNum;
+    }
+    // DIFAL por item (interestadual + nao contribuinte)
+    const difalItem = calcIcmsUfDestItem(line, company, partner, cfg, _indIEDestCalc);
+    if (difalItem) {
+      vFCPUFDest_total += difalItem.vFCPUFDest;
+      vICMSUFDest_total += difalItem.vICMSUFDest;
+      console.log('[NFE-XML] [DIFAL] item %s: vBCUFDest=%s pICMSUFDest=%s pICMSInter=%s vICMSUFDest=%s',
+        nItem, num(difalItem.vBCUFDest), num(difalItem.pICMSUFDest), num(difalItem.pICMSInter), num(difalItem.vICMSUFDest));
     }
 
     xml += `
@@ -487,7 +560,7 @@ ${xmlEndereco(partner, 'enderDest')}
         <qTrib>${num3(line.qty)}</qTrib>
         <vUnTrib>${num4(line.price_unit)}</vUnTrib>
         <indTot>1</indTot>
-      </prod>${xmlImpostoItem(line, company.crt || '1', ibsItem)}${ibsItem ? `
+      </prod>${xmlImpostoItem(line, company.crt || '1', ibsItem, difalItem)}${ibsItem ? `
       <vItem>${vProd}</vItem>` : ''}
     </det>`;
   });
@@ -521,6 +594,8 @@ ${xmlEndereco(partner, 'enderDest')}
         <vBC>${num(vBC_total)}</vBC>
         <vICMS>${num(vICMS_total)}</vICMS>
         <vICMSDeson>0.00</vICMSDeson>
+        <vFCPUFDest>${num(round2(vFCPUFDest_total))}</vFCPUFDest>
+        <vICMSUFDest>${num(round2(vICMSUFDest_total))}</vICMSUFDest>
         <vFCP>0.00</vFCP>
         <vBCST>0.00</vBCST>
         <vST>0.00</vST>
