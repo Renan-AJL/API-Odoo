@@ -58,9 +58,10 @@ check('NADA entre </ICMS00> e </ICMS> (ICMSUFDest nao dentro do ICMS)',
 check('vBCUFDest=8376.00', xml1.includes('<vBCUFDest>8376.00</vBCUFDest>'));
 check('pICMSUFDest=17.00 (tabela SC)', xml1.includes('<pICMSUFDest>17.00</pICMSUFDest>'));
 check('pICMSInter=12.00', xml1.includes('<pICMSInter>12.00</pICMSInter>'));
-// FIX rejeicao 816 (NT 2019.001/LC 190/2020): partilha do remetente = 0.00,
-// vICMSUFRemet = 0.00 e DIFAL integral (100%) para a UF de destino.
-check('pICMSInterPart=0.00 (2019+: partilha remetente zero)', xml1.includes('<pICMSInterPart>0.00</pICMSInterPart>'));
+// FIX rejeicao 816 (NT 2019.001/LC 190/2020): partilha da ORIGEM = 0% desde 2019,
+// portanto vICMSUFRemet = 0.00 e DIFAL integral (pICMSInterPart=100.00) para a UF destino.
+// pICMSInterPart e validado pela rejeicao 699 contra o ano da emissao (2026 => 100.00).
+check('pICMSInterPart=100.00 (rejeicao 699: 2026 => 100.00)', xml1.includes('<pICMSInterPart>100.00</pICMSInterPart>'));
 check('vFCPUFDest=0.00', xml1.includes('<vFCPUFDest>0.00</vFCPUFDest>'));
 check('vICMSUFDest=418.80 (8376 x 5% — DIFAL integral UF destino)', xml1.includes('<vICMSUFDest>418.80</vICMSUFDest>'));
 check('vICMSUFRemet item=0.00 (fix rejeicao 816)', /<vICMSUFDest>418\.80<\/vICMSUFDest><vICMSUFRemet>0\.00<\/vICMSUFRemet>/.test(xml1.replace(/\n/g, '')));
@@ -88,7 +89,7 @@ check('pICMSUFDest=22.00', xml4.includes('<pICMSUFDest>22.00</pICMSUFDest>'));
 check('pICMSInter=7.00', xml4.includes('<pICMSInter>7.00</pICMSInter>'));
 check('vICMSUFDest=1256.40 (8376 x 15% — integral UF destino)', xml4.includes('<vICMSUFDest>1256.40</vICMSUFDest>'));
 check('vICMSUFRemet=0.00 (fix rejeicao 816)', /<vICMSUFDest>1256\.40<\/vICMSUFDest><vICMSUFRemet>0\.00<\/vICMSUFRemet>/.test(xml4.replace(/\n/g, '')));
-check('pICMSInterPart=0.00 (cenario MA)', xml4.includes('<pICMSInterPart>0.00</pICMSInterPart>'));
+check('pICMSInterPart=100.00 (cenario MA)', xml4.includes('<pICMSInterPart>100.00</pICMSInterPart>'));
 
 console.log('\n' + (falhas === 0 ? 'TODOS OS CHECKS OK' : falhas + ' CHECK(S) FALHARAM'));
 process.exit(falhas === 0 ? 0 : 1);

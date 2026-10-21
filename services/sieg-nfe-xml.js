@@ -99,15 +99,17 @@ function calcIcmsUfDestItem(line, company, partner, cfg, indIEDest) {
     ? parseFloat(line.picms)
     : (UFS_SUL_SUDESTE.includes(ufDest) ? 12 : 7);
   const vBcUfDest = round2(parseFloat(line.vbc_icms || line.vbc || line.price_subtotal || 0));
-  // NT 2019.001 / LC 190/2020 (art. 13 §4o LC 87/96): desde 2019 100% do DIFAL
-  // vai para a UF de DESTINO — a partilha da UF do remetente (pICMSInterPart)
-  // e ZERO e o vICMSUFRemet deve ser 0.00. Informar valor > 0 gera a rejeicao
-  // 816 "Valor do ICMS Interestadual para UF do Remetente difere do calculado
-  // [Valor Informado: X Valor Calculado: 0.00]" (SEFAZ calcula 0.00).
-  const pIcmsInterPart = 0; // 2019+: partilha do remetente = 0.00 (obrigatorio no XML)
-  // DIFAL integral pertence a UF de destino: vBCUFDest x (aliq interna UF dest - aliq interestadual)
-  const vIcmsUfDest = round2(vBcUfDest * (pIcmsUfDest - pIcmsInter) / 100);
-  // vICMSUFRemet: tag OBRIGATORIA no XSD (min=1) porem o VALOR e 0.00 desde 2019.
+  // NT 2015.003 + NT 2019.001 / LC 190-2020: pICMSInterPart = percentual do DIFAL
+  // destinado a UF de DESTINO, validado pela SEFAZ contra o ANO da data de emissao
+  // (rejeicao 699): 2015=20.00 | 2016=40.00 | 2017=60.00 | 2018=80.00 | 2019+ = 100.00.
+  // Para 2026 o valor OBRIGATORIO e 100.00.
+  const pIcmsInterPart = 100; // 2019+: 100.00 (100% do DIFAL para a UF de destino) — rejeicao 699
+  // vICMSUFDest = DIFAL integral x partilha do destino (100%): vBCUFDest x (aliq interna UF dest - aliq interestadual)
+  const vIcmsUfDest = round2(vBcUfDest * (pIcmsUfDest - pIcmsInter) * pIcmsInterPart / 10000);
+  // vICMSUFRemet = DIFAL x partilha da ORIGEM (100 - pICMSInterPart)/100 = 0% desde 2019.
+  // Tag OBRIGATORIA no XSD (min=1) porem o VALOR e sempre 0.00 desde 2019 — informar
+  // valor > 0 gera a rejeicao 816 "Valor do ICMS Interestadual para UF do Remetente
+  // difere do calculado [Valor Informado: X Valor Calculado: 0.00]".
   const vIcmsUfRemet = 0;
   return {
     vBCUFDest: vBcUfDest,
