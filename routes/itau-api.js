@@ -514,9 +514,28 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
     var valorTotal = await corrigirValorComIpi(faturaName, faturaId, parseFloat(fat.valor_nominal || d.fatura_valor) || 0);
     var dataVencBase = fat.data_vencimento || d.fatura_vencimento || '';
 
+    // === ENTRADA + PARCELAMENTO (demanda 8): le entrada/parcelas da fatura ===
+    var isEntradaParceladaPagar = formaPag.trim().toUpperCase().indexOf('ENTRADA') >= 0 &&
+                                  formaPag.trim().toUpperCase().indexOf('PARCEL') >= 0;
+    var epDadosPagar = { entrada: 0, qtdParcelas: 0, financiado: valorTotal };
+    if (isEntradaParceladaPagar) {
+      epDadosPagar = await lerFaturaEntradaParcelamento(faturaName, faturaId, valorTotal);
+    }
+
     var pag = d.pagador || {};
 
     var plano = parseFormaPagamento(formaPag);
+    if (isEntradaParceladaPagar) {
+      // E+P: N boletos MENSais do VALOR FINANCIADO (vNF - entrada).
+      // A entrada nao vira boleto — e paga a vista na emissao.
+      var nParcEP = Math.max(1, Math.min(parseInt(epDadosPagar.qtdParcelas) || 1, 60));
+      var parcelasEP = [];
+      for (var epi = 1; epi <= nParcEP; epi++) {
+        parcelasEP.push({ numero: epi, dias: epi * 30, valor_pct: 100 / nParcEP });
+      }
+      plano = { tipo: 'boleto', parcelas: parcelasEP, baseValor: epDadosPagar.financiado, epBaseHoje: true };
+      console.log('[API/BOLETO] E+P: ' + nParcEP + ' boletos mensais do FINANCIADO R$ ' + epDadosPagar.financiado.toFixed(2) + ' (entrada R$ ' + epDadosPagar.entrada.toFixed(2) + ' nao vai pro Itau)');
+    }
     console.log('[API] Plano parsed:', JSON.stringify(plano));
 
     if (plano.tipo !== 'boleto' || plano.parcelas.length === 0) {
@@ -582,18 +601,21 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
     };
 
     var totalP = plano.parcelas.length;
+    // E+P (demanda 8): boletos sobre o VALOR FINANCIADO (vNF - entrada).
+    var baseValorPag = (typeof plano.baseValor === 'number' && plano.baseValor > 0) ? plano.baseValor : valorTotal;
     var pagamentos = [];
 
     for (var i = 0; i < totalP; i++) {
       var parc = plano.parcelas[i];
-      var valorParc = Math.round((valorTotal * parc.valor_pct / 100) * 100) / 100;
+      var valorParc = Math.round((baseValorPag * parc.valor_pct / 100) * 100) / 100;
       if (i === totalP - 1) {
         var soma = 0;
-        for (var j = 0; j < totalP - 1; j++) soma += Math.round((valorTotal * plano.parcelas[j].valor_pct / 100) * 100) / 100;
-        valorParc = Math.round((valorTotal - soma) * 100) / 100;
+        for (var j = 0; j < totalP - 1; j++) soma += Math.round((baseValorPag * plano.parcelas[j].valor_pct / 100) * 100) / 100;
+        valorParc = Math.round((baseValorPag - soma) * 100) / 100;
       }
 
-      var dataVenc = calcDataVenc(dataVencBase, parc.dias);
+      // E+P: vencimento mensal a partir de HOJE (30, 60, 90... dias da emissao)
+      var dataVenc = calcDataVenc(plano.epBaseHoje ? '' : dataVencBase, parc.dias);
       var pPayload = Object.assign({}, basePayload);
       pPayload.valor = valorParc;
       pPayload.dataVencimento = dataVenc;
@@ -696,6 +718,8 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
       data: {
         forma_pagamento: formaPag, total_parcelas: totalP,
         valor_total: valorTotal.toFixed(2),
+        valor_financiado: baseValorPag.toFixed(2),
+        valor_entrada: isEntradaParceladaPagar ? epDadosPagar.entrada.toFixed(2) : '0.00',
         fatura_name: faturaName || '(nao informado)',
         fatura_id: faturaId || 0,
         pagamentos: pagamentos,
