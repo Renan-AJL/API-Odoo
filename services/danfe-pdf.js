@@ -50,8 +50,12 @@ function dataFmt(iso) {
   if (!iso) return '';
   var d = new Date(iso);
   if (isNaN(d.getTime())) return String(iso).slice(0, 10);
+  // FIX (URGENTE, demanda usuario): renderizar SEMPRE na hora do Brasil (UTC-3).
+  // O servidor (Render) roda em UTC — usar getHours() mostrava a hora 3h à frente
+  // no DANFE (emissao, saida, protocolo e rodape).
+  var br = new Date(d.getTime() - 3 * 3600 * 1000);
   var p = function (n) { return String(n).padStart(2, '0'); };
-  return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  return p(br.getUTCDate()) + '/' + p(br.getUTCMonth() + 1) + '/' + br.getUTCFullYear() + ' ' + p(br.getUTCHours()) + ':' + p(br.getUTCMinutes());
 }
 
 async function barcode(chave) {
@@ -129,14 +133,16 @@ async function gerarDanfePdf(nfeProcXml, opts) {
   // --- Cabecalho: emitente + chave ---
   var hHead = 78;
   box(L, y, W, hHead);
-  doc.fontSize(9).font('Helvetica-Bold').text(tag(emit, 'xNome'), L + 5, y + 6, { width: 200 });
+  // FIX (demanda usuario): nome do emitente desalinhado / "tudo muito junto" —
+  // nome com espaco entre as linhas (lineGap) e bloco de endereco mais abaixo.
+  doc.fontSize(8.5).font('Helvetica-Bold').text(tag(emit, 'xNome'), L + 6, y + 5, { width: 202, lineGap: 2 });
   var eEnd = bloco(emit, 'enderEmit');
-  doc.fontSize(6.5).font('Helvetica').text(
+  doc.fontSize(6.2).font('Helvetica').text(
     tag(eEnd, 'xLgr') + ', ' + tag(eEnd, 'nro') + ' ' + tag(eEnd, 'xBairro') + '\n' +
     tag(eEnd, 'xMun') + ' - ' + tag(eEnd, 'UF') + '  CEP ' + tag(eEnd, 'CEP') + '\n' +
     'CNPJ ' + cnpjFmt(tag(emit, 'CNPJ')) + '   IE ' + tag(emit, 'IE') + '\n' +
     'Fone ' + (tag(eEnd, 'fone') || '-'),
-    L + 5, y + 22, { width: 200 }
+    L + 6, y + 31, { width: 202, lineGap: 1.2 }
   );
 
   doc.fontSize(13).font('Helvetica-Bold').text('DANFE', L + 215, y + 6, { width: 90, align: 'center' });
@@ -256,12 +262,14 @@ async function gerarDanfePdf(nfeProcXml, opts) {
     { t: 'CST IPI', w: 0.04 }, { t: 'V.IPI', w: 0.06 }, { t: 'PIPI%', w: 0.04 },
   ];
   var x = L;
-  box(L, y, W, 12);
+  // FIX (demanda usuario): linha do produto "grudada em cima e a esquerda" —
+  // celula mais alta e texto com respiro vertical/horizontal.
+  box(L, y, W, 14);
   cols.forEach(function (c) {
-    doc.fontSize(5.5).font('Helvetica-Bold').text(c.t, x + 2, y + 4, { width: W * c.w - 3, lineBreak: false });
+    doc.fontSize(5.5).font('Helvetica-Bold').text(c.t, x + 4, y + 5, { width: W * c.w - 6, lineBreak: false });
     x += W * c.w;
   });
-  y += 12;
+  y += 14;
 
   var dets = blocos(infNFe, 'det');
   dets.forEach(function (det) {
@@ -271,7 +279,7 @@ async function gerarDanfePdf(nfeProcXml, opts) {
     var ipi = bloco(det, 'IPI');
     var ipiTrib = bloco(ipi, 'IPITrib');
     var ipiNT = bloco(ipi, 'IPINT');
-    var h = 12;
+    var h = 14;
     box(L, y, W, h);
     var vals = [
       tag(prod, 'cProd'), tag(prod, 'xProd'), tag(prod, 'NCM'),
@@ -288,7 +296,7 @@ async function gerarDanfePdf(nfeProcXml, opts) {
     cols.forEach(function (c, i) {
       var align = i >= 6 ? 'right' : 'left';
       doc.fontSize(5.8).font('Helvetica')
-        .text(String(vals[i] || ''), xx + 2, y + 4, { width: W * c.w - 4, lineBreak: false, ellipsis: true, align: align });
+        .text(String(vals[i] || ''), xx + 4, y + 5, { width: W * c.w - 6, lineBreak: false, ellipsis: true, align: align });
       xx += W * c.w;
     });
     y += h;
