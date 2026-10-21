@@ -303,6 +303,66 @@ async function corrigirValorFatura(faturaName, faturaId, valorInformado) {
 // Alias retrocompatibilidade
 var corrigirValorComIpi = corrigirValorFatura;
 
+// === ENTRADA + PARCELAMENTO (demanda AJL 21/10/2026) ===
+// Le os campos x_studio da fatura (copiados do pedido pela automacao 115):
+//   x_studio_valor_entrada (Monetary) — entrada paga a vista (NAO vira boleto)
+//   x_studio_qtd_parcelas  (Integer)  — numero de parcelas mensais no Itau
+// Retorna { entrada, qtdParcelas, financiado } onde financiado = vNF - entrada.
+// So o VALOR FINANCIADO e enviado ao Itau, em N boletos mensais.
+var _epCache = {};
+async function lerFaturaEntradaParcelamento(faturaName, faturaId, valorNF) {
+  var out = { entrada: 0, qtdParcelas: 0, financiado: Math.round((parseFloat(valorNF) || 0) * 100) / 100 };
+  try {
+    var oc = config.odoo;
+    if (!oc || !oc.enabled || !oc.url) return out;
+    var cacheKey = String(faturaName || ('id:' + faturaId));
+    if (_epCache[cacheKey] && (Date.now() - _epCache[cacheKey].ts) < 60000) return _epCache[cacheKey].dados;
+
+    var xmlrpcEP = require('xmlrpc');
+    var baseEP = oc.url.replace(/\/+$/, '');
+    var hostEP = baseEP.replace('https://', '').replace('http://', '');
+    var commonEP = xmlrpcEP.createSecureClient({ host: hostEP, path: '/xmlrpc/2/common', port: 443 });
+    var modelsEP = xmlrpcEP.createSecureClient({ host: hostEP, path: '/xmlrpc/2/object', port: 443 });
+    var uidEP = await new Promise(function(ok, fail) {
+      commonEP.methodCall('authenticate', [oc.db, oc.user, oc.password, {}], function(e, r) {
+        if (e || !r) return fail(e || new Error('auth failed')); ok(r);
+      });
+    });
+    function ekwEP(model, method, args, kwargs) {
+      return new Promise(function(ok, fail) {
+        var params = [oc.db, uidEP, oc.password, model, method, args];
+        if (kwargs) params.push(kwargs);
+        modelsEP.methodCall('execute_kw', params, function(e, r) {
+          if (e) return fail(e); ok(r);
+        });
+      });
+    }
+
+    var domainEP = faturaName ? [['name', '=', faturaName], ['move_type', '=', 'out_invoice']]
+      : [['id', '=', faturaId], ['move_type', '=', 'out_invoice']];
+    var idsEP = await ekwEP('account.move', 'search', [domainEP], { limit: 1 });
+    if (idsEP && idsEP.length) {
+      var invEP = await ekwEP('account.move', 'read', [idsEP, ['amount_total', 'x_studio_valor_entrada', 'x_studio_qtd_parcelas']]);
+      var rec = (invEP && invEP[0]) || {};
+      out.entrada = Math.round((parseFloat(rec.x_studio_valor_entrada) || 0) * 100) / 100;
+      out.qtdParcelas = parseInt(rec.x_studio_qtd_parcelas) || 0;
+      var totalNF = Math.round((parseFloat(rec.amount_total) || valorNF) * 100) / 100;
+      // Seguranca: entrada invalida (>= vNF ou negativa) -> financia o total
+      if (out.entrada <= 0 || out.entrada >= totalNF) {
+        console.warn('[E+P] Entrada invalida (R$ ' + out.entrada.toFixed(2) + ') para vNF R$ ' + totalNF.toFixed(2) + ' — financiando o valor total');
+        out.entrada = 0;
+      }
+      out.financiado = Math.round((totalNF - out.entrada) * 100) / 100;
+      console.log('[E+P] ' + cacheKey + ': vNF=R$ ' + totalNF.toFixed(2) + ' entrada=R$ ' + out.entrada.toFixed(2) + ' financiado=R$ ' + out.financiado.toFixed(2) + ' x ' + (out.qtdParcelas || 1) + ' parcelas');
+    }
+    _epCache[cacheKey] = { ts: Date.now(), dados: out };
+    return out;
+  } catch (eEP) {
+    console.warn('[E+P] Falha ao ler campos E+P da fatura (financiando valor total): ' + eEP.message);
+    return out;
+  }
+}
+
 // --- Deteccao de cartao por bandeira ---
 var BANDEIRAS = ['VISA', 'MASTER', 'ELO', 'AMEX', 'HIPERCARD', 'HIPER'];
 
@@ -819,8 +879,27 @@ router.post('/gerar', async function(req, res) {
       return;
     }
 
+    // === ENTRADA + PARCELAMENTO (demanda 8): le entrada/parcelas da fatura ===
+    var isEntradaParcelada = formaPag.trim().toUpperCase().indexOf('ENTRADA') >= 0 &&
+                             formaPag.trim().toUpperCase().indexOf('PARCEL') >= 0;
+    var epDados = { entrada: 0, qtdParcelas: 0, financiado: fatValor };
+    if (isEntradaParcelada) {
+      epDados = await lerFaturaEntradaParcelamento(fatName, gerarFaturaId, fatValor);
+    }
+
     // === BOLETO ===
     var plano = parseFormaPagamento(formaPag);
+    if (isEntradaParcelada) {
+      // E+P: N boletos MENSais do VALOR FINANCIADO (vNF - entrada).
+      // A entrada nao vira boleto — e paga a vista na emissao.
+      var nParcEP = Math.max(1, Math.min(parseInt(epDados.qtdParcelas) || 1, 60));
+      var parcelasEP = [];
+      for (var epi = 1; epi <= nParcEP; epi++) {
+        parcelasEP.push({ numero: epi, dias: epi * 30, valor_pct: 100 / nParcEP });
+      }
+      plano = { tipo: 'boleto', parcelas: parcelasEP, baseValor: epDados.financiado, epBaseHoje: true };
+      console.log('[API/GERAR] E+P: ' + nParcEP + ' boletos mensais do valor FINANCIADO R$ ' + epDados.financiado.toFixed(2) + ' (entrada R$ ' + epDados.entrada.toFixed(2) + ' nao vai pro Itau)');
+    }
     if (plano.tipo !== 'boleto' || plano.parcelas.length === 0) {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.send('ERRO|Forma de pagamento nao suportada: ' + formaPag);
@@ -888,18 +967,23 @@ router.post('/gerar', async function(req, res) {
     };
 
     var totalP = plano.parcelas.length;
+    // E+P (demanda 8): boletos sobre o VALOR FINANCIADO (vNF - entrada).
+    // Demais formas: vNF total (comportamento atual).
+    var baseValorBol = (typeof plano.baseValor === 'number' && plano.baseValor > 0) ? plano.baseValor : fatValor;
     var lines = ['OK|' + totalP];
 
     for (var i = 0; i < totalP; i++) {
       var parc = plano.parcelas[i];
-      var valorParc = Math.round((fatValor * parc.valor_pct / 100) * 100) / 100;
+      var valorParc = Math.round((baseValorBol * parc.valor_pct / 100) * 100) / 100;
       if (i === totalP - 1) {
         var soma = 0;
-        for (var j = 0; j < totalP - 1; j++) soma += Math.round((fatValor * plano.parcelas[j].valor_pct / 100) * 100) / 100;
-        valorParc = Math.round((fatValor - soma) * 100) / 100;
+        for (var j = 0; j < totalP - 1; j++) soma += Math.round((baseValorBol * plano.parcelas[j].valor_pct / 100) * 100) / 100;
+        valorParc = Math.round((baseValorBol - soma) * 100) / 100;
       }
 
-      var dataVenc = calcDataVenc(fatVenc, parc.dias);
+      // E+P: vencimento mensal a partir de HOJE (30, 60, 90... dias da emissao).
+      // Demais formas: mantem a base fatura_vencimento do Odoo.
+      var dataVenc = calcDataVenc(plano.epBaseHoje ? '' : fatVenc, parc.dias);
       var pPayload = Object.assign({}, basePayload);
       pPayload.valor = valorParc;
       pPayload.dataVencimento = dataVenc;

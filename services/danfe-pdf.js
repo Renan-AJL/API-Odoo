@@ -249,10 +249,10 @@ async function gerarDanfePdf(nfeProcXml, opts) {
   // --- Itens ---
   doc.fontSize(6).font('Helvetica-Bold').text('DADOS DOS PRODUTOS / SERVICOS', L, y); y += 8;
   var cols = [
-    { t: 'COD', w: 0.07 }, { t: 'DESCRICAO', w: 0.24 }, { t: 'NCM', w: 0.06 },
+    { t: 'COD', w: 0.07 }, { t: 'DESCRICAO', w: 0.20 }, { t: 'NCM', w: 0.06 },
     { t: 'CST', w: 0.04 }, { t: 'CFOP', w: 0.04 }, { t: 'UN', w: 0.03 },
-    { t: 'QTD', w: 0.07 }, { t: 'V.UNIT', w: 0.08 }, { t: 'V.TOTAL', w: 0.08 },
-    { t: 'BC ICMS', w: 0.06 }, { t: 'V.ICMS', w: 0.05 },
+    { t: 'QTD', w: 0.07 }, { t: 'V.UNIT', w: 0.07 }, { t: 'V.TOTAL', w: 0.07 },
+    { t: 'BC ICMS', w: 0.06 }, { t: 'V.ICMS', w: 0.05 }, { t: 'ALQ ICMS', w: 0.05 },
     { t: 'CST IPI', w: 0.04 }, { t: 'V.IPI', w: 0.06 }, { t: 'PIPI%', w: 0.04 },
   ];
   var x = L;
@@ -278,6 +278,8 @@ async function gerarDanfePdf(nfeProcXml, opts) {
       tag(icms, 'CST') || tag(icms, 'CSOSN'), tag(prod, 'CFOP'), tag(prod, 'uCom'),
       qtd(tag(prod, 'qCom')), moeda(tag(prod, 'vUnCom')), moeda(tag(prod, 'vProd')),
       moeda(tag(icms, 'vBC')), moeda(tag(icms, 'vICMS')),
+      // AJL (demanda 6): %ICMS visivel por linha de produto no DANFE
+      tag(icms, 'pICMS') ? (parseFloat(tag(icms, 'pICMS')) || 0).toFixed(2) + '%' : '',
       tag(ipiTrib, 'CST') || tag(ipiNT, 'CST') || '',
       moeda(tag(ipiTrib, 'vIPI')),
       tag(ipiTrib, 'pIPI') ? parseFloat(tag(ipiTrib, 'pIPI')).toFixed(2) : '',

@@ -644,6 +644,12 @@ ${xmlEndereco(partner, 'enderDest')}
   if (order.sale_order_number && infCplText.indexOf('Pedido') === -1) {
     infCplText = 'Pedido: ' + order.sale_order_number + '. ' + infCplText;
   }
+  // AJL (demanda 8): observacao livre da fatura (x_studio_obs_nfe) — inclui a
+  // informacao de Entrada + Parcelamento preenchida no Odoo na observacoes da NF.
+  var obsNfeTxt = stripHtml(order.obs_nfe || '');
+  if (obsNfeTxt && infCplText.indexOf(obsNfeTxt.substring(0, 40)) === -1) {
+    infCplText = infCplText ? infCplText + '. ' + obsNfeTxt : obsNfeTxt;
+  }
   // Pagamento: boleto com parcelas/vencimentos/valores, PIX, ou a vista
   if (order.boleto_detalhes && order.boleto_detalhes.length > 0) {
     var boletoParts = [];

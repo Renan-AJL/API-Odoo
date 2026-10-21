@@ -69,6 +69,10 @@ function buildPagamentoInfo(opts) {
   var parcelasFatura = opts.parcelasFatura || [];
   var dataBase = opts.dataBase || '';
   var itauBoletos = opts.itauBoletos || [];
+  // ENTRADA + PARCELAMENTO (demanda AJL 21/10/2026): valor da entrada e
+  // quantidade de parcelas vem dos campos x_studio da fatura/pedido.
+  var valorEntrada = round2(opts.valorEntrada || 0);
+  var qtdParcelas = parseInt(opts.qtdParcelas) || 0;
 
   function addDays(isoDate, days) {
     var d = isoDate ? new Date(isoDate + 'T12:00:00Z') : new Date();
@@ -99,7 +103,8 @@ function buildPagamentoInfo(opts) {
 
   // --- Detecao do tipo de pagamento pelo texto do campo ---
   var tipoPag = 'avista';
-  if (formaUp.indexOf('PIX') >= 0) tipoPag = 'pix';
+  if (formaUp.indexOf('ENTRADA') >= 0 && formaUp.indexOf('PARCEL') >= 0) tipoPag = 'entrada_parcelada';
+  else if (formaUp.indexOf('PIX') >= 0) tipoPag = 'pix';
   else if (formaUp.indexOf('BOLETO') >= 0 || formaUp.indexOf('BOL ') >= 0) tipoPag = 'boleto';
   else if (formaUp.indexOf('CHEQUE') >= 0) tipoPag = 'cheque';
   else if (formaUp.indexOf('DÉBITO') >= 0 || formaUp.indexOf('DEBITO') >= 0 || formaUp.indexOf('DÉB') >= 0 || formaUp.indexOf('DEB') >= 0) tipoPag = 'debito';
@@ -113,7 +118,9 @@ function buildPagamentoInfo(opts) {
   // historico do middleware (tPag 15 = PIX, a vista, infCpl "Pagamento a vista").
   if (!forma) tipoPag = 'pix';
 
-  var tPag = { avista: '01', pix: '15', boleto: '13', cheque: '02', credito: '03', debito: '04', deposito: '14', transferencia: '16', dinheiro: '01' }[tipoPag] || '99';
+  var tPag = { avista: '01', pix: '15', boleto: '13', cheque: '02', credito: '03', debito: '04', deposito: '14', transferencia: '16', dinheiro: '01', entrada_parcelada: '13' }[tipoPag] || '99';
+  // tPag da ENTRADA: PIX se a forma citar PIX; dinheiro (01) como padrao
+  var tPagEntrada = formaUp.indexOf('PIX') >= 0 ? '15' : '01';
 
   // --- Parcelas: dias/meses declarados na forma ---
   var parcelas = [];
@@ -172,6 +179,22 @@ function buildPagamentoInfo(opts) {
       for (var pv = 0; pv < parcelas.length; pv++) vencimentos.push(addDays(dataBase, parcelas[pv]));
     }
     formaLabel = forma || 'Boleto bancário';
+  } else if (tipoPag === 'entrada_parcelada') {
+    // ENTRADA + PARCELAMENTO (demanda AJL): 1 pagamento a vista da ENTRADA
+    // (dinheiro/PIX) + N parcelas mensais SOMENTE do valor financiado
+    // (vNF - entrada). A entrada NAO vai para o Itau e NAO entra no cobr.
+    var vEntrada = (valorEntrada > 0 && valorEntrada < vNF) ? valorEntrada : 0;
+    var financiado = round2(vNF - vEntrada);
+    var nParc = Math.max(1, Math.min(qtdParcelas || 1, 60));
+    valores = splitValores(financiado, nParc);
+    vencimentos = [];
+    for (var epv = 1; epv <= nParc; epv++) vencimentos.push(addDays(dataBase, epv * 30));
+    formaLabel = 'Entrada R$ ' + vEntrada.toFixed(2) + ' + ' + nParc + ' parcelas mensais de R$ ' + valores[0].toFixed(2) + (vEntrada > 0 ? ' (valor financiado: R$ ' + financiado.toFixed(2) + ')' : '');
+    if (vEntrada > 0) {
+      pagamentos.push({ indPag: '0', tPag: tPagEntrada, vPag: vEntrada.toFixed(2) });
+    }
+    console.log('[SIEG-EMIT] ENTRADA+PARCELAMENTO: entrada=R$ ' + vEntrada.toFixed(2) +
+      ' financiado=R$ ' + financiado.toFixed(2) + ' x ' + nParc + ' parcelas');
   } else {
     // A vista / PIX / cartao / etc: 1 pagamento no valor total
     valores = [vNF];
@@ -179,17 +202,24 @@ function buildPagamentoInfo(opts) {
     formaLabel = forma || ({ pix: 'Pagamento a vista (PIX)', avista: 'Pagamento a vista', dinheiro: 'Pagamento a vista (dinheiro)', cheque: 'Pagamento em cheque', credito: 'Pagamento com cartão de crédito', debito: 'Pagamento com cartão de débito', deposito: 'Pagamento por depósito', transferencia: 'Pagamento por transferência' }[tipoPag] || 'Pagamento a vista');
   }
 
-  var indPag = (valores.length > 1 || (tipoPag === 'boleto' && parseInt(parcelas[0] || 0) > 0)) ? '1' : '0';
-
+  // indPag POR pagamento: entrada = 0 (a vista); parcelas = 1 (a prazo).
+  // "1 + 30 BOLETO": a parcela do dia 0 (entrada) sai a vista — as restantes a prazo.
   for (var pg = 0; pg < valores.length; pg++) {
+    var ePrazo = (tipoPag === 'boleto' || tipoPag === 'entrada_parcelada');
+    var diaZero = (tipoPag === 'boleto' && parseInt(parcelas[pg] || 0) === 0);
+    var indPagPg = ePrazo
+      ? (diaZero ? '0' : '1')
+      : (valores.length > 1 ? '1' : '0');
+    var tPagPg = diaZero ? tPagEntrada : tPag;
     pagamentos.push({
-      indPag: indPag,
-      tPag: tPag,
+      indPag: indPagPg,
+      tPag: tPagPg,
       vPag: valores[pg].toFixed(2),
     });
     // Duplicatas somente para pagamentos a prazo (boleto com dias/parcelas).
     // A vista / PIX / cartao NAO tem cobr/dup.
-    if (tipoPag === 'boleto') {
+    // E+P: cobr lista SOMENTE as parcelas do valor financiado (entrada fora).
+    if (ePrazo) {
       duplicatas.push({
         dVenc: vencimentos[pg] || '',
         vDup: valores[pg].toFixed(2),
@@ -198,7 +228,7 @@ function buildPagamentoInfo(opts) {
   }
 
   // --- boletoDetalhes p/ infCpl (texto rico) ---
-  if (tipoPag === 'boleto') {
+  if (tipoPag === 'boleto' || tipoPag === 'entrada_parcelada') {
     for (var bd = 0; bd < valores.length; bd++) {
       var det = {
         parcela: String(bd + 1) + '/' + String(valores.length),
@@ -215,9 +245,16 @@ function buildPagamentoInfo(opts) {
     }
   }
 
+  // indPag resumo p/ retrocompatibilidade (odoo-admin remontagem usa pagInfo.indPag):
+  // '1' se HA qualquer pagamento a prazo; '0' se tudo a vista.
+  var indPagResumo = '0';
+  for (var ipg = 0; ipg < pagamentos.length; ipg++) {
+    if (pagamentos[ipg].indPag === '1') { indPagResumo = '1'; break; }
+  }
+
   return {
     formaLabel: formaLabel,
-    indPag: indPag,
+    indPag: indPagResumo,
     tPag: tPag,
     pagamentos: pagamentos,
     duplicatas: duplicatas,
@@ -337,6 +374,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     'x_studio_nfe_status', 'x_studio_nfse_status', 'payment_state',
     'x_studio_itau_nosso_numero', 'x_studio_itau_resposta_json', 'x_studio_boleto_cancelado',
     'x_studio_forma_de_pagamento', 'invoice_payment_term_id',
+    'x_studio_valor_entrada', 'x_studio_qtd_parcelas', 'x_studio_obs_nfe',
     'invoice_line_ids', 'line_ids',
   ]]);
   if (!moves || !moves.length) throw new Error('Fatura ' + moveId + ' nao encontrada');
@@ -540,6 +578,23 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   if (parcelasFatura.length) {
     console.log('[SIEG-EMIT] Parcelas na fatura: ' + parcelasFatura.length +
       ' (venc1=' + parcelasFatura[0].vencimento + ')');
+  }
+
+  // 1e. ENTRADA + PARCELAMENTO (demanda AJL 21/10/2026): le os campos x_studio
+  // da fatura (copiados do pedido pela automacao 115) para o buildPagamentoInfo.
+  var epValorEntrada = 0;
+  var epQtdParcelas = 0;
+  var epObsNfe = '';
+  try {
+    epValorEntrada = parseFloat(move.x_studio_valor_entrada) || 0;
+    epQtdParcelas = parseInt(move.x_studio_qtd_parcelas) || 0;
+    epObsNfe = String(move.x_studio_obs_nfe || '').trim();
+    if (epValorEntrada > 0 || epQtdParcelas > 0 || epObsNfe) {
+      console.log('[SIEG-EMIT] E+P campos da fatura: entrada=R$ ' + epValorEntrada.toFixed(2) +
+        ' parcelas=' + epQtdParcelas + (epObsNfe ? ' obs="' + epObsNfe.substring(0, 60) + '"' : ''));
+    }
+  } catch (eEP) {
+    console.log('[SIEG-EMIT] Campos E+P nao lidos: ' + eEP.message);
   }
 
   // 2. Read company
@@ -759,6 +814,24 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     linesData.push(ld);
   }
 
+  // 6a-ter. PRE-CHECK NCM NO MIDDLEWARE (demanda 2 — rede de seguranca alem
+  // da automacao 111 do Odoo): se QUALQUER linha esta sem NCM, a emissao e
+  // ABORTADA com mensagem clara (status 'erro' + chatter) dizendo exatamente
+  // quais produtos precisam do NCM. Nada e enviado a SEFAZ.
+  var itensSemNcm = [];
+  for (var sn = 0; sn < linesData.length; sn++) {
+    if (!String(linesData[sn].ncm || '').replace(/\D/g, '')) {
+      itensSemNcm.push('#' + (sn + 1) + ' ' + (linesData[sn].cProd || linesData[sn].product_name || '?'));
+    }
+  }
+  if (itensSemNcm.length && tipo === 'nfe') {
+    var msgNcm = 'NCM ausente ou invalido em ' + itensSemNcm.length + ' produto(s): '
+      + itensSemNcm.join(' | ').substring(0, 400)
+      + '. Cadastre o NCM no cadastro do produto e marque a fatura como pendente novamente.';
+    console.error('[SIEG-EMIT] *** PRE-CHECK NCM BLOQUEOU A EMISSAO: ' + msgNcm);
+    throw new Error(msgNcm);
+  }
+
   // 6a-bis. CONSISTENCIA SEFAZ (rejeicao 629): o XML envia vUnCom com 4 decimais
   // (TDec_1204) e a SEFAZ calcula vProd = qCom x vUnCom com os valores EFETIVOS
   // do XML. Normaliza: qCom 3 dec, vUnCom 4 dec, vProd derivado dos enviados.
@@ -842,6 +915,8 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     parcelasFatura: parcelasFatura,
     dataBase: move.invoice_date || move.date || '',
     itauBoletos: boletoDataList || [],
+    valorEntrada: epValorEntrada,
+    qtdParcelas: epQtdParcelas,
   });
 
   // Calcular Difal total para infCpl (Difal NAO soma no total — só informativo)
@@ -869,9 +944,13 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     order: {
       name: move.name,
       number: String(nextNum),
-      date_order: move.invoice_date || move.date,
+      // AJL (demanda 1): dhEmi SEMPRE no momento da emissao, horario de
+      // Brasilia (-03:00) — o formatDh converte o ISO UTC para -03:00.
+      date_order: new Date().toISOString(),
       amount_total: vNFValue, // vNF = vProd + vIPI (somente IPI soma)
       note: move.narration || '',
+      // Demanda 8: observacao livre da fatura (x_studio_obs_nfe) entra na NF
+      obs_nfe: epObsNfe || '',
       sale_order_number: saleOrderNumber || '',
       boleto_info: boletoInfo || '',
       icms_aliquota: icmsAliquotaInfCpl,
@@ -893,7 +972,8 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   };
   console.log('[SIEG-EMIT] Pagamento NF: ' + pagInfo.formaLabel + ' | tPag=' +
     (pagInfo.pagamentos[0] || {}).tPag + ' | indPag=' + (pagInfo.pagamentos[0] || {}).indPag +
-    ' | parcelas=' + (pagInfo.duplicatas ? pagInfo.duplicatas.length : 0));
+    ' | parcelas=' + (pagInfo.duplicatas ? pagInfo.duplicatas.length : 0) +
+    ' | detPag=' + pagInfo.pagamentos.length);
 
   // NFS-e: build service block from product x_studio_ fields
   if (tipo === 'nfse') {
@@ -906,39 +986,65 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   else processVals.x_studio_nfse_status = 'processando';
   await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId], processVals]);
 
-  // 9. Call SIEG API
-  console.log('[SIEG-EMIT] Enviando ao SIEG...');
-  var resultado;
-  try {
-    resultado = await emitirNota(emitData);
-  } catch (siegErr) {
-    // Captura erros HTTP (ex: 409 com detalhes no body)
-    var siegDetail = siegErr.response && siegErr.response.data;
-    var errMsg = 'SIEG HTTP ' + (siegErr.response ? siegErr.response.status : 'erro') + ': ';
-    if (siegDetail) {
-      // Tentar extrair ErrorMessage do formato SIEG (PascalCase)
-      var siegMsg = siegDetail.ErrorMessage || siegDetail.Message || siegDetail.message || '';
-      if (siegMsg) {
-        errMsg += siegMsg;
-      } else {
-        errMsg += typeof siegDetail === 'string' ? siegDetail : JSON.stringify(siegDetail).slice(0, 800);
-      }
-    } else {
-      errMsg += siegErr.message;
-    }
-    console.error('[SIEG-EMIT] Erro SIEG:', errMsg);
-    throw new Error(errMsg);
-  }
-  console.log('[SIEG-EMIT] SIEG retornou - sucesso: ' + resultado.sucesso + (resultado.httpStatus ? ' (HTTP ' + resultado.httpStatus + ')' : ''));
-
-  // Se SIEG retornou erro (IsSuccess=false), extrair mensagem detalhada
-  if (!resultado.sucesso && resultado.erro) {
-    console.error('[SIEG-EMIT] SIEG rejeitou o XML: ' + resultado.erro);
-  }
-
-  // 10. Parse result
-  var info = parseResult(resultado, tipo);
+  // 9. Call SIEG/SEFAZ — COM RETRY DE DUPLICIDADE (demanda 3)
+  // Se a SEFAZ rejeitar com cStat 539/205/204 (duplicidade de numero na serie),
+  // o numero da NF e AVANCADO (+1) e o XML regenerado com nova chave — ate 3
+  // tentativas. Isso garante que o numero da fatura SEMPRE acompanhe o numero
+  // real da NF autorizada (nunca mais trava em numero fantasma como o 539).
+  var MAX_TENTATIVAS = 3;
+  var resultado = null;
+  var info = null;
   var xmlRetornoText = '';
+  var tentativas = 0;
+  for (var tent = 1; tent <= MAX_TENTATIVAS; tent++) {
+    tentativas = tent;
+    emitData.order.number = String(nextNum);
+    console.log('[SIEG-EMIT] Tentativa ' + tent + '/' + MAX_TENTATIVAS + ' — Enviando ao SEFAZ/SIEG (nNF ' + nextNum + ')...');
+    try {
+      resultado = await emitirNota(emitData);
+    } catch (siegErr) {
+      // Captura erros HTTP (ex: 409 com detalhes no body)
+      var siegDetail = siegErr.response && siegErr.response.data;
+      var errMsg = 'SIEG HTTP ' + (siegErr.response ? siegErr.response.status : 'erro') + ': ';
+      if (siegDetail) {
+        // Tentar extrair ErrorMessage do formato SIEG (PascalCase)
+        var siegMsg = siegDetail.ErrorMessage || siegDetail.Message || siegDetail.message || '';
+        if (siegMsg) {
+          errMsg += siegMsg;
+        } else {
+          errMsg += typeof siegDetail === 'string' ? siegDetail : JSON.stringify(siegDetail).slice(0, 800);
+        }
+      } else {
+        errMsg += siegErr.message;
+      }
+      console.error('[SIEG-EMIT] Erro SIEG:', errMsg);
+      throw new Error(errMsg);
+    }
+    console.log('[SIEG-EMIT] SIEG retornou - sucesso: ' + resultado.sucesso + (resultado.httpStatus ? ' (HTTP ' + resultado.httpStatus + ')' : ''));
+
+    // Se SIEG retornou erro (IsSuccess=false), extrair mensagem detalhada
+    if (!resultado.sucesso && resultado.erro) {
+      console.error('[SIEG-EMIT] SIEG rejeitou o XML: ' + resultado.erro);
+    }
+
+    info = parseResult(resultado, tipo);
+    if (info.sucesso) break;
+
+    // === RETRY DUPLICIDADE (539/205/204) ===
+    var cStatN = String(info.cStat || '');
+    var motivoLc = String(info.motivo || '').toLowerCase();
+    var isDuplicidade = ['539', '205', '204', '540'].indexOf(cStatN) >= 0 ||
+      motivoLc.indexOf('duplicidade') >= 0 || motivoLc.indexOf('duplicada') >= 0 ||
+      motivoLc.indexOf('duplicat') >= 0;
+    if (isDuplicidade && tipo === 'nfe' && tent < MAX_TENTATIVAS) {
+      console.warn('[SIEG-EMIT] *** Rejeicao ' + (cStatN || '539') + ' (duplicidade) com nNF ' + nextNum +
+        ' — renumerando para ' + (nextNum + 1) + ' e reenviando (demanda 3) ***');
+      nextNum += 1;
+      continue;
+    }
+    break;
+  }
+
   var rawXmlAuth = resultado.resposta && (resultado.resposta.Xml || resultado.resposta.xml || resultado.resposta.xmlBase64);
   if (rawXmlAuth) {
     xmlRetornoText = (typeof rawXmlAuth === 'string' && rawXmlAuth.length > 200)
@@ -958,7 +1064,9 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       updateVals.x_studio_nfse_numero = String(nextNum);
     }
 
-    // Increment NF number (only on authorization)
+    // Increment NF number (only on authorization) — SYNC DA NUMERACAO:
+    // o contador fica SEMPRE com o numero da ultima NF autorizada, mesmo
+    // que tenha sido avancado pelo retry de duplicidade.
     try {
       var companyUpdate = {};
       companyUpdate[numField] = nextNum;
@@ -966,6 +1074,21 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       console.log('[SIEG-EMIT] Sequencia ' + numField + ' = ' + nextNum);
     } catch (seqErr) {
       console.error('[SIEG-EMIT] Erro ao atualizar sequencia:', seqErr.message);
+    }
+
+    // RENOMEIA A FATURA (demanda 3): o nome da fatura ('NFe 000NNNNN') passa a
+    // seguir EXATAMENTE o numero da NF autorizada — acaba a confusao entre
+    // numero da fatura no Odoo e numero real da NF (caso da 72902 vs 72906).
+    if (tipo === 'nfe') {
+      try {
+        var nomeEsperado = 'NFe ' + String(nextNum).padStart(8, '0');
+        if (String(move.name || '').trim() !== nomeEsperado) {
+          await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId], { name: nomeEsperado }]);
+          console.log('[SIEG-EMIT] Fatura renomeada: ' + move.name + ' -> ' + nomeEsperado + ' (alinhada a NF autorizada)');
+        }
+      } catch (eRen) {
+        console.warn('[SIEG-EMIT] Nao foi possivel renomear a fatura (nao critico): ' + eRen.message);
+      }
     }
   } else {
     // Falha: NUNCA gravar texto livre num campo Selection (o Odoo descarta e a
@@ -984,8 +1107,9 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   await writeStatusSafe(client, db, uid, pwd, moveId, tipo, updateVals);
   console.log('[SIEG-EMIT] Fatura atualizada');
 
-  // 12. Post XML + PDF to Chatter
-  await postChatterResult(client, db, uid, pwd, moveId, move.name, tipo, info, resultado, xmlRetornoText);
+  // 12. Post XML + PDF to Chatter (moveName pode ter sido renomeado — usar o
+  // nome final para o anexo ficar consistente com o numero da NF)
+  await postChatterResult(client, db, uid, pwd, moveId, tipo === 'nfe' && info.sucesso ? ('NFe ' + String(nextNum).padStart(8, '0')) : move.name, tipo, info, resultado, xmlRetornoText);
 
   return {
     move_id: moveId, sucesso: info.sucesso, tipo: tipo,
@@ -996,6 +1120,18 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
 // ============================================================
 // Post XML + PDF to Odoo Chatter
 // ============================================================
+/**
+ * Demanda 1 (AJL): hora de emissao sempre em horario de Brasilia.
+ * O Odoo exibe create_date no fuso do usuario, mas o texto da mensagem
+ * ganha o carimbo explicito dd/mm/aaaa hh:mm -03:00 para nao haver duvida.
+ */
+function brNowStr() {
+  var d = new Date(Date.now() - 3 * 3600 * 1000);
+  function p2(n) { return String(n).padStart(2, '0'); }
+  return p2(d.getUTCDate()) + '/' + p2(d.getUTCMonth() + 1) + '/' + d.getUTCFullYear() +
+    ' ' + p2(d.getUTCHours()) + ':' + p2(d.getUTCMinutes()) + ' (horario de Brasilia)';
+}
+
 async function postChatterResult(client, db, uid, pwd, moveId, moveName, tipo, info, resultado, xmlRetornoText) {
   var attachIds = [];
   var safeName = (moveName || 'Fatura').replace(/[^a-zA-Z0-9\-_]/g, '_');
@@ -1046,10 +1182,12 @@ async function postChatterResult(client, db, uid, pwd, moveId, moveName, tipo, i
       body += 'Numero: ' + info.numero + '<br/>';
     }
     body += 'Status: ' + info.cStat + ' - ' + info.motivo;
+    body += '<br/>Emissao: ' + brNowStr();
     body += '<br/><br/><i>Arquivos anexados: XML e ' + (tipo === 'nfe' ? 'DANFE' : 'DANFSE') + ' (PDF)</i>';
   } else {
     body = '<b>Erro na Emissao de ' + nfLabel + '</b><br/>';
     body += 'Status: ' + info.cStat + ' - ' + info.motivo;
+    body += '<br/>Tentativa: ' + brNowStr();
   }
 
   try {
@@ -2379,4 +2517,4 @@ async function cancelOneInvoice(client, db, uid, pwd, moveId, cancelarNFe) {
   return { move_id: moveId, sucesso: resultado.sucesso, fatura: move.name, cStat: resultado.cStat };
 }
 
-module.exports = { processPendingEmissions, processPendingCancellations, buildPagamentoInfo };
+module.exports = { processPendingEmissions, processPendingCancellations, buildPagamentoInfo, brNowStr };
