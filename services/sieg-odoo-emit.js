@@ -1248,11 +1248,11 @@ async function readCompany(client, db, uid, pwd, companyId) {
   }
 
   // AJL 21/10/2026 (pedido Renan): campo x_studio_codigo_municipio do cadastro
-  // MANDA como cMun — APENAS para emitente do PARANA. Prioridade maxima,
-  // acima da tabela e do Odoo (deterministico, sem depender de nome de cidade).
+  // MANDA como cMun — para emitente do PARANA, SANTA CATARINA e SAO PAULO.
+  // Prioridade maxima, acima da tabela e do Odoo (deterministico).
   var campoMunEmp = String(p.x_studio_codigo_municipio || '').replace(/\D/g, '');
   var ufEmp = (stateCode || 'PR').toUpperCase();
-  if ((ufEmp === 'PR' || ufEmp === 'SC') && campoMunEmp.length === 7) {
+  if ((ufEmp === 'PR' || ufEmp === 'SC' || ufEmp === 'SP') && campoMunEmp.length === 7) {
     if (cityIbge !== campoMunEmp) {
       console.log('[SIEG-EMIT] cMun EMITENTE pelo campo do cadastro (' + ufEmp + '): %s -> %s', cityIbge || '(vazio)', campoMunEmp);
     }
@@ -1477,11 +1477,12 @@ async function readPartner(client, db, uid, pwd, partnerId) {
   }
 
   // AJL 21/10/2026 (pedido Renan): campo x_studio_codigo_municipio no cadastro
-  // do cliente MANDA como cMun — APENAS para PARANA. Prioridade maxima,
-  // acima da tabela IBGE e do codigo vindo do Odoo (deterministico).
+  // do cliente MANDA como cMun — para PARANA, SANTA CATARINA e SAO PAULO.
+  // Prioridade maxima, acima da tabela IBGE e do codigo vindo do Odoo
+  // (deterministico). Demais UFs: busca nativa (res.city / tabela) como ja e.
   var campoMunDest = String(p.x_studio_codigo_municipio || '').replace(/\D/g, '');
   var ufDest = String(stateCode || '').toUpperCase();
-  if ((ufDest === 'PR' || ufDest === 'SC') && campoMunDest.length === 7) {
+  if ((ufDest === 'PR' || ufDest === 'SC' || ufDest === 'SP') && campoMunDest.length === 7) {
     if (cityIbge !== campoMunDest) {
       console.log('[SIEG-EMIT] cMun DEST pelo campo do cadastro (' + ufDest + '): %s/%s %s -> %s', p.city, stateCode, cityIbge || '(vazio)', campoMunDest);
     }
