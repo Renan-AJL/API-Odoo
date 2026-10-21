@@ -121,14 +121,14 @@ async function gerarDanfePdf(nfeProcXml, opts) {
   }
 
   // --- Canhoto ---
-  box(L, y, W - 110, 26);
+  box(L, y, W - 110, 40);
   doc.fontSize(5.5).text('RECEBEMOS DE ' + tag(emit, 'xNome') + ' OS PRODUTOS CONSTANTES DA NOTA FISCAL INDICADA AO LADO', L + 3, y + 3, { width: W - 120 });
-  doc.fontSize(5.5).text('DATA DE RECEBIMENTO', L + 3, y + 15);
-  doc.text('IDENTIFICACAO E ASSINATURA DO RECEBEDOR', L + 130, y + 15);
-  box(L + W - 110, y, 110, 26);
+  doc.fontSize(5.5).text('DATA DE RECEBIMENTO', L + 3, y + 24);
+  doc.text('IDENTIFICACAO E ASSINATURA DO RECEBEDOR', L + 130, y + 24);
+  box(L + W - 110, y, 110, 40);
   doc.fontSize(7).font('Helvetica-Bold')
-    .text('NF-e  N. ' + tag(ide, 'nNF') + '\nSERIE ' + tag(ide, 'serie'), L + W - 105, y + 6);
-  y += 32;
+    .text('NF-e  N. ' + tag(ide, 'nNF') + '\nSERIE ' + tag(ide, 'serie'), L + W - 105, y + 14);
+  y += 46;
 
   // --- Cabecalho: emitente + chave ---
   var hHead = 78;
