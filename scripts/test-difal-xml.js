@@ -58,14 +58,16 @@ check('NADA entre </ICMS00> e </ICMS> (ICMSUFDest nao dentro do ICMS)',
 check('vBCUFDest=8376.00', xml1.includes('<vBCUFDest>8376.00</vBCUFDest>'));
 check('pICMSUFDest=17.00 (tabela SC)', xml1.includes('<pICMSUFDest>17.00</pICMSUFDest>'));
 check('pICMSInter=12.00', xml1.includes('<pICMSInter>12.00</pICMSInter>'));
-check('pICMSInterPart=100.00', xml1.includes('<pICMSInterPart>100.00</pICMSInterPart>'));
+// FIX rejeicao 816 (NT 2019.001/LC 190/2020): partilha do remetente = 0.00,
+// vICMSUFRemet = 0.00 e DIFAL integral (100%) para a UF de destino.
+check('pICMSInterPart=0.00 (2019+: partilha remetente zero)', xml1.includes('<pICMSInterPart>0.00</pICMSInterPart>'));
 check('vFCPUFDest=0.00', xml1.includes('<vFCPUFDest>0.00</vFCPUFDest>'));
-check('vICMSUFDest=418.80 (8376 x 5%)', xml1.includes('<vICMSUFDest>418.80</vICMSUFDest>'));
-check('vICMSUFRemet item=1005.12 (8376 x 12%)', /<vICMSUFDest>418\.80<\/vICMSUFDest><vICMSUFRemet>1005\.12<\/vICMSUFRemet>/.test(xml1.replace(/\n/g, '')));
-check('ICMSTot vICMSUFRemet=1005.12', /<vICMSUFDest>418\.80<\/vICMSUFDest>\s*<vICMSUFRemet>1005\.12<\/vICMSUFRemet>/.test(xml1));
+check('vICMSUFDest=418.80 (8376 x 5% — DIFAL integral UF destino)', xml1.includes('<vICMSUFDest>418.80</vICMSUFDest>'));
+check('vICMSUFRemet item=0.00 (fix rejeicao 816)', /<vICMSUFDest>418\.80<\/vICMSUFDest><vICMSUFRemet>0\.00<\/vICMSUFRemet>/.test(xml1.replace(/\n/g, '')));
+check('ICMSTot vICMSUFRemet=0.00', /<vICMSUFDest>418\.80<\/vICMSUFDest>\s*<vICMSUFRemet>0\.00<\/vICMSUFRemet>/.test(xml1));
 check('ICMSTot com vICMSUFDest=418.80', /<ICMSTot>[\s\S]*<vICMSUFDest>418.80<\/vICMSUFDest>/.test(xml1));
 check('ordem XSD: vICMSDeson -> vFCPUFDest -> vICMSUFDest -> vICMSUFRemet -> vFCP',
-  /<vICMSDeson>0\.00<\/vICMSDeson>\s*<vFCPUFDest>0\.00<\/vFCPUFDest>\s*<vICMSUFDest>418\.80<\/vICMSUFDest>\s*<vICMSUFRemet>1005\.12<\/vICMSUFRemet>\s*<vFCP>0\.00<\/vFCP>/.test(xml1));
+  /<vICMSDeson>0\.00<\/vICMSDeson>\s*<vFCPUFDest>0\.00<\/vFCPUFDest>\s*<vICMSUFDest>418\.80<\/vICMSUFDest>\s*<vICMSUFRemet>0\.00<\/vICMSUFRemet>\s*<vFCP>0\.00<\/vFCP>/.test(xml1));
 check('vICMS origem mantido 1005.12', xml1.includes('<vICMS>1005.12</vICMS>'));
 check('vNF inalterado 8376.00', xml1.includes('<vNF>8376.00</vNF>'));
 
@@ -84,8 +86,9 @@ linhasMA[0].picms = '7'; linhasMA[0].vicms = '586.32'; // emissor reescreve pICM
 var xml4 = gerarXmlNFe(base({ partner: { state: 'MA', city: 'Sao Luis', city_ibge_code: '2111300', zip: '65010000' }, lines: linhasMA }));
 check('pICMSUFDest=22.00', xml4.includes('<pICMSUFDest>22.00</pICMSUFDest>'));
 check('pICMSInter=7.00', xml4.includes('<pICMSInter>7.00</pICMSInter>'));
-check('vICMSUFDest=1256.40 (8376 x 15%)', xml4.includes('<vICMSUFDest>1256.40</vICMSUFDest>'));
-check('vICMSUFRemet=586.32 (8376 x 7%)', /<vICMSUFDest>1256\.40<\/vICMSUFDest><vICMSUFRemet>586\.32<\/vICMSUFRemet>/.test(xml4.replace(/\n/g, '')));
+check('vICMSUFDest=1256.40 (8376 x 15% — integral UF destino)', xml4.includes('<vICMSUFDest>1256.40</vICMSUFDest>'));
+check('vICMSUFRemet=0.00 (fix rejeicao 816)', /<vICMSUFDest>1256\.40<\/vICMSUFDest><vICMSUFRemet>0\.00<\/vICMSUFRemet>/.test(xml4.replace(/\n/g, '')));
+check('pICMSInterPart=0.00 (cenario MA)', xml4.includes('<pICMSInterPart>0.00</pICMSInterPart>'));
 
 console.log('\n' + (falhas === 0 ? 'TODOS OS CHECKS OK' : falhas + ' CHECK(S) FALHARAM'));
 process.exit(falhas === 0 ? 0 : 1);

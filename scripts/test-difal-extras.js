@@ -63,7 +63,7 @@ var flatSn = xmlSn.replace(/\n\s*/g, '');
 check('CSOSN: ICMSSN102 emitido', /<ICMS><ICMSSN102><orig>0<\/orig><CSOSN>102<\/CSOSN><\/ICMSSN102><\/ICMS>/.test(flatSn));
 check('CSOSN: ICMSUFDest apos COFINS', /<\/COFINS><ICMSUFDest>[\s\S]*?<\/ICMSUFDest><\/imposto>/.test(flatSn));
 check('CSOSN: vICMSUFDest=418.80 (tabela SC 17% - 12%)', flatSn.includes('<vICMSUFDest>418.80</vICMSUFDest>'));
-check('CSOSN: vICMSUFRemet=1005.12', flatSn.includes('<vICMSUFRemet>1005.12</vICMSUFRemet>'));
+check('CSOSN: vICMSUFRemet=0.00 (fix rejeicao 816)', flatSn.includes('<vICMSUFRemet>0.00</vICMSUFRemet>'));
 
 console.log('\n' + (falhas === 0 ? 'EXTRAS OK' : falhas + ' FALHA(S)'));
 process.exit(falhas === 0 ? 0 : 1);

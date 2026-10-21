@@ -99,11 +99,16 @@ function calcIcmsUfDestItem(line, company, partner, cfg, indIEDest) {
     ? parseFloat(line.picms)
     : (UFS_SUL_SUDESTE.includes(ufDest) ? 12 : 7);
   const vBcUfDest = round2(parseFloat(line.vbc_icms || line.vbc || line.price_subtotal || 0));
-  const pIcmsInterPart = 100; // 2019+: 100% do diferencial para a UF de destino
-  const vIcmsUfDest = round2(vBcUfDest * (pIcmsUfDest - pIcmsInter) * pIcmsInterPart / 10000);
-  // vICMSUFRemet (OBRIGATORIO no XSD, min=1): ICMS que permanece na UF de origem
-  // (base x aliq interestadual). vICMSUFDest + vICMSUFRemet = ICMS teorico a aliq interna.
-  const vIcmsUfRemet = round2(vBcUfDest * pIcmsInter / 100);
+  // NT 2019.001 / LC 190/2020 (art. 13 §4o LC 87/96): desde 2019 100% do DIFAL
+  // vai para a UF de DESTINO — a partilha da UF do remetente (pICMSInterPart)
+  // e ZERO e o vICMSUFRemet deve ser 0.00. Informar valor > 0 gera a rejeicao
+  // 816 "Valor do ICMS Interestadual para UF do Remetente difere do calculado
+  // [Valor Informado: X Valor Calculado: 0.00]" (SEFAZ calcula 0.00).
+  const pIcmsInterPart = 0; // 2019+: partilha do remetente = 0.00 (obrigatorio no XML)
+  // DIFAL integral pertence a UF de destino: vBCUFDest x (aliq interna UF dest - aliq interestadual)
+  const vIcmsUfDest = round2(vBcUfDest * (pIcmsUfDest - pIcmsInter) / 100);
+  // vICMSUFRemet: tag OBRIGATORIA no XSD (min=1) porem o VALOR e 0.00 desde 2019.
+  const vIcmsUfRemet = 0;
   return {
     vBCUFDest: vBcUfDest,
     pFCPUFDest: 0, // produto fora da lista do Fundo de Combate a Pobreza da UF destino
