@@ -186,6 +186,7 @@ async function emitirBoletosAuto(ctx) {
   var html =
     '<b>Boletos emitidos automaticamente junto com a NF (' + pags.length + ')</b><br/>' +
     linhas.join('<br/>') +
+    (d.aviso_config ? '<br/><b style="color:#b45309">Aviso: ' + String(d.aviso_config).replace(/</g, '&lt;') + '</b>' : '') +
     '<br/><i>Forma: ' + (d.forma_pagamento || ctx.formaPagamento) +
     ' | Odoo: ' + (d.odoo_push || 'n/d') + ' | ' + ((Date.now() - t0) / 1000).toFixed(1) + 's</i>';
   console.log('[BOLETO-AUTO] OK: ' + pags.length + ' boleto(s) em ' + (Date.now() - t0) + 'ms | push Odoo: ' + (d.odoo_push || 'n/d'));

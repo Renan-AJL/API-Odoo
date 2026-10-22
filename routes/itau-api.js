@@ -513,6 +513,48 @@ function calcDataVenc(base, dias) {
   return a+'-'+m+'-'+d;
 }
 
+/**
+ * Demanda 22/10/2026: parcelas EDITAVEIS para TODAS as formas que emitem boleto
+ * (Entrada+Parcelamento, DIN+BOLETO, BOLETO 30/60/90, 1 + 30 BOLETO, ENTRADA+CHQ...).
+ * Fonte da verdade (fatura): x_studio_valor_entrada / x_studio_qtd_parcelas /
+ * x_fatura.parcela (valores e datas por boleto) — lidos por lerFaturaEntradaParcelamento.
+ * Prioridade: 1) parcelasConfig (valor/data por boleto)  2) qtd/entrada (split igual,
+ * preservando os dias do parse quando a contagem bate).
+ * Retorna { plano, aviso } ou null quando nada configurado (mantem o plano do parse).
+ */
+function aplicarConfigBoleto(planoParse, ep) {
+  if (!ep) return null;
+  var temConfig = ep.parcelasConfig && ep.parcelasConfig.length > 0;
+  var temQtd = (parseInt(ep.qtdParcelas) || 0) > 0;
+  var temEntrada = (parseFloat(ep.entrada) || 0) > 0;
+  if (!temConfig && !temQtd && !temEntrada) return null;
+
+  var nParc = temConfig ? ep.parcelasConfig.length
+    : Math.max(1, Math.min(parseInt(ep.qtdParcelas) || (planoParse && planoParse.parcelas ? planoParse.parcelas.length : 1), 60));
+  var parcelas = [];
+  if (temConfig) {
+    parcelas = ep.parcelasConfig.map(function (pc, ix) {
+      return { numero: pc.numero || (ix + 1), dias: 0, valor_pct: 0, valorFixo: pc.valor, dataFixa: pc.data };
+    });
+    var somaCfg = 0;
+    for (var s = 0; s < parcelas.length; s++) somaCfg += parcelas[s].valorFixo;
+    somaCfg = Math.round(somaCfg * 100) / 100;
+    var dif = Math.round((somaCfg - (ep.financiado || 0)) * 100) / 100;
+    var aviso = (Math.abs(dif) > 0.05)
+      ? ('Soma das parcelas configuradas (R$ ' + somaCfg.toFixed(2) + ') difere do financiado (R$ ' +
+        (ep.financiado || 0).toFixed(2) + ') — boletos emitidos com os valores configurados')
+      : '';
+    return { plano: { tipo: 'boleto', parcelas: parcelas, baseValor: ep.financiado, epBaseHoje: true }, aviso: aviso };
+  }
+  // Preserva os DIAS do parse quando a contagem bate (ex: BOLETO 30/60 com entrada)
+  var diasParse = (planoParse && planoParse.tipo === 'boleto' && planoParse.parcelas &&
+    planoParse.parcelas.length === nParc) ? planoParse.parcelas.map(function (p) { return p.dias; }) : null;
+  for (var i = 1; i <= nParc; i++) {
+    parcelas.push({ numero: i, dias: diasParse ? diasParse[i - 1] : i * 30, valor_pct: 100 / nParc });
+  }
+  return { plano: { tipo: 'boleto', parcelas: parcelas, baseValor: ep.financiado, epBaseHoje: true }, aviso: '' };
+}
+
 router.post('/pagar', apiKeyAuth, async function(req, res) {
   try {
     var d = req.body;
@@ -543,36 +585,35 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
     var valorTotal = await corrigirValorComIpi(faturaName, faturaId, parseFloat(fat.valor_nominal || d.fatura_valor) || 0);
     var dataVencBase = fat.data_vencimento || d.fatura_vencimento || '';
 
-    // === ENTRADA + PARCELAMENTO (demanda 8): le entrada/parcelas da fatura ===
-    var isEntradaParceladaPagar = formaPag.trim().toUpperCase().indexOf('ENTRADA') >= 0 &&
-                                  formaPag.trim().toUpperCase().indexOf('PARCEL') >= 0;
+    // === ENTRADA + PARCELAMENTO (demanda 8) + PARCELAS EDITAVEIS para TODAS as
+    // formas com boleto (demanda 22/10): entrada, qtd e data/valor por parcela
+    // vem da fatura (x_studio_valor_entrada / x_studio_qtd_parcelas / x_fatura.parcela)
+    var upPag = formaPag.trim().toUpperCase();
+    var isEntradaParceladaPagar = upPag.indexOf('ENTRADA') >= 0 && upPag.indexOf('PARCEL') >= 0;
+    var usaConfigBoletoPagar = upPag.indexOf('BOL') >= 0 || upPag.indexOf('ENTRADA') >= 0;
     var epDadosPagar = { entrada: 0, qtdParcelas: 0, financiado: valorTotal };
-    if (isEntradaParceladaPagar) {
+    if (usaConfigBoletoPagar) {
       epDadosPagar = await lerFaturaEntradaParcelamento(faturaName, faturaId, valorTotal);
     }
 
     var pag = d.pagador || {};
 
     var plano = parseFormaPagamento(formaPag);
-    if (isEntradaParceladaPagar) {
-      // E+P: N boletos do VALOR FINANCIADO (vNF - entrada).
+    var avisoConfigPagar = '';
+    if (isEntradaParceladaPagar || usaConfigBoletoPagar) {
+      // E+P / formas com boleto: N boletos do VALOR FINANCIADO (vNF - entrada).
       // A entrada nao vira boleto — e paga a vista na emissao.
-      // Demanda 22/10/2026: se o financeiro configurou data/valor por parcela na fatura
-      // (x_fatura.parcela), usa a CONFIGURACAO; senao mantem 30/60/90 automatico.
-      var nParcEP = Math.max(1, Math.min(parseInt(epDadosPagar.qtdParcelas) || 1, 60));
-      var parcelasEP = [];
-      if (epDadosPagar.parcelasConfig && epDadosPagar.parcelasConfig.length) {
-        parcelasEP = epDadosPagar.parcelasConfig.map(function(pcEP, ixEP) {
-          return { numero: pcEP.numero || (ixEP + 1), dias: 0, valor_pct: 0, valorFixo: pcEP.valor, dataFixa: pcEP.data };
-        });
-        console.log('[API/BOLETO] E+P CONFIG: ' + parcelasEP.length + ' boleto(s) conforme data/valor configurados na fatura pelo financeiro');
-      } else {
-        for (var epi = 1; epi <= nParcEP; epi++) {
-          parcelasEP.push({ numero: epi, dias: epi * 30, valor_pct: 100 / nParcEP });
-        }
+      // Se o financeiro configurou data/valor por parcela na fatura
+      // (x_fatura.parcela), usa a CONFIGURACAO; senao mantem o plano do parse.
+      var planoCfgPagar = aplicarConfigBoleto(plano, epDadosPagar);
+      if (planoCfgPagar) {
+        plano = planoCfgPagar.plano;
+        avisoConfigPagar = planoCfgPagar.aviso || '';
+        if (avisoConfigPagar) console.warn('[API/BOLETO] AVISO CONFIG: ' + avisoConfigPagar);
+        console.log('[API/BOLETO] ' + plano.parcelas.length + ' boleto(s) do FINANCIADO R$ ' + epDadosPagar.financiado.toFixed(2) +
+          ' (entrada R$ ' + epDadosPagar.entrada.toFixed(2) +
+          (epDadosPagar.parcelasConfig ? ', CONFIG do financeiro' : ', 30/60/90 auto') + ')');
       }
-      plano = { tipo: 'boleto', parcelas: parcelasEP, baseValor: epDadosPagar.financiado, epBaseHoje: true };
-      console.log('[API/BOLETO] E+P: ' + parcelasEP.length + ' boletos do FINANCIADO R$ ' + epDadosPagar.financiado.toFixed(2) + ' (entrada R$ ' + epDadosPagar.entrada.toFixed(2) + ' nao vai pro Itau)');
     }
     console.log('[API] Plano parsed:', JSON.stringify(plano));
 
@@ -766,7 +807,8 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
         forma_pagamento: formaPag, total_parcelas: totalP,
         valor_total: valorTotal.toFixed(2),
         valor_financiado: baseValorPag.toFixed(2),
-        valor_entrada: isEntradaParceladaPagar ? epDadosPagar.entrada.toFixed(2) : '0.00',
+        valor_entrada: usaConfigBoletoPagar ? epDadosPagar.entrada.toFixed(2) : '0.00',
+        aviso_config: avisoConfigPagar || '',
         fatura_name: faturaName || '(nao informado)',
         fatura_id: faturaId || 0,
         pagamentos: pagamentos,
@@ -950,35 +992,31 @@ router.post('/gerar', async function(req, res) {
       return;
     }
 
-    // === ENTRADA + PARCELAMENTO (demanda 8): le entrada/parcelas da fatura ===
-    var isEntradaParcelada = formaPag.trim().toUpperCase().indexOf('ENTRADA') >= 0 &&
-                             formaPag.trim().toUpperCase().indexOf('PARCEL') >= 0;
+    // === ENTRADA + PARCELAMENTO (demanda 8) + PARCELAS EDITAVEIS para TODAS as
+    // formas com boleto (demanda 22/10) — mesma regra do /pagar ===
+    var upGerar = formaPag.trim().toUpperCase();
+    var isEntradaParcelada = upGerar.indexOf('ENTRADA') >= 0 && upGerar.indexOf('PARCEL') >= 0;
+    var usaConfigBoleto = upGerar.indexOf('BOL') >= 0 || upGerar.indexOf('ENTRADA') >= 0;
     var epDados = { entrada: 0, qtdParcelas: 0, financiado: fatValor };
-    if (isEntradaParcelada) {
+    if (usaConfigBoleto) {
       epDados = await lerFaturaEntradaParcelamento(fatName, gerarFaturaId, fatValor);
     }
 
     // === BOLETO ===
     var plano = parseFormaPagamento(formaPag);
-    if (isEntradaParcelada) {
-      // E+P: N boletos do VALOR FINANCIADO (vNF - entrada).
+    if (isEntradaParcelada || usaConfigBoleto) {
+      // E+P / formas com boleto: N boletos do VALOR FINANCIADO (vNF - entrada).
       // A entrada nao vira boleto — e paga a vista na emissao.
-      // Demanda 22/10/2026: se o financeiro configurou data/valor por parcela na fatura
-      // (x_fatura.parcela), usa a CONFIGURACAO; senao mantem 30/60/90 automatico.
-      var nParcEP = Math.max(1, Math.min(parseInt(epDados.qtdParcelas) || 1, 60));
-      var parcelasEP = [];
-      if (epDados.parcelasConfig && epDados.parcelasConfig.length) {
-        parcelasEP = epDados.parcelasConfig.map(function(pcGE, ixGE) {
-          return { numero: pcGE.numero || (ixGE + 1), dias: 0, valor_pct: 0, valorFixo: pcGE.valor, dataFixa: pcGE.data };
-        });
-        console.log('[API/GERAR] E+P CONFIG: ' + parcelasEP.length + ' boleto(s) conforme data/valor configurados na fatura pelo financeiro');
-      } else {
-        for (var epi = 1; epi <= nParcEP; epi++) {
-          parcelasEP.push({ numero: epi, dias: epi * 30, valor_pct: 100 / nParcEP });
-        }
+      // Se o financeiro configurou data/valor por parcela na fatura
+      // (x_fatura.parcela), usa a CONFIGURACAO; senao mantem o plano do parse.
+      var planoCfgGerar = aplicarConfigBoleto(plano, epDados);
+      if (planoCfgGerar) {
+        plano = planoCfgGerar.plano;
+        if (planoCfgGerar.aviso) console.warn('[API/GERAR] AVISO CONFIG: ' + planoCfgGerar.aviso);
+        console.log('[API/GERAR] ' + plano.parcelas.length + ' boleto(s) do FINANCIADO R$ ' + epDados.financiado.toFixed(2) +
+          ' (entrada R$ ' + epDados.entrada.toFixed(2) +
+          (epDados.parcelasConfig ? ', CONFIG do financeiro' : ', 30/60/90 auto') + ')');
       }
-      plano = { tipo: 'boleto', parcelas: parcelasEP, baseValor: epDados.financiado, epBaseHoje: true };
-      console.log('[API/GERAR] E+P: ' + parcelasEP.length + ' boletos do valor FINANCIADO R$ ' + epDados.financiado.toFixed(2) + ' (entrada R$ ' + epDados.entrada.toFixed(2) + ' nao vai pro Itau)');
     }
     if (plano.tipo !== 'boleto' || plano.parcelas.length === 0) {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
