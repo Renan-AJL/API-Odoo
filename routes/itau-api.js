@@ -17,6 +17,7 @@ const { buildDevedorFromDoc } = require('../utils/pix-devedor');
 const { buscarExtratoNormalizado } = require('../services/itau-extrato');
 const { criarExtrato } = require('../services/odoo-bank-statement');
 const config = require('../config');
+const { getOdooClient } = require('../services/odoo-api');
 const bwipjs = require('bwip-js');
 
 // === AJL 21/10/2026: numero do documento do boleto SEM o prefixo NF-e/NFe ===
@@ -554,6 +555,110 @@ function aplicarConfigBoleto(planoParse, ep) {
   }
   return { plano: { tipo: 'boleto', parcelas: parcelas, baseValor: ep.financiado, epBaseHoje: true }, aviso: '' };
 }
+
+// ================== PREVIEW DO PLANO DE BOLETOS (sem emitir) ==================
+// GET /api/v1/itau/plano-preview?fatura_name=NFe%2000072944  |  ?fatura_id=123
+// Demanda 22/10 (parcelas editaveis): mostra EXATAMENTE o plano que o /pagar
+// usaria — parse da forma + entrada/qtd/tabela x_fatura.parcela da fatura.
+// Nao emite boleto, nao grava nada — ferramenta de conferencia do financeiro.
+router.get('/plano-preview', apiKeyAuth, async function(req, res) {
+  try {
+    var faturaNamePrev = String(req.query.fatura_name || req.query.fatura || '').trim();
+    var faturaIdPrev = req.query.fatura_id ? parseInt(req.query.fatura_id) : 0;
+    if (!faturaNamePrev && !faturaIdPrev) {
+      return res.json({ success: false, message: 'Informe fatura_name ou fatura_id' });
+    }
+    var ocPrev = config.odoo;
+    if (!ocPrev || !ocPrev.enabled || !ocPrev.url) {
+      return res.json({ success: false, message: 'Odoo nao configurado' });
+    }
+    var cliPrev = getOdooClient();
+    if (!cliPrev.uid) await cliPrev.authenticate();
+    var domPrev = faturaNamePrev
+      ? [['name', '=', faturaNamePrev], ['move_type', '=', 'out_invoice']]
+      : [['id', '=', faturaIdPrev], ['move_type', '=', 'out_invoice']];
+    var idsPrev = await cliPrev.execute('account.move', 'search', [domPrev], { limit: 1 });
+    if (!idsPrev || !idsPrev.length) {
+      return res.json({ success: false, message: 'Fatura nao encontrada: ' + (faturaNamePrev || faturaIdPrev) });
+    }
+    var recsPrev = await cliPrev.execute('account.move', 'read', [idsPrev,
+      ['name', 'state', 'amount_total', 'x_studio_forma_de_pagamento',
+       'x_studio_valor_entrada', 'x_studio_qtd_parcelas']]);
+    var invPrev = (recsPrev && recsPrev[0]) || {};
+    var formaPrev = invPrev.x_studio_forma_de_pagamento || '';
+    var valorPrev = await corrigirValorComIpi(invPrev.name, invPrev.id, invPrev.amount_total || 0);
+    var upPrev = formaPrev.trim().toUpperCase();
+    var usaCfgPrev = upPrev.indexOf('BOL') >= 0 || upPrev.indexOf('ENTRADA') >= 0;
+    var epPrev = { entrada: 0, qtdParcelas: 0, financiado: valorPrev };
+    if (usaCfgPrev) {
+      epPrev = await lerFaturaEntradaParcelamento(invPrev.name, invPrev.id, valorPrev);
+    }
+    var planoPrev = parseFormaPagamento(formaPrev);
+    var avisoPrev = '';
+    if (usaCfgPrev) {
+      var cfgPrev = aplicarConfigBoleto(planoPrev, epPrev);
+      if (cfgPrev) {
+        planoPrev = cfgPrev.plano;
+        avisoPrev = cfgPrev.aviso || '';
+      }
+    }
+    if (!planoPrev || planoPrev.tipo !== 'boleto' || !planoPrev.parcelas || !planoPrev.parcelas.length) {
+      return res.json({
+        success: true,
+        fatura: { id: invPrev.id, name: invPrev.name, state: invPrev.state },
+        forma_pagamento: formaPrev,
+        gera_boleto: false,
+        message: 'Forma nao gera boleto pelo parser atual',
+      });
+    }
+    var basePrev = (typeof planoPrev.baseValor === 'number' && planoPrev.baseValor > 0) ? planoPrev.baseValor : valorPrev;
+    var totPrev = planoPrev.parcelas.length;
+    var parcListPrev = [];
+    var somaPrev = 0;
+    for (var ip = 0; ip < totPrev; ip++) {
+      var pp = planoPrev.parcelas[ip];
+      var vp;
+      if (typeof pp.valorFixo === 'number' && pp.valorFixo > 0) {
+        vp = Math.round(pp.valorFixo * 100) / 100;
+      } else {
+        vp = Math.round((basePrev * pp.valor_pct / 100) * 100) / 100;
+        if (ip === totPrev - 1) {
+          var somaj = 0;
+          for (var jp = 0; jp < totPrev - 1; jp++) somaj += Math.round((basePrev * planoPrev.parcelas[jp].valor_pct / 100) * 100) / 100;
+          vp = Math.round((basePrev - somaj) * 100) / 100;
+        }
+      }
+      somaPrev += vp;
+      var dvPrev = (pp.dataFixa && /^\d{4}-\d{2}-\d{2}$/.test(pp.dataFixa))
+        ? pp.dataFixa
+        : calcDataVenc('', pp.dias);
+      parcListPrev.push({
+        numero: pp.numero || (ip + 1),
+        dias: pp.dias || 0,
+        data_vencimento: dvPrev,
+        valor: vp,
+        origem: (typeof pp.valorFixo === 'number' && pp.valorFixo > 0) ? 'config_fatura' : 'calculo',
+      });
+    }
+    res.json({
+      success: true,
+      fatura: { id: invPrev.id, name: invPrev.name, state: invPrev.state, amount_total: valorPrev },
+      forma_pagamento: formaPrev,
+      gera_boleto: true,
+      valor_entrada: epPrev.entrada || 0,
+      valor_financiado: basePrev,
+      usa_config_fatura: !!(epPrev.parcelasConfig && epPrev.parcelasConfig.length),
+      qtd_parcelas_campo: epPrev.qtdParcelas || 0,
+      total_parcelas: totPrev,
+      soma_parcelas: Math.round(somaPrev * 100) / 100,
+      aviso_config: avisoPrev,
+      parcelas: parcListPrev,
+    });
+  } catch (ePrev) {
+    console.error('[API/PREVIEW] ERRO:', ePrev.message);
+    res.json({ success: false, message: 'Erro no preview: ' + (ePrev.message || ePrev) });
+  }
+});
 
 router.post('/pagar', apiKeyAuth, async function(req, res) {
   try {
