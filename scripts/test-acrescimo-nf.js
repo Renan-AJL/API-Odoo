@@ -124,14 +124,30 @@ var xml = gerarXmlNFe({
 });
 
 ok('XML gerado', xml && xml.indexOf('<infNFe') > 0);
-ok('<transporta> presente (sem frete — modFrete 9)', xml.indexOf('<transporta>') > 0);
+// REVERT 845 (23/10): SEFAZ rejeita <transporta> preenchida com modFrete 9 —
+// sem frete o grupo transportador NAO vai (comportamento anterior restaurado)
+ok('<transporta> AUSENTE sem frete (evita rejeicao 845)', xml.indexOf('<transporta>') === -1);
 ok('modFrete 9 (sem frete)', xml.indexOf('<modFrete>9</modFrete>') > 0);
-ok('CNPJ da AJL como transportadora', xml.indexOf('<CNPJ>22603750000190</CNPJ>') > 0);
-ok('transporta vem ANTES de vol (ordem do schema)', xml.indexOf('<transporta>') < xml.indexOf('<vol>') || xml.indexOf('<vol>') === -1);
 ok('Venc: DD/MM/AAAA no infCpl', xml.indexOf('Venc: 22/11/2026') > 0 && xml.indexOf('Venc: 07/12/2026') > 0);
 ok('duplicata dVenc segue ISO (schema)', xml.indexOf('<dVenc>2026-11-22</dVenc>') > 0);
 ok('Acréscimo: R$ 20.00 no infCpl', xml.indexOf('Acréscimo: R$ 20.00') > 0);
-ok('transporta xNome = razão social AJL', xml.indexOf('AJL COMERCIO ATACADISTA') > 0);
+
+// Com frete real (cfg.transporta explicito): grupo transportador entra
+var xmlFrete = gerarXmlNFe({
+  company: company, partner: partner, order: order, lines: lines, pagamentos: pagamentos,
+  duplicatas: [
+    { dVenc: '2026-11-22', vDup: '77.75' },
+    { dVenc: '2026-12-07', vDup: '77.75' },
+  ],
+  config: { serie: '100', tpAmb: '2', natOp: 'Venda de Mercadoria', mod: '55',
+    transporta: { xNome: 'TRANSPORTADORA TESTE LTDA', cnpj: '12345678000100', ie: '1234567890',
+      xEnder: 'Rodovia Teste, 1', xMun: 'CURITIBA', UF: 'PR' } },
+  tipo: 'nfe',
+});
+ok('XML com frete gerado', xmlFrete && xmlFrete.indexOf('<infNFe') > 0);
+ok('<transporta> presente quando cfg.transporta informado', xmlFrete.indexOf('<transporta>') > 0);
+ok('transportadora real no XML (nome)', xmlFrete.indexOf('TRANSPORTADORA TESTE LTDA') > 0);
+ok('transportadora real no XML (CNPJ)', xmlFrete.indexOf('<CNPJ>12345678000100</CNPJ>') > 0);
 
 console.log('== E. Rota de fabricação (PCP/Base44) ==');
 ok('routes/fabricacao.js existe', fabSrc.length > 1000);

@@ -656,10 +656,12 @@ ${xmlEndereco(partner, 'enderDest')}
     </total>`;
 
   // === transp ===
-  // AJL 23/10/2026 (demanda Transportadora): a AJL fica SEMPRE cadastrada como
-  // transportadora na NF — mesmo sem frete (modFrete 9). Schema permite
-  // <transporta> preenchida com modFrete 9. cfg.transporta sobrepoe se um dia
-  // for enviada uma transportadora real.
+  // AJL 23/10/2026 URGENTE (revert 845): a SEFAZ REJEITA com o erro 845
+  // ("O grupo transportador nao pode ser preenchido para modalidade do frete
+  // informada") quando <transporta> vem preenchida com modFrete 9 (sem
+  // transporte). Voltamos ao comportamento anterior: SEM <transporta> por
+  // padrao. A transportadora AJL continua cadastrada no Odoo (res.partner);
+  // quando houver frete real, informar cfg.transporta e o grupo entra.
   const modFrete = String(cfg.modFrete || '9');
   const hasVolume = cfg.qVol != null && Number(cfg.qVol) > 0;
   // Peso total: soma peso_unitario * quantidade de cada linha
@@ -679,26 +681,28 @@ ${xmlEndereco(partner, 'enderDest')}
   if (order.peso_bruto && order.peso_bruto > 0) pesoBrutoTotal = order.peso_bruto;
   if (order.peso_liquido && order.peso_liquido > 0) pesoLiqTotal = order.peso_liquido;
   
-  // Transportadora: AJL (emitente) por padrao — mesmo sem frete
-  var tpCfg = (cfg.transporta && typeof cfg.transporta === 'object') ? cfg.transporta : {};
-  var tpCnpj = onlyNum(tpCfg.cnpj || company.cnpj_cpf || '');
-  var tpNome = String(tpCfg.xNome || company.legal_name || company.name || 'AJL FERRO E ACO LTDA');
-  var tpIe = onlyNum(tpCfg.ie || company.inscr_est || '');
-  var tpEnder = String(tpCfg.xEnder || ((company.street || '') + (company.number ? ', ' + company.number : '')));
-  var tpMun = String(tpCfg.xMun || company.city || '');
-  var tpUf = String(tpCfg.UF || company.state || '');
-  console.log('[NFE-XML] transporta: ' + tpNome + ' (CNPJ ' + (tpCnpj || 'vazio') + ') modFrete=' + modFrete);
-  xml += `
-    <transp>
-      <modFrete>${modFrete}</modFrete>
+  // Transportadora: entra SOMENTE se vier cfg.transporta explicito (frete real)
+  var tpCfg = (cfg.transporta && typeof cfg.transporta === 'object') ? cfg.transporta : null;
+  var tpBloco = '';
+  if (tpCfg && String(tpCfg.xNome || '').trim()) {
+    var tpCnpj = onlyNum(tpCfg.cnpj || '');
+    var tpIe = onlyNum(tpCfg.ie || '');
+    tpBloco = `
       <transporta>
         ${tpCnpj ? `<CNPJ>${tpCnpj}</CNPJ>
-        ` : ''}<xNome>${esc(tpNome)}</xNome>${tpIe ? `
+        ` : ''}<xNome>${esc(String(tpCfg.xNome))}</xNome>${tpIe ? `
         <IE>${tpIe}</IE>` : ''}
-        <xEnder>${esc(tpEnder || 'S/N')}</xEnder>
-        <xMun>${esc(tpMun || 'CURITIBA')}</xMun>
-        <UF>${esc(tpUf || 'PR')}</UF>
-      </transporta>${hasVolume ? `
+        <xEnder>${esc(String(tpCfg.xEnder || 'S/N'))}</xEnder>
+        <xMun>${esc(String(tpCfg.xMun || 'CURITIBA'))}</xMun>
+        <UF>${esc(String(tpCfg.UF || 'PR'))}</UF>
+      </transporta>`;
+    console.log('[NFE-XML] transporta: ' + tpCfg.xNome + ' (CNPJ ' + (tpCnpj || 'vazio') + ') modFrete=' + modFrete);
+  } else {
+    console.log('[NFE-XML] transporta: OMITIDA (sem frete — evita rejeicao 845) modFrete=' + modFrete);
+  }
+  xml += `
+    <transp>
+      <modFrete>${modFrete}</modFrete>${tpBloco}${hasVolume ? `
       <vol>
         <qVol>${Math.trunc(Number(cfg.qVol))}</qVol>${pesoBrutoTotal > 0 ? `
         <pesoB>${num(pesoBrutoTotal)}</pesoB>
