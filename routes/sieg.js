@@ -20,7 +20,7 @@ const {
   setOAuthToken,
 } = require('../services/sieg-auth');
 const { emitirNota, enviarNFe, emitirNFSe, gerarDanfe, gerarDanfse } = require('../services/sieg-api');
-const { processPendingEmissions } = require('../services/sieg-odoo-emit');
+const { processPendingEmissions, solicitarEmissaoComBoletos } = require('../services/sieg-odoo-emit');
 const { cancelarNFeOdoo } = require('../services/nfe-cancelar-odoo');
 
 // === OAuth Callback ===
@@ -194,6 +194,30 @@ router.post('/webhook', apiKeyAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('[SIEG] Erro webhook:', err.message);
+    res.status(500).json({ sucesso: false, erro: err.message });
+  }
+});
+
+// === EMITIR NF-e + BOLETOS (botao "Emitir NF e Boleto" do Odoo) ===
+// Recebe: { fatura_ids: [id, ...] }
+// Registra o auto-boleto, marca pendente e dispara a emissao imediatamente.
+// Se a NF autorizar, os boletos Itau saem automaticamente (mesmo fluxo do
+// /pagar manual). Responde rapido com o que foi aceito/ignorado.
+router.post('/emitir-com-boletos', apiKeyAuth, async (req, res) => {
+  var ids = req.body && req.body.fatura_ids;
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ sucesso: false, erro: 'fatura_ids obrigatorio (array de ids de account.move)' });
+  }
+  ids = ids.map(Number).filter(function (n) { return n > 0; });
+  if (!ids.length) {
+    return res.status(400).json({ sucesso: false, erro: 'fatura_ids invalido' });
+  }
+  console.log('[SIEG] emitir-com-boletos solicitado: ' + JSON.stringify(ids));
+  try {
+    const resultado = await solicitarEmissaoComBoletos(ids);
+    res.json({ sucesso: true, ...resultado });
+  } catch (err) {
+    console.error('[SIEG] Erro emitir-com-boletos:', err.message);
     res.status(500).json({ sucesso: false, erro: err.message });
   }
 });

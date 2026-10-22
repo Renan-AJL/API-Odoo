@@ -29,7 +29,30 @@ var { emitirNota } = require('./sieg-api');
 var config = require('../config');
 var { IeService } = require('./ie.service');
 var ibgeMunicipios = require('./ibge-municipios');
+var { agendarBoletosAutomaticos } = require('./boleto-auto');
 var _ieService = new IeService();
+
+// ============================================================
+// AUTO-BOLETO: registro em memoria dos moves que devem emitir
+// boletos apos a NF-e autorizar. Setado pela rota
+// POST /api/v1/sieg/emitir-com-boletos (botao "Emitir NF e Boleto")
+// ANTES de marcar 'pendente' — assim o poller nunca processa uma
+// fatura armada sem a flag (sem corrida). Consumido 1x por
+// processamento: falha NAO rearma (re-clique no botao rearma).
+// ============================================================
+var _autoBoletoMoves = {};   // { moveId: timestamp }
+var AUTO_BOLETO_TTL_MS = 24 * 3600 * 1000;
+function marcarAutoBoleto(moveIds) {
+  var now = Date.now();
+  (moveIds || []).forEach(function (id) { _autoBoletoMoves[id] = now; });
+  Object.keys(_autoBoletoMoves).forEach(function (k) {
+    if (now - _autoBoletoMoves[k] > AUTO_BOLETO_TTL_MS) delete _autoBoletoMoves[k];
+  });
+}
+function consumirAutoBoleto(moveId) {
+  if (_autoBoletoMoves[moveId]) { delete _autoBoletoMoves[moveId]; return true; }
+  return false;
+}
 
 // ============================================================
 // Helpers numéricos
@@ -394,7 +417,10 @@ async function _runPendingEmissionsOnce() {
 // ============================================================
 async function processOne(client, db, uid, pwd, moveId, tipo) {
   var t0 = Date.now();
-  console.log('[SIEG-EMIT] --- Fatura ID: ' + moveId + ' | Tipo: ' + tipo + ' ---');
+  // Auto-boleto: consome a flag ANTES de processar (1 clique = 1 tentativa armada;
+  // se a NF falhar e for reemitida pelo fluxo comum, NAO reemite boleto sem novo clique)
+  var autoBoletoArmado = tipo === 'nfe' ? consumirAutoBoleto(moveId) : false;
+  console.log('[SIEG-EMIT] --- Fatura ID: ' + moveId + ' | Tipo: ' + tipo + (autoBoletoArmado ? ' | AUTO-BOLETO ARMADO' : '') + ' ---');
 
   // 1. Read account.move (sem invoice_line_ids — pode ser computed nao-stored no Odoo 19)
   var moves = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], [
@@ -1173,7 +1199,45 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
 
   // 12. Post XML + PDF to Chatter (moveName pode ter sido renomeado — usar o
   // nome final para o anexo ficar consistente com o numero da NF)
-  await postChatterResult(client, db, uid, pwd, moveId, tipo === 'nfe' && info.sucesso ? ('NFe ' + String(nextNum).padStart(8, '0')) : move.name, tipo, info, resultado, xmlRetornoText);
+  var faturaNameFinal = tipo === 'nfe' ? ('NFe ' + String(nextNum).padStart(8, '0')) : move.name;
+  await postChatterResult(client, db, uid, pwd, moveId, faturaNameFinal, tipo, info, resultado, xmlRetornoText);
+
+  // 13. AUTO-BOLETO (demanda AJL 22/10/2026): NF autorizada -> ja emite os
+  // boletos Itau da fatura (mesmo fluxo do botao manual /pagar: E+P, parcelas,
+  // guardas anti-duplicidade, PDFs, push Odoo). Fire-and-forget: falha de
+  // boleto NAO afeta a NF; resultado/erro vira nota no chatter da fatura.
+  // SO dispara quando a emissao veio do botao "Emitir NF e Boleto" (flag
+  // consumida no inicio de processOne) — o fluxo comum de NF fica intacto.
+  if (info.sucesso && tipo === 'nfe' && autoBoletoArmado) {
+    try {
+      agendarBoletosAutomaticos({
+        moveId: moveId,
+        faturaName: faturaNameFinal,
+        formaPagamento: formaPagamento,
+        valorNF: vNFValue,
+        dataVencBase: (parcelasFatura[0] && parcelasFatura[0].vencimento) || move.invoice_date || move.date || '',
+        pagador: {
+          nome: partner.xNome || '',
+          cpf_cnpj: partner.cnpj_cpf || '',
+          street: partner.street || '',
+          city: partner.city || '',
+          state: partner.state || '',
+          zip: partner.zip || '',
+        },
+        boletoJaExiste: !!move.x_studio_itau_nosso_numero && !move.x_studio_boleto_cancelado,
+        postChatter: async function(htmlBoletos) {
+          await executeKw(client, db, uid, pwd, 'mail.message', 'create', [{
+            model: 'account.move',
+            res_id: moveId,
+            body: htmlBoletos,
+            message_type: 'comment',
+          }]);
+        },
+      });
+    } catch (eAuto) {
+      console.warn('[SIEG-EMIT] Auto-boleto: falha ao agendar (NF segue OK): ' + eAuto.message);
+    }
+  }
 
   return {
     move_id: moveId, sucesso: info.sucesso, tipo: tipo,
@@ -2583,4 +2647,81 @@ async function cancelOneInvoice(client, db, uid, pwd, moveId, cancelarNFe) {
   return { move_id: moveId, sucesso: resultado.sucesso, fatura: move.name, cStat: resultado.cStat };
 }
 
-module.exports = { processPendingEmissions, processPendingCancellations, buildPagamentoInfo, brNowStr };
+// ============================================================
+// Solicitar emissao NF-e + BOLETOS (botao "Emitir NF e Boleto")
+// Chamado por POST /api/v1/sieg/emitir-com-boletos. Ordem garantida:
+//   1) registra a flag de auto-boleto (em memoria)
+//   2) marca x_studio_nfe_status='pendente' (writeStatusSafe tem guarda
+//      anti-downgrade — nunca rebaixa autorizada)
+//   3) dispara o ciclo de emissao agora (mutex enfileira se ja rodando)
+// Retorna imediatamente com o que foi aceito/ignorado e o motivo.
+// ============================================================
+async function solicitarEmissaoComBoletos(moveIds) {
+  var odoo = config.odoo;
+  if (!odoo || !odoo.enabled || !odoo.url) throw new Error('Odoo nao configurado no middleware');
+  if (!Array.isArray(moveIds) || !moveIds.length) throw new Error('fatura_ids vazio');
+
+  var client = createClient(odoo.url);
+  var uid = await authenticate(client, odoo.db, odoo.user, odoo.password);
+  var db = odoo.db, pwd = odoo.password;
+
+  var recs = await executeKw(client, db, uid, pwd, 'account.move', 'read', [moveIds, [
+    'name', 'move_type', 'x_studio_nfe_status', 'x_studio_nfe_chave',
+  ]]);
+  if (!recs || !recs.length) throw new Error('Faturas nao encontradas no Odoo: ' + moveIds.join(','));
+
+  var aceitos = [], ignorados = [];
+  for (var i = 0; i < recs.length; i++) {
+    var m = recs[i];
+    if (m.move_type !== 'out_invoice') {
+      ignorados.push({ id: m.id, name: m.name, motivo: 'nao e fatura de cliente' });
+    } else if (m.x_studio_nfe_status === 'autorizada' || m.x_studio_nfe_chave) {
+      ignorados.push({ id: m.id, name: m.name, motivo: 'NF-e ja autorizada/vinculada — para boletos, use o fluxo manual de boletos Itau' });
+    } else if (m.x_studio_nfe_status === 'processando') {
+      ignorados.push({ id: m.id, name: m.name, motivo: 'NF-e ja em processamento — aguarde o resultado no historico da fatura' });
+    } else {
+      aceitos.push(m);
+    }
+  }
+
+  if (aceitos.length) {
+    // 1) flag ANTES do status (poller nao pode pegar sem flag)
+    marcarAutoBoleto(aceitos.map(function (mm) { return mm.id; }));
+    // 2) status pendente + chatter de solicitacao
+    for (var j = 0; j < aceitos.length; j++) {
+      var mv = aceitos[j];
+      await writeStatusSafe(client, db, uid, pwd, mv.id, 'nfe', { x_studio_nfe_status: 'pendente' });
+      try {
+        await executeKw(client, db, uid, pwd, 'mail.message', 'create', [{
+          model: 'account.move', res_id: mv.id,
+          body: '<b>Emissão de NF-e Solicitada (com Boletos)</b><br/>' +
+            'A NF-e será emitida e, se autorizada, os boletos Itaú serão gerados automaticamente.<br/>' +
+            'Aguardando processamento...',
+          message_type: 'comment',
+        }]);
+      } catch (eCh) {
+        console.warn('[SIEG-EMIT-BOLETO] chatter de solicitacao falhou (segue): ' + eCh.message);
+      }
+    }
+    // 3) dispara o ciclo agora (mutex serializa com o poller)
+    setImmediate(function () {
+      processPendingEmissions().catch(function (e) {
+        console.error('[SIEG-EMIT-BOLETO] ciclo disparado falhou:', e.message);
+      });
+    });
+  }
+
+  console.log('[SIEG-EMIT-BOLETO] solicitacao: ' + aceitos.length + ' aceita(s), ' +
+    ignorados.length + ' ignorada(s) | ids=' + JSON.stringify(moveIds));
+  return {
+    aceitos: aceitos.map(function (mm) { return { id: mm.id, name: mm.name }; }),
+    aceitos_ids: aceitos.map(function (mm) { return mm.id; }),
+    ignorados: ignorados,
+    disparado: aceitos.length > 0,
+  };
+}
+
+module.exports = {
+  processPendingEmissions, processPendingCancellations, buildPagamentoInfo, brNowStr,
+  solicitarEmissaoComBoletos, marcarAutoBoleto, consumirAutoBoleto,
+};
