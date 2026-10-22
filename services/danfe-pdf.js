@@ -121,14 +121,42 @@ async function gerarDanfePdf(nfeProcXml, opts) {
   }
 
   // --- Canhoto ---
-  box(L, y, W - 110, 40);
-  doc.fontSize(5.5).text('RECEBEMOS DE ' + tag(emit, 'xNome') + ' OS PRODUTOS CONSTANTES DA NOTA FISCAL INDICADA AO LADO', L + 3, y + 3, { width: W - 120 });
-  doc.fontSize(5.5).text('DATA DE RECEBIMENTO', L + 3, y + 24);
-  doc.text('IDENTIFICACAO E ASSINATURA DO RECEBEDOR', L + 130, y + 24);
-  box(L + W - 110, y, 110, 40);
+  // URGENTE (demanda 23/10): canhoto MAIOR (40 -> 58) com area de assinatura mais
+  // folgada e NOME DO CLIENTE (destinatario da NF) SEMPRE visivel no canhoto,
+  // em destaque e tambem na caixa do numero — identificacao ao separar o picote.
+  // Truncamento MANUAL (pdfkit 0.15 ignora lineBreak:false em texto longo):
+  // area esquerda (bold 7.5, ~427pt) max 2 linhas; caixa direita (5.5, 100pt) 1 linha.
+  var CANHOTO_H = 58;
+  var destNomeCanhoto = tag(dest, 'xNome') || '-';
+  var truncar = function (s, max) { s = String(s || ''); return s.length > max ? s.slice(0, max - 3).trimEnd() + '...' : s; };
+  var destNomeLongo = truncar(destNomeCanhoto, 172);   // max 2 linhas na area esquerda
+  var destNomeCurto = truncar(destNomeCanhoto, 26);    // 1 linha na caixa do numero (~26 x 3.3pt = 86pt < 100pt)
+  box(L, y, W - 110, CANHOTO_H);
+  doc.fontSize(5.5).font('Helvetica')
+    .text('RECEBEMOS DE ' + tag(emit, 'xNome') + ' OS PRODUTOS CONSTANTES DA NOTA FISCAL INDICADA AO LADO', L + 3, y + 3, { width: W - 120, ellipsis: true, lineBreak: false });
+  // Nome do cliente (destinatario) em destaque no canhoto
+  doc.fontSize(7.5).font('Helvetica-Bold')
+    .text('CLIENTE: ' + destNomeLongo, L + 3, y + 14, { width: W - 120 });
+  // Labels de data/assinatura + linhas-guia para preenchimento
+  doc.fontSize(5.5).font('Helvetica');
+  doc.text('DATA DE RECEBIMENTO', L + 3, y + 34);
+  doc.text('IDENTIFICACAO E ASSINATURA DO RECEBEDOR', L + 130, y + 34);
+  doc.lineWidth(0.4)
+    .moveTo(L + 3, y + 48).lineTo(L + 120, y + 48)
+    .moveTo(L + 128, y + 48).lineTo(L + W - 116, y + 48)
+    .stroke();
+  // Caixa lateral: numero da NF + nome do cliente (identifica o picote mesmo separado)
+  box(L + W - 110, y, 110, CANHOTO_H);
   doc.fontSize(7).font('Helvetica-Bold')
-    .text('NF-e  N. ' + tag(ide, 'nNF') + '\nSERIE ' + tag(ide, 'serie'), L + W - 105, y + 14);
-  y += 46;
+    .text('NF-e  N. ' + tag(ide, 'nNF') + '\nSERIE ' + tag(ide, 'serie'), L + W - 105, y + 12);
+  doc.fontSize(5.5).font('Helvetica')
+    .text(destNomeCurto, L + W - 105, y + 36, { width: 100 });
+  y += CANHOTO_H + 2;
+  // Linha de corte (picotado) entre canhoto e DANFE
+  doc.save().lineWidth(0.5).dash(2, { space: 2 })
+    .moveTo(L, y).lineTo(L + W, y).stroke()
+    .undash().restore();
+  y += 4;
 
   // --- Cabecalho: emitente + chave ---
   var hHead = 78;
