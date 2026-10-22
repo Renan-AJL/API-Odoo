@@ -257,8 +257,11 @@ async function corrigirValorFatura(faturaName, faturaId, valorInformado) {
     var oc = config.odoo;
     if (!oc || !oc.enabled || !oc.url) return informado;
     var nm = String(faturaName || '').trim();
-    if (!/^NFe/i.test(nm)) return informado; // nao e fatura emitida -> sem correcao
-    var cacheKey = nm || ('id:' + faturaId);
+    if (!/^NFe/i.test(nm)) return informado; // pedido/'S...' passa direto (comportamento historico)
+    // FIX 23/10 (incidente 4 boletos): lookup por ID quando disponivel — o NOME
+    // 'NFe NNNNNNNN' e renomeado pelo middleware durante a emissao e duas faturas
+    // do mesmo ciclo podem dividir o mesmo nome -> leitura da fatura ERRADA.
+    var cacheKey = (faturaId > 0) ? ('id:' + faturaId) : nm;
     var cached = _valorIpiCache[cacheKey];
     if (cached && (Date.now() - cached.ts) < 60000) return cached.valor;
 
@@ -282,8 +285,9 @@ async function corrigirValorFatura(faturaName, faturaId, valorInformado) {
       });
     }
 
-    var domain = nm ? [['name', '=', nm], ['move_type', '=', 'out_invoice']]
-                    : [['id', '=', faturaId], ['move_type', '=', 'out_invoice']];
+    var domain = (faturaId > 0)
+      ? [['id', '=', faturaId], ['move_type', '=', 'out_invoice']]
+      : [['name', '=', nm], ['move_type', '=', 'out_invoice']];
     var ids = await ekwV('account.move', 'search', [domain], { limit: 1 });
     if (!ids || !ids.length) return informado;
     var inv = await ekwV('account.move', 'read', [ids, ['amount_total']]);
@@ -327,7 +331,13 @@ async function lerFaturaEntradaParcelamento(faturaName, faturaId, valorNF) {
   try {
     var oc = config.odoo;
     if (!oc || !oc.enabled || !oc.url) return out;
-    var cacheKey = String(faturaName || ('id:' + faturaId));
+    // FIX 23/10 (incidente 4 boletos): cache/lookup por ID quando disponivel —
+    // o nome 'NFe NNNNNNNN' muda durante a emissao (rename do middleware) e pode
+    // colidir entre faturas do mesmo ciclo; ID e inequivoco. Pedidos/'S...' seguem
+    // o comportamento historico (lookup por nome — nao acham fatura).
+    var nmEP = String(faturaName || '').trim();
+    var usaIdEP = ((/^NFe/i.test(nmEP) || !nmEP) && faturaId > 0);
+    var cacheKey = usaIdEP ? ('id:' + faturaId) : ('nm:' + nmEP);
     if (_epCache[cacheKey] && (Date.now() - _epCache[cacheKey].ts) < 60000) return _epCache[cacheKey].dados;
 
     var xmlrpcEP = require('xmlrpc');
@@ -350,8 +360,9 @@ async function lerFaturaEntradaParcelamento(faturaName, faturaId, valorNF) {
       });
     }
 
-    var domainEP = faturaName ? [['name', '=', faturaName], ['move_type', '=', 'out_invoice']]
-      : [['id', '=', faturaId], ['move_type', '=', 'out_invoice']];
+    var domainEP = usaIdEP
+      ? [['id', '=', faturaId], ['move_type', '=', 'out_invoice']]
+      : [['name', '=', nmEP], ['move_type', '=', 'out_invoice']];
     var idsEP = await ekwEP('account.move', 'search', [domainEP], { limit: 1 });
     if (idsEP && idsEP.length) {
       var invEP = await ekwEP('account.move', 'read', [idsEP, ['amount_total', 'x_studio_valor_entrada', 'x_studio_qtd_parcelas', 'x_studio_parcela_ids']]);
@@ -721,6 +732,23 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
       }
     }
     console.log('[API] Plano parsed:', JSON.stringify(plano));
+
+    // === GUARDA DE SANIDADE (incidente 23/10 — 4 boletos errados) ===
+    // entrada + financiado PRECISAM bater com o total da fatura. Se nao bater,
+    // os dados E+P nao pertencem a esta fatura (leitura desalinhada) — ABORTA
+    // SEM EMITIR, antes de criar qualquer boleto no Itau.
+    var epTemDadosPagar = epDadosPagar && ((parseFloat(epDadosPagar.entrada) || 0) > 0 ||
+      (parseInt(epDadosPagar.qtdParcelas) || 0) > 0 ||
+      (epDadosPagar.parcelasConfig && epDadosPagar.parcelasConfig.length));
+    if (epTemDadosPagar && valorTotal > 0) {
+      var somaEPCheck = Math.round(((parseFloat(epDadosPagar.financiado) || 0) + (parseFloat(epDadosPagar.entrada) || 0)) * 100) / 100;
+      if (Math.abs(somaEPCheck - valorTotal) > 0.05) {
+        console.error('[API/BOLETO] SANIDADE FALHOU: entrada+financiado R$ ' + somaEPCheck.toFixed(2) +
+          ' != total da fatura R$ ' + valorTotal.toFixed(2) + ' — emissao BLOQUEADA (dados E+P nao pertencem a esta fatura)');
+        return res.json({ success: false, message: 'Dados de entrada/parcelamento (R$ ' + somaEPCheck.toFixed(2) +
+          ') nao batem com o total da fatura (R$ ' + valorTotal.toFixed(2) + '). NENHUM boleto emitido — confira Valor de Entrada / Quantidade de Parcelas na fatura.' });
+      }
+    }
 
     if (plano.tipo !== 'boleto' || plano.parcelas.length === 0) {
       return res.json({ success: false, message: 'Forma de pagamento nao suportada para boleto: ' + formaPag });
@@ -1127,6 +1155,21 @@ router.post('/gerar', async function(req, res) {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.send('ERRO|Forma de pagamento nao suportada: ' + formaPag);
       return;
+    }
+
+    // === GUARDA DE SANIDADE (incidente 23/10 — 4 boletos errados) — igual /pagar ===
+    var epTemDadosGerar = epDados && ((parseFloat(epDados.entrada) || 0) > 0 ||
+      (parseInt(epDados.qtdParcelas) || 0) > 0 ||
+      (epDados.parcelasConfig && epDados.parcelasConfig.length));
+    if (epTemDadosGerar && fatValor > 0) {
+      var somaEPGerar = Math.round(((parseFloat(epDados.financiado) || 0) + (parseFloat(epDados.entrada) || 0)) * 100) / 100;
+      if (Math.abs(somaEPGerar - fatValor) > 0.05) {
+        console.error('[API/GERAR] SANIDADE FALHOU: entrada+financiado R$ ' + somaEPGerar.toFixed(2) +
+          ' != total da fatura R$ ' + fatValor.toFixed(2) + ' — emissao BLOQUEADA');
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.send('ERRO|Dados de entrada/parcelamento (R$ ' + somaEPGerar.toFixed(2) + ') nao batem com o total da fatura (R$ ' + fatValor.toFixed(2) + '). NENHUM boleto emitido.');
+        return;
+      }
     }
 
     // === GUARDA: Verificar boleto ativo antes de emitir ===
