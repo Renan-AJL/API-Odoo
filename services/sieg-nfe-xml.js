@@ -656,6 +656,10 @@ ${xmlEndereco(partner, 'enderDest')}
     </total>`;
 
   // === transp ===
+  // AJL 23/10/2026 (demanda Transportadora): a AJL fica SEMPRE cadastrada como
+  // transportadora na NF — mesmo sem frete (modFrete 9). Schema permite
+  // <transporta> preenchida com modFrete 9. cfg.transporta sobrepoe se um dia
+  // for enviada uma transportadora real.
   const modFrete = String(cfg.modFrete || '9');
   const hasVolume = cfg.qVol != null && Number(cfg.qVol) > 0;
   // Peso total: soma peso_unitario * quantidade de cada linha
@@ -675,9 +679,26 @@ ${xmlEndereco(partner, 'enderDest')}
   if (order.peso_bruto && order.peso_bruto > 0) pesoBrutoTotal = order.peso_bruto;
   if (order.peso_liquido && order.peso_liquido > 0) pesoLiqTotal = order.peso_liquido;
   
+  // Transportadora: AJL (emitente) por padrao — mesmo sem frete
+  var tpCfg = (cfg.transporta && typeof cfg.transporta === 'object') ? cfg.transporta : {};
+  var tpCnpj = onlyNum(tpCfg.cnpj || company.cnpj_cpf || '');
+  var tpNome = String(tpCfg.xNome || company.legal_name || company.name || 'AJL FERRO E ACO LTDA');
+  var tpIe = onlyNum(tpCfg.ie || company.inscr_est || '');
+  var tpEnder = String(tpCfg.xEnder || ((company.street || '') + (company.number ? ', ' + company.number : '')));
+  var tpMun = String(tpCfg.xMun || company.city || '');
+  var tpUf = String(tpCfg.UF || company.state || '');
+  console.log('[NFE-XML] transporta: ' + tpNome + ' (CNPJ ' + (tpCnpj || 'vazio') + ') modFrete=' + modFrete);
   xml += `
     <transp>
-      <modFrete>${modFrete}</modFrete>${hasVolume ? `
+      <modFrete>${modFrete}</modFrete>
+      <transporta>
+        ${tpCnpj ? `<CNPJ>${tpCnpj}</CNPJ>
+        ` : ''}<xNome>${esc(tpNome)}</xNome>${tpIe ? `
+        <IE>${tpIe}</IE>` : ''}
+        <xEnder>${esc(tpEnder || 'S/N')}</xEnder>
+        <xMun>${esc(tpMun || 'CURITIBA')}</xMun>
+        <UF>${esc(tpUf || 'PR')}</UF>
+      </transporta>${hasVolume ? `
       <vol>
         <qVol>${Math.trunc(Number(cfg.qVol))}</qVol>${pesoBrutoTotal > 0 ? `
         <pesoB>${num(pesoBrutoTotal)}</pesoB>
@@ -732,6 +753,12 @@ ${xmlEndereco(partner, 'enderDest')}
   // e valores) ou PIX. Impostos (ICMS/Difal) NAO somam no total — só texto.
   var infCplText = stripHtml(order.note || order.infCpl || '');
   var formaLabel = String(order.forma_pagamento_label || order.forma_pagamento || '').trim();
+  // AJL 23/10/2026 (demanda Acréscimo): valor rateado nos itens aparece no
+  // rodapé da NF para o cliente conferir o total
+  var acrescVal = parseFloat(order.acrescimo_valor || 0);
+  if (acrescVal > 0) {
+    infCplText = 'Acréscimo: R$ ' + num(acrescVal.toFixed(2)) + '. ' + infCplText;
+  }
   // Incluir alíquota ICMS quando houver
   if (order.icms_aliquota && infCplText.indexOf('ICMS') === -1) {
     infCplText = 'ICMS ' + order.icms_aliquota + '%. ' + infCplText;
@@ -753,7 +780,8 @@ ${xmlEndereco(partner, 'enderDest')}
       var bd = order.boleto_detalhes[bi];
       var part = 'Boleto ' + (bd.parcela || ((bi + 1) + '/' + order.boleto_detalhes.length));
       if (bd.valor) part += ': R$ ' + num(bd.valor);
-      if (bd.vencimento) part += ' Venc: ' + bd.vencimento;
+      // AJL 23/10/2026 (demanda Formato Vencimento): rodapé da NF em DD/MM/AAAA
+      if (bd.vencimento) part += ' Venc: ' + fmtDataBR(bd.vencimento);
       if (bd.nosso_numero) part += ' NN: ' + bd.nosso_numero;
       if (bd.linha_digitavel) part += ' Linha: ' + bd.linha_digitavel;
       boletoParts.push(part);
@@ -820,6 +848,18 @@ ${xmlEndereco(partner, 'enderDest')}
 }
 
 // === Helper functions ===
+
+/**
+ * AJL 23/10/2026 (demanda Formato Vencimento): datas do rodapé da NF
+ * (infCpl) em DD/MM/AAAA — a fatura do Odoo entrega "2026-11-30" ou ISO
+ * completo; o dVenc da duplicata segue ISO (schema), só o TEXTO muda.
+ */
+function fmtDataBR(s) {
+  var str = String(s || '');
+  var m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[3] + '/' + m[2] + '/' + m[1];
+  return str;
+}
 
 function stripHtml(s) {
   if (!s) return '';

@@ -787,6 +787,32 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   if (!invoiceLines.length) throw new Error('Fatura sem linhas de produto/servico (total: ' + rawLines.length + ', com product: 0)');
   console.log('[SIEG-EMIT] Linhas de produto: ' + invoiceLines.length);
 
+  // 4b. ACRÉSCIMO (AJL 23/10/2026 — demanda Acréscimo % e Valor):
+  // a linha do produto ACRÉSCIMO (criada pela automação AJL-ACRÉSC no pedido)
+  // NÃO é item da NF-e (serviço não tem NCM). O valor é RATEADO
+  // proporcionalmente nos itens reais (vProd), igual ao esquema do desconto
+  // embutido (automação 76). Assim vNF = total da fatura e o faturamento
+  // nunca diverge da NF.
+  var isAcrescLine = function(l) {
+    var nome = '';
+    if (l.product_id && Array.isArray(l.product_id) && l.product_id[1]) nome = l.product_id[1];
+    if (!nome && l.name) nome = l.name;
+    var norm = String(nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    return norm.indexOf('acrescimo') === 0;
+  };
+  var valorAcrescimo = 0;
+  var keptLines = [];
+  for (var ia = 0; ia < invoiceLines.length; ia++) {
+    if (isAcrescLine(invoiceLines[ia])) {
+      valorAcrescimo += round2(parseFloat(invoiceLines[ia].price_subtotal) || 0);
+      console.log('[SIEG-EMIT] ACRÉSCIMO: linha "' + (invoiceLines[ia].name || '?') + '" R$ ' + (parseFloat(invoiceLines[ia].price_subtotal) || 0).toFixed(2) + ' -> será rateada nos itens (não é item da NF)');
+    } else {
+      keptLines.push(invoiceLines[ia]);
+    }
+  }
+  if (valorAcrescimo !== 0) invoiceLines = keptLines;
+  if (valorAcrescimo) console.log('[SIEG-EMIT] ACRÉSCIMO total: R$ ' + valorAcrescimo.toFixed(2) + ' | itens restantes: ' + invoiceLines.length);
+
   // 5. Get next NF number from company
   var serie, numField, nextNum;
   if (tipo === 'nfe') {
@@ -901,6 +927,38 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       }
     }
     linesData.push(ld);
+  }
+
+  // 6a-quater. ACRÉSCIMO — rateio proporcional nos itens (AJL 23/10/2026).
+  // Fator único = (vProd base + acréscimo) / vProd base. Aplicado em vUnCom,
+  // vProd, vBC/vICMS, PIS/COFINS e IPI (os PERCENTUAIS ficam intactos, então
+  // vICMS = pICMS × vBC e vIPI = pIPI × vBC continuam batendo — SEFAZ ok).
+  // A normalização 629 abaixo re-deriva vProd = qCom × vUnCom a partir do
+  // vUnCom já escalado, então o XML permanece consistente.
+  if (valorAcrescimo && linesData.length) {
+    var baseProd = 0;
+    for (var bp = 0; bp < linesData.length; bp++) baseProd += parseFloat(linesData[bp].price_subtotal) || 0;
+    var novoTotal = round2(baseProd + valorAcrescimo);
+    if (baseProd > 0 && novoTotal > 0) {
+      var fator = novoTotal / baseProd;
+      for (var fr = 0; fr < linesData.length; fr++) {
+        var fld = linesData[fr];
+        fld.price_unit = Math.round((parseFloat(fld.price_unit) || 0) * fator * 10000) / 10000;
+        fld.price_subtotal = round2((parseFloat(fld.price_subtotal) || 0) * fator);
+        fld.vbc_icms = String(round2((parseFloat(fld.vbc_icms) || 0) * fator));
+        fld.vicms = String(round2((parseFloat(fld.vicms) || 0) * fator));
+        fld.vbc_pis = String(round2((parseFloat(fld.vbc_pis) || 0) * fator));
+        fld.vpis = String(round2((parseFloat(fld.vpis) || 0) * fator));
+        fld.vbc_cofins = String(round2((parseFloat(fld.vbc_cofins) || 0) * fator));
+        fld.vcofins = String(round2((parseFloat(fld.vcofins) || 0) * fator));
+        fld.vbc_ipi = String(round2((parseFloat(fld.vbc_ipi) || 0) * fator));
+        fld.vipi = String(round2((parseFloat(fld.vipi) || 0) * fator));
+        if (fld.difal) fld.difal = round2(fld.difal * fator);
+      }
+      console.log('[SIEG-EMIT] ACRÉSCIMO rateado: base=R$ ' + baseProd.toFixed(2) + ' + acréscimo=R$ ' + valorAcrescimo.toFixed(2) + ' => fator=' + fator.toFixed(6));
+    } else {
+      console.error('[SIEG-EMIT] *** ACRÉSCIMO R$ ' + valorAcrescimo.toFixed(2) + ' NÃO rateado (base de produtos = 0) — vNF ficará diferente da fatura! ***');
+    }
   }
 
   // 6a-ter. PRE-CHECK NCM NO MIDDLEWARE (demanda 2 — rede de seguranca alem
@@ -1047,6 +1105,8 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       forma_pagamento: formaPagamento || '',
       forma_pagamento_label: pagInfo.formaLabel,
       duplicatas: pagInfo.duplicatas,
+      // AJL 23/10/2026: acréscimo rateado nos itens — informativo no rodapé
+      acrescimo_valor: valorAcrescimo || 0,
     },
     lines: linesData,
     pagamentos: pagInfo.pagamentos,
