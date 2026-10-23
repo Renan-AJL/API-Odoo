@@ -1107,6 +1107,14 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       duplicatas: pagInfo.duplicatas,
       // AJL 23/10/2026: acréscimo rateado nos itens — informativo no rodapé
       acrescimo_valor: valorAcrescimo || 0,
+      // AJL 23/10/2026: desconto embutido nos itens — informativo no rodapé
+      desconto_valor: (function () {
+        var vdTotal = 0;
+        for (var vdi = 0; vdi < linesData.length; vdi++) {
+          vdTotal += parseFloat(linesData[vdi].desconto_linha) || 0;
+        }
+        return round2(vdTotal) || 0;
+      })(),
     },
     lines: linesData,
     pagamentos: pagInfo.pagamentos,
@@ -1966,14 +1974,43 @@ async function buildLineData(client, db, uid, pwd, line, icmsInternoPR) {
     console.log('[SIEG-EMIT-IPI] IPI sem CST, usando CST 00: vBC=' + vbcIpi + ' pIPI=' + pipi + '% vIPI=' + vipi);
   }
 
+  // 4c. DESCONTO (AJL 23/10/2026 — demanda desconto na NF): o discount da
+  // account.move.line (aplicado na venda/wizard) entra na NF EMBUTIDO no
+  // preco unitario (vUnCom liquido), mesmo esquema do acréscimo. O
+  // price_subtotal (grossSubtotal) do Odoo JÁ é líquido de desconto, então
+  // vUnCom passa a bater com ele (consistência SEFAZ 629) e vNF = total da
+  // fatura com desconto — sem rejeição e sem divergência de boleto.
+  var discPct = parseFloat(line.discount) || 0;
+  var vUnLiquido = parseFloat(line.price_unit) || 0;
+  var descontoLinha = 0;
+  if (discPct > 0 && discPct < 100 && vUnLiquido > 0) {
+    descontoLinha = round2(vUnLiquido * (parseFloat(line.quantity) || 0) * discPct / 100);
+    vUnLiquido = vUnLiquido * (1 - discPct / 100);
+    console.log('[SIEG-EMIT] DESCONTO item ' + (defaultCode || productName) + ': ' + discPct +
+      '% -> vUnCom ' + vUnLiquido.toFixed(4) + ' (desconto R$ ' + descontoLinha.toFixed(2) + ')');
+  }
+  // 4d. DESCRICAO COMPLETA (demanda NF): xProd = nome do produto + descrição/
+  // observação da linha da fatura, em 1 linha, com teto de 120 chars do
+  // schema SEFAZ. Sem descrição extra na linha, mantém só o nome do produto.
+  var xProdFull = String(line.name || '').replace(/\s+/g, ' ').trim() || productName;
+  if (productName && xProdFull.toUpperCase().indexOf(String(productName).toUpperCase()) !== 0) {
+    xProdFull = productName + ' - ' + xProdFull;
+  }
+  if (xProdFull.length > 120) xProdFull = xProdFull.substring(0, 120);
+  if (xProdFull !== productName) {
+    console.log('[SIEG-EMIT] xProd completo (' + xProdFull.length + ' chars): ' + JSON.stringify(xProdFull));
+  }
+
   var lineData = {
     cProd: defaultCode, barcode: barcode,
-    product_name: productName, xProd: productName,
+    product_name: xProdFull, xProd: xProdFull,
     ncm: ncm, cfop: '5102', uom: uomName,
-    qty: line.quantity || 0, price_unit: line.price_unit || 0,
+    qty: line.quantity || 0, price_unit: vUnLiquido,
     // price_subtotal aqui = valor BRUTO fiscal (vProd): subtotal Odoo x impostos
     // por dentro. Somente IPI soma depois (vNF = vProd + vIPI).
-    price_subtotal: grossSubtotal || (line.price_subtotal || (line.quantity * line.price_unit)),
+    price_subtotal: grossSubtotal || (line.price_subtotal || (line.quantity * vUnLiquido)),
+    // AJL 23/10/2026: desconto da linha (informativo — soma vai no infCpl)
+    desconto_linha: descontoLinha,
     detailed_type: detailedType,
     // Tributação Lucro Real (padrão) — sobrescrito se Odoo tiver impostos configurados
     csosn: tax.csosn || '',

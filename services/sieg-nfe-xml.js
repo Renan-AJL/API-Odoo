@@ -763,6 +763,12 @@ ${xmlEndereco(partner, 'enderDest')}
   if (acrescVal > 0) {
     infCplText = 'Acréscimo: R$ ' + num(acrescVal.toFixed(2)) + '. ' + infCplText;
   }
+  // AJL 23/10/2026 (demanda desconto na NF): desconto embutido nos itens
+  // aparece no rodapé da NF para o cliente conferir o total
+  var descVal = parseFloat(order.desconto_valor || 0);
+  if (descVal > 0) {
+    infCplText = 'Desconto: R$ ' + num(descVal.toFixed(2)) + '. ' + infCplText;
+  }
   // Incluir alíquota ICMS quando houver
   if (order.icms_aliquota && infCplText.indexOf('ICMS') === -1) {
     infCplText = 'ICMS ' + order.icms_aliquota + '%. ' + infCplText;

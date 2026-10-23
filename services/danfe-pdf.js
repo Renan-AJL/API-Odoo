@@ -282,12 +282,14 @@ async function gerarDanfePdf(nfeProcXml, opts) {
 
   // --- Itens ---
   doc.fontSize(6).font('Helvetica-Bold').text('DADOS DOS PRODUTOS / SERVICOS', L, y); y += 8;
+  // AJL 23/10/2026 (demanda): coluna DESCRICAO maior — cabe produto + observação
+  // completa (desconto dado a COD/NCM/CST/QTD/BC/ALQ/IPI, que sobram legíveis).
   var cols = [
-    { t: 'COD', w: 0.07 }, { t: 'DESCRICAO', w: 0.20 }, { t: 'NCM', w: 0.06 },
-    { t: 'CST', w: 0.04 }, { t: 'CFOP', w: 0.04 }, { t: 'UN', w: 0.03 },
-    { t: 'QTD', w: 0.07 }, { t: 'V.UNIT', w: 0.07 }, { t: 'V.TOTAL', w: 0.07 },
-    { t: 'BC ICMS', w: 0.06 }, { t: 'V.ICMS', w: 0.05 }, { t: 'ALQ ICMS', w: 0.05 },
-    { t: 'CST IPI', w: 0.04 }, { t: 'V.IPI', w: 0.06 }, { t: 'PIPI%', w: 0.04 },
+    { t: 'COD', w: 0.055 }, { t: 'DESCRICAO', w: 0.30 }, { t: 'NCM', w: 0.05 },
+    { t: 'CST', w: 0.03 }, { t: 'CFOP', w: 0.035 }, { t: 'UN', w: 0.025 },
+    { t: 'QTD', w: 0.055 }, { t: 'V.UNIT', w: 0.07 }, { t: 'V.TOTAL', w: 0.07 },
+    { t: 'BC ICMS', w: 0.055 }, { t: 'V.ICMS', w: 0.045 }, { t: 'ALQ ICMS', w: 0.05 },
+    { t: 'CST IPI', w: 0.03 }, { t: 'V.IPI', w: 0.05 }, { t: 'PIPI%', w: 0.035 },
   ];
   var x = L;
   // FIX (demanda usuario): linha do produto "grudada em cima e a esquerda" —
@@ -307,10 +309,13 @@ async function gerarDanfePdf(nfeProcXml, opts) {
     var ipi = bloco(det, 'IPI');
     var ipiTrib = bloco(ipi, 'IPITrib');
     var ipiNT = bloco(ipi, 'IPINT');
-    var h = 14;
+    // AJL 23/10/2026: descrição longa (produto + observação) quebra em 2 linhas
+    // dentro da célula em vez de cortar com reticências.
+    var descTxt = String(tag(prod, 'xProd') || '');
+    var h = descTxt.length > 52 ? 22 : 14;
     box(L, y, W, h);
     var vals = [
-      tag(prod, 'cProd'), tag(prod, 'xProd'), tag(prod, 'NCM'),
+      tag(prod, 'cProd'), descTxt, tag(prod, 'NCM'),
       tag(icms, 'CST') || tag(icms, 'CSOSN'), tag(prod, 'CFOP'), tag(prod, 'uCom'),
       qtd(tag(prod, 'qCom')), moeda(tag(prod, 'vUnCom')), moeda(tag(prod, 'vProd')),
       moeda(tag(icms, 'vBC')), moeda(tag(icms, 'vICMS')),
@@ -323,8 +328,14 @@ async function gerarDanfePdf(nfeProcXml, opts) {
     var xx = L;
     cols.forEach(function (c, i) {
       var align = i >= 6 ? 'right' : 'left';
-      doc.fontSize(5.8).font('Helvetica')
-        .text(String(vals[i] || ''), xx + 4, y + 5, { width: W * c.w - 6, lineBreak: false, ellipsis: true, align: align });
+      if (i === 1) {
+        // descrição: permite quebra em até 2 linhas (célula mais alta)
+        doc.fontSize(5.8).font('Helvetica')
+          .text(String(vals[i] || ''), xx + 4, y + 4, { width: W * c.w - 6, ellipsis: true, align: 'left', height: h - 4, lineGap: 0.2 });
+      } else {
+        doc.fontSize(5.8).font('Helvetica')
+          .text(String(vals[i] || ''), xx + 4, y + 5, { width: W * c.w - 6, lineBreak: false, ellipsis: true, align: align });
+      }
       xx += W * c.w;
     });
     y += h;
