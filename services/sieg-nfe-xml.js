@@ -9,6 +9,11 @@
 
 const NFE_NS = 'http://www.portalfiscal.inf.br/nfe';
 
+// PADRÃO AJL 23/10/2026: saneamento TString para TODO texto da NF-e
+// (rejeições 225 na NFe 00073124 e 00073133 — zero-width do WhatsApp,
+// quebras de linha no infCpl, chars fora do Latin-1)
+var saneiaTextoNFe = require('./nfe-texto').saneiaTextoNFe;
+
 /**
  * Extrai numero do logradouro quando o campo 'number' esta vazio/S/N.
  * Odoo frequentemente armazena o endereco completo no campo 'street':
@@ -810,15 +815,12 @@ ${xmlEndereco(partner, 'enderDest')}
     infCplText = 'Pagamento a vista. ' + infCplText;
   }
   if (infCplText) {
-    // AJL 21/10/2026: sanitizacao p/ schema NF-e (evita rejeicao 225):
-    // trim nas pontas (schema nao aceita espaco na 1a/ultima posicao),
-    // sem caracteres de controle e sem quebras de linha cruas.
-    infCplText = String(infCplText)
-      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    // PADRÃO AJL 23/10/2026 (nfe-texto.js): saneia zero-width (WhatsApp),
+    // controles/quebras, chars fora do Latin-1 e pontas — com teto de 2000
+    // SEM terminar em espaço/separador (evita rejeição 225 cvc-pattern-valid)
+    infCplText = saneiaTextoNFe(infCplText, 2000);
     xml += `\n    <infAdic>
-      <infCpl>${esc(infCplText.substring(0, 2000))}</infCpl>
+      <infCpl>${esc(infCplText)}</infCpl>
     </infAdic>`;
   }
 
@@ -878,7 +880,9 @@ function stripHtml(s) {
 
 function esc(s) {
   if (!s) return '';
-  return String(s)
+  // PADRÃO: qualquer TString do XML passa pelo saneamento (nfe-texto.js)
+  // ANTES de escapar — cobre xNome, xLgr, xProd, infCpl, obs... de uma vez.
+  return saneiaTextoNFe(String(s))
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

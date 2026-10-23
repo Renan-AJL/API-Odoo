@@ -1755,13 +1755,18 @@ function extractNcmFromRef(ref) {
 //  - o corte anterior (substring 0,120) podia terminar em ESPACO e o pattern
 //    TString da SEFAZ exige primeiro/ultimo caractere diferente de espaco;
 //  - sanitizacao unica: 1 linha, sem espacos duplos, teto 120, pontas limpas.
+// FIX 23/10/2026 (NFe 00073133): zero-width (U+200B do WhatsApp etc.) agora e
+//  REMOVIDO antes do teto — nao consome orcamento dos 120 chars e nao quebra
+//  o pattern TString. O PADRÃO completo (nfe-texto.js) re-aplica no esc().
+//  Regex declarado DENTRO da função — testes fazem eval() isolado do corpo.
 // ============================================================
 function buildXProdCompleto(productName, lineName) {
-  var nm = String(productName || '').replace(/\s+/g, ' ').trim();
+  var _ZW_RE = /[\u200B-\u200D\u2060\uFEFF\u00AD]/g; // zero-width/BOM/soft-hyphen: REMOVER
+  var nm = String(productName || '').replace(_ZW_RE, '').replace(/\s+/g, ' ').trim();
   var parts = String(lineName || '').split('\n');
   var obs = '';
   for (var pi = 1; pi < parts.length; pi++) {
-    var pseg = String(parts[pi] || '').replace(/\s+/g, ' ').trim();
+    var pseg = String(parts[pi] || '').replace(_ZW_RE, '').replace(/\s+/g, ' ').trim();
     pseg = pseg.replace(/^\[\d+\]\s*/, ''); // codigos '[523]' no meio da obs nao sao informacao
     if (pseg) obs = obs ? (obs + ' - ' + pseg) : pseg;
   }
@@ -1777,8 +1782,8 @@ function buildXProdCompleto(productName, lineName) {
     }
   }
   var out = obs ? (nm + ' - ' + obs) : nm;
-  if (!out) out = String(lineName || '').replace(/\s+/g, ' ').trim();
-  out = String(out || '').replace(/\s+/g, ' ').trim();
+  if (!out) out = String(lineName || '').replace(_ZW_RE, '').replace(/\s+/g, ' ').trim();
+  out = String(out || '').replace(_ZW_RE, '').replace(/\s+/g, ' ').trim();
   if (out.length > 120) out = out.substring(0, 120);
   out = out.replace(/[\s\-–—:,;]+$/, '').trim();   // NUNCA termina em espaco/separador
   return out || 'Item';
