@@ -368,14 +368,19 @@ async function _runPendingEmissionsOnce() {
   console.log('[SIEG-EMIT] Buscando faturas pendentes...');
 
   // Buscar NF-e pendentes
+  // AJL 24/10/2026 — ANTI-DUPLICIDADE: fila so pega fatura CONFIRMADA (posted).
+  // Antes rascunho com status 'pendente' entrava na fila e tinha NF AUTORIZADA
+  // sem a fatura estar confirmada (26 casos 'Confirmar fatura' no Odoo).
   var nfeIds = await executeKw(client, db, uid, pwd, 'account.move', 'search', [[
     ['move_type', '=', 'out_invoice'],
+    ['state', '=', 'posted'],
     ['x_studio_nfe_status', '=', 'pendente'],
   ]], { order: 'id asc', limit: 5 });
 
-  // Buscar NFS-e pendentes
+  // Buscar NFS-e pendentes (mesma trava de estado)
   var nfseIds = await executeKw(client, db, uid, pwd, 'account.move', 'search', [[
     ['move_type', '=', 'out_invoice'],
+    ['state', '=', 'posted'],
     ['x_studio_nfse_status', '=', 'pendente'],
   ]], { order: 'id asc', limit: 5 });
 
