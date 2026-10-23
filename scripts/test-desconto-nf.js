@@ -59,12 +59,49 @@ console.log('== D. infCpl Desconto no XML ==');
 ok('xml lê order.desconto_valor', xmlSrc.indexOf('order.desconto_valor') >= 0);
 ok("xml escreve 'Desconto: R$ '", xmlSrc.indexOf("'Desconto: R$ '") >= 0);
 
-console.log('== E. xProd completo ==');
-ok('xProd vem da line.name (observação)', emitSrc.indexOf("String(line.name || '')") >= 0);
-ok('junha nome do produto quando falta no nome da linha', emitSrc.indexOf("productName + ' - ' + xProdFull") >= 0);
-ok('teto 120 chars (schema SEFAZ)', emitSrc.indexOf('xProdFull.length > 120') >= 0);
-// XML usa product_name no <xProd>
+console.log('== E. xProd completo (fix rejeicao 225 — NFe 00073124) ==');
+ok('helper dedicado buildXProdCompleto', emitSrc.indexOf('function buildXProdCompleto') >= 0);
+ok('buildLineData usa o helper', emitSrc.indexOf('buildXProdCompleto(productName, line.name)') >= 0);
 ok('XML mantém <xProd> do product_name', xmlSrc.indexOf('line.product_name || line.xProd') >= 0);
+// Unidade real: extrai o helper da fonte e testa com os dados da fatura 479
+var mFn = emitSrc.match(/function buildXProdCompleto[\s\S]*?\n\}/);
+assert(mFn, 'helper buildXProdCompleto encontrado na fonte');
+var buildXProdCompleto = eval('(' + mFn[0] + ')');
+// linha real 523 (obs repetia o nome do produto -> duplicava e estourava o padrao)
+var nm523 = '523 - Tubo Ret 40x60 1,25 GI (Padrão - BR)';
+var x523 = buildXProdCompleto(nm523, '[523] 523 - Tubo Ret 40x60 1,25 GI (Padrão - BR)\n523 - Tubo Ret 40x60 1,25 GI (Padrão - BR)');
+ok('523: sem duplicação do nome', x523 === nm523, JSON.stringify(x523));
+// telha com medida na obs
+var nm834 = '834 - Telha TP 25 (0,43) nacional (Padrão - MT)';
+var x834 = buildXProdCompleto(nm834, '[834] 834 - Telha TP 25 (0,43) nacional (Padrão - MT)\n26 x 700');
+ok('834: nome + medida da obs', x834 === nm834 + ' - 26 x 700', JSON.stringify(x834));
+// enrijecido (nome com espaço duplo + obs)
+var x2285 = buildXProdCompleto('2285 - Perfil U 150x50 1,95 (Padrão - BR)', '[2285] 2285 - Perfil U 150x50 1,95  (Padrão - BR)\nENRIJECIDO **');
+ok('2285: obs ENRIJECIDO preservada', /- ENRIJECIDO \*\*$/.test(x2285), JSON.stringify(x2285));
+// obs com espaço final (linha real '09 x 6,700 ')
+var x407 = buildXProdCompleto('407 - Telha TP 40 (0,43) nacional (Padrão - MT)', '[407] 407 - Telha TP 40 (0,43) nacional (Padrão - MT)\n09 x 6,700 ');
+ok('407: sem espaço final', x407 === '407 - Telha TP 40 (0,43) nacional (Padrão - MT) - 09 x 6,700', JSON.stringify(x407));
+// linha só com o nome (sem obs)
+var x35 = buildXProdCompleto('35 - Barra Chata 1.1/2x1/4 (Padrão - BR)', '[35] 35 - Barra Chata 1.1/2x1/4 (Padrão - BR)');
+ok('35: nome puro (obs inexistente)', x35 === '35 - Barra Chata 1.1/2x1/4 (Padrão - BR)', JSON.stringify(x35));
+// teto 120 + corte nunca termina em espaço/separador
+var xLong = buildXProdCompleto('A'.repeat(100), 'A'.repeat(100) + '\n' + 'B'.repeat(16) + ' ' + 'C'.repeat(10));
+ok('teto 120 chars respeitado', xLong.length <= 120, String(xLong.length));
+ok('corte não termina em espaço', !/\s$/.test(xLong), JSON.stringify(xLong.slice(-6)));
+// valores da fatura 73124 (15 linhas) — todos dentro do padrão
+var linhas73124 = [
+  ['523 - Tubo Ret 40x60 1,25 GI (Padrão - BR)', '[523] 523 - Tubo Ret 40x60 1,25 GI (Padrão - BR)\n523 - Tubo Ret 40x60 1,25 GI (Padrão - BR)'],
+  ['2285 - Perfil U 150x50 1,95 (Padrão - BR)', '[2285] 2285 - Perfil U 150x50 1,95  (Padrão - BR)\nENRIJECIDO **'],
+  ['834 - Telha TP 25 (0,43) nacional (Padrão - MT)', '[834] 834 - Telha TP 25 (0,43) nacional (Padrão - MT)\n26 x 700'],
+  ['407 - Telha TP 40 (0,43) nacional (Padrão - MT)', '[407] 407 - Telha TP 40 (0,43) nacional (Padrão - MT)\n09 x 6,700 '],
+  ['35 - Barra Chata 1.1/2x1/4 (Padrão - BR)', '[35] 35 - Barra Chata 1.1/2x1/4 (Padrão - BR)'],
+];
+var todasOk = true;
+for (var li = 0; li < linhas73124.length; li++) {
+  var xv = buildXProdCompleto(linhas73124[li][0], linhas73124[li][1]);
+  if (xv.length > 120 || /\s$/.test(xv) || /^\s/.test(xv) || xv.indexOf(xv.trim()) !== 0) todasOk = false;
+}
+ok('todas as linhas da 73124 dentro do padrão SEFAZ', todasOk);
 
 console.log('== F. DANFE descrição maior + wrap ==');
 ok("coluna DESCRICAO 0.30", danfeSrc.indexOf("{ t: 'DESCRICAO', w: 0.30 }") >= 0);

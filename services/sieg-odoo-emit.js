@@ -1747,6 +1747,43 @@ function extractNcmFromRef(ref) {
 // ============================================================
 // Build Line Data (with product x_studio_ fields for NFS-e)
 // ============================================================
+// ============================================================
+// buildXProdCompleto — xProd da NF-e = nome do produto + observação da linha.
+// FIX URGENTE 23/10/2026 — rejeicao 225 (cvc-pattern-valid) na NFe 00073124:
+//  - a line.name vem como '[code] nome\nobs' e a obs PODE repetir o nome do
+//    produto ('523 - Tubo Ret...\n523 - Tubo Ret...') -> nao duplicar o nome;
+//  - o corte anterior (substring 0,120) podia terminar em ESPACO e o pattern
+//    TString da SEFAZ exige primeiro/ultimo caractere diferente de espaco;
+//  - sanitizacao unica: 1 linha, sem espacos duplos, teto 120, pontas limpas.
+// ============================================================
+function buildXProdCompleto(productName, lineName) {
+  var nm = String(productName || '').replace(/\s+/g, ' ').trim();
+  var parts = String(lineName || '').split('\n');
+  var obs = '';
+  for (var pi = 1; pi < parts.length; pi++) {
+    var pseg = String(parts[pi] || '').replace(/\s+/g, ' ').trim();
+    pseg = pseg.replace(/^\[\d+\]\s*/, ''); // codigos '[523]' no meio da obs nao sao informacao
+    if (pseg) obs = obs ? (obs + ' - ' + pseg) : pseg;
+  }
+  var nmUp = nm.toUpperCase();
+  var obsUp = obs.toUpperCase();
+  if (obs && nmUp) {
+    if (obsUp === nmUp) {
+      obs = '';                                    // obs repete o nome do produto (item 523 da 73124)
+    } else if (obsUp.indexOf(nmUp) === 0) {
+      obs = obs.substring(nm.length).replace(/^[\s\-–—:,;]+/, '').trim();
+    } else if (nmUp.indexOf(obsUp) === 0) {
+      obs = '';                                    // obs e prefixo do nome (nao acrescenta info)
+    }
+  }
+  var out = obs ? (nm + ' - ' + obs) : nm;
+  if (!out) out = String(lineName || '').replace(/\s+/g, ' ').trim();
+  out = String(out || '').replace(/\s+/g, ' ').trim();
+  if (out.length > 120) out = out.substring(0, 120);
+  out = out.replace(/[\s\-–—:,;]+$/, '').trim();   // NUNCA termina em espaco/separador
+  return out || 'Item';
+}
+
 async function buildLineData(client, db, uid, pwd, line, icmsInternoPR) {
   // icmsInternoPR: aliquota ICMS interna do emitente (PR: IE=12%, sem IE/CPF=19.5%)
   // Fallback defensivo caso chamador nao passe (evita ReferenceError)
@@ -1989,14 +2026,11 @@ async function buildLineData(client, db, uid, pwd, line, icmsInternoPR) {
     console.log('[SIEG-EMIT] DESCONTO item ' + (defaultCode || productName) + ': ' + discPct +
       '% -> vUnCom ' + vUnLiquido.toFixed(4) + ' (desconto R$ ' + descontoLinha.toFixed(2) + ')');
   }
-  // 4d. DESCRICAO COMPLETA (demanda NF): xProd = nome do produto + descrição/
-  // observação da linha da fatura, em 1 linha, com teto de 120 chars do
-  // schema SEFAZ. Sem descrição extra na linha, mantém só o nome do produto.
-  var xProdFull = String(line.name || '').replace(/\s+/g, ' ').trim() || productName;
-  if (productName && xProdFull.toUpperCase().indexOf(String(productName).toUpperCase()) !== 0) {
-    xProdFull = productName + ' - ' + xProdFull;
-  }
-  if (xProdFull.length > 120) xProdFull = xProdFull.substring(0, 120);
+  // 4d. DESCRICAO COMPLETA (demanda NF): xProd = nome do produto + observação
+  // da linha, em 1 linha, teto 120 chars do schema SEFAZ — montado pelo
+  // helper buildXProdCompleto (fix rejeicao 225: sem duplicar nome, pontas
+  // sempre sanitizadas — ver comentario acima da funcao).
+  var xProdFull = buildXProdCompleto(productName, line.name);
   if (xProdFull !== productName) {
     console.log('[SIEG-EMIT] xProd completo (' + xProdFull.length + ' chars): ' + JSON.stringify(xProdFull));
   }
