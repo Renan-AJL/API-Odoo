@@ -463,7 +463,9 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   // 1c-3. TIPO DE OPERACAO (l10n_br.operation.type) — AJL 21/10/2026
   // A NF deve sair com a NOMENCLATURA usada no Odoo (nome do tipo em pt_BR) e o
   // CFOP correto: transferencia -> 5152/6152; remessa industrializacao -> 5901/6901.
-  var opTypeId = 0, opTypeName = '', opTypeTech = '';
+  // AJL 27/10/2026: tambem le o CFOP do cadastro do tipo (l10n_br_cfop_code —
+  // ex: bonificação/doação/brinde = 5910) p/ qualquer tipo novo sem mapping fixo.
+  var opTypeId = 0, opTypeName = '', opTypeTech = '', opTypeCfop = '';
   try {
     var otVal = await executeKw(client, db, uid, pwd, 'account.move', 'read',
       [[moveId], ['l10n_br_goods_operation_type_id']], { context: { lang: 'pt_BR' } });
@@ -472,9 +474,12 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       opTypeId = opRef[0];
       opTypeName = opRef[1] || '';
       var otd = await executeKw(client, db, uid, pwd, 'l10n_br.operation.type', 'read',
-        [[opTypeId], ['technical_name']]);
-      if (otd && otd[0]) opTypeTech = otd[0].technical_name || '';
-      console.log('[SIEG-EMIT] Tipo de operacao: id=' + opTypeId + ' "' + opTypeName + '" (' + opTypeTech + ')');
+        [[opTypeId], ['technical_name', 'l10n_br_cfop_code']]);
+      if (otd && otd[0]) {
+        opTypeTech = otd[0].technical_name || '';
+        opTypeCfop = String(otd[0].l10n_br_cfop_code || '').replace(/\D/g, '');
+      }
+      console.log('[SIEG-EMIT] Tipo de operacao: id=' + opTypeId + ' "' + opTypeName + '" (' + opTypeTech + ')' + (opTypeCfop ? ' CFOP=' + opTypeCfop : ''));
     }
   } catch (eOT) {
     console.log('[SIEG-EMIT] Tipo de operacao nao lido (segue padrao): ' + eOT.message);
@@ -764,6 +769,112 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   }
   console.log('[SIEG-EMIT] [ICMS-PR] aliquota_icms=' + partnerAliquotaIcms + ' has_ie=' + partnerHasIe + ' cnpj_len=' + partnerCnpjLimpo.length + ' → icmsInternoPR=' + icmsInternoPR + '%');
 
+  // 3d. TRANSPORTADORA / FRETE / VOLUMES (AJL 27/10/2026 — demanda bonificação 5910):
+  // a fatura pode ter transportadora cadastrada (l10n_br_edi_transporter_id),
+  // modelo do frete (l10n_br_edi_freight_model), placa (l10n_br_plate_number)
+  // e volumes (l10n_br_package_ids). Tudo vira o grupo <transp> do XML
+  // (modFrete, veicTransp, transporta, vol) — respeitando a regra da rejeicao
+  // 845: transporta/veicTransp/vol SO quando modFrete != 9 (sem frete).
+  // Faturas SEM esses campos = XML IDENTICO ao de hoje (modFrete 9, sem transporta).
+  var cfgTransp = { modFrete: '9', transporta: null, veicTransp: null, qVol: 0, espVol: '', pesoBruto: 0, pesoLiquido: 0 };
+  var FREIGHT_MOD = { CIF: '0', FOB: '1', Thirdparty: '2', SenderVehicle: '3', ReceiverVehicle: '4', FreeShipping: '9' };
+  var tpFreightRaw = '';
+  var tpTransporterId = 0, tpTransporterNome = '';
+  var tpPlate = '';
+  var tpPackageIds = [];
+  try {
+    var tpmv = await executeKw(client, db, uid, pwd, 'account.move', 'read',
+      [[moveId], ['l10n_br_edi_freight_model', 'l10n_br_edi_transporter_id', 'l10n_br_plate_number', 'l10n_br_package_ids']]);
+    var tpmvRec = (tpmv && tpmv[0]) || {};
+    tpFreightRaw = String(tpmvRec.l10n_br_edi_freight_model || '');
+    tpPlate = String(tpmvRec.l10n_br_plate_number || '').trim().toUpperCase();
+    if (tpmvRec.l10n_br_edi_transporter_id && tpmvRec.l10n_br_edi_transporter_id[0]) {
+      tpTransporterId = tpmvRec.l10n_br_edi_transporter_id[0];
+      tpTransporterNome = String(tpmvRec.l10n_br_edi_transporter_id[1] || '');
+    }
+    if (Array.isArray(tpmvRec.l10n_br_package_ids)) tpPackageIds = tpmvRec.l10n_br_package_ids;
+  } catch (eTp) {
+    console.log('[SIEG-EMIT] [TRANSP] Campos de transporte nao lidos (segue padrao sem transp): ' + eTp.message);
+  }
+
+  if (tpFreightRaw || tpTransporterId || tpPlate || tpPackageIds.length) {
+    console.log('[SIEG-EMIT] [TRANSP] Fatura tem transporte: frete=' + (tpFreightRaw || '(vazio)') +
+      ' transportadora=' + (tpTransporterNome || '(nenhuma)') + ' placa=' + (tpPlate || '-') + ' volumes=' + tpPackageIds.length);
+    // modFrete: mapa do campo Odoo -> codigo NF-e. Fatura com transportadora e
+    // frete vazio = Terceiros (2) — o caso real do fluxo (transportadora contratada).
+    if (FREIGHT_MOD[tpFreightRaw]) {
+      cfgTransp.modFrete = FREIGHT_MOD[tpFreightRaw];
+    } else if (!tpFreightRaw && tpTransporterId) {
+      cfgTransp.modFrete = '2';
+      console.log('[SIEG-EMIT] [TRANSP] frete vazio com transportadora definida -> modFrete 2 (terceiros)');
+    }
+    // Transportadora (parceiro Odoo) — so entra no XML quando modFrete != 9 (rejeicao 845)
+    if (tpTransporterId && cfgTransp.modFrete !== '9') {
+      try {
+        var transpPartner = await readPartner(client, db, uid, pwd, tpTransporterId);
+        var tpDoc = String(transpPartner.cnpj_cpf || '').replace(/\D/g, '');
+        var tpIeRaw = String(transpPartner.inscr_est || '').replace(/\D/g, '');
+        var tpNome = String(transpPartner.legal_name || transpPartner.name || '').trim();
+        var tpEnder = String(transpPartner.street || '').trim();
+        var tpNro = String(transpPartner.number || '').trim();
+        if (tpNro && tpNro.toUpperCase() !== 'S/N') tpEnder += (tpEnder ? ', ' : '') + tpNro;
+        if (transpPartner.street2) tpEnder += (tpEnder ? ' - ' : '') + String(transpPartner.street2).trim();
+        var tpMun = String(transpPartner.city || '').trim();
+        var tpUF = String(transpPartner.state || '').trim().toUpperCase();
+        if (tpNome) {
+          cfgTransp.transporta = {
+            cnpj: tpDoc,
+            xNome: tpNome,
+            ie: tpIeRaw,
+            xEnder: tpEnder,
+            xMun: tpMun,
+            UF: tpUF,
+          };
+          if (!tpDoc) console.warn('[SIEG-EMIT] [TRANSP] Transportadora sem CNPJ/CPF no cadastro (' + tpNome + ') — <transporta> sai sem documento');
+          if (!tpIeRaw) console.warn('[SIEG-EMIT] [TRANSP] Transportadora sem IE no cadastro (' + tpNome + ') — SEFAZ pode exigir IE de transportadora PJ');
+          if (!tpMun || !tpUF) console.warn('[SIEG-EMIT] [TRANSP] Transportadora sem cidade/UF no cadastro — <transporta> sai sem endereco (tags opcionais, nada inventado)');
+        } else {
+          console.warn('[SIEG-EMIT] [TRANSP] Transportadora id ' + tpTransporterId + ' sem nome — <transporta> omitida');
+        }
+      } catch (eTpp) {
+        console.warn('[SIEG-EMIT] [TRANSP] Falha ao ler transportadora: ' + eTpp.message);
+      }
+    } else if (tpTransporterId && cfgTransp.modFrete === '9') {
+      console.warn('[SIEG-EMIT] [TRANSP] Transportadora definida mas frete "sem frete" (9) — <transporta> OMITIDA (regra SEFAZ 845). Preencha o Modelo do Frete p/ enviar a transportadora.');
+    }
+    // Placa (veicTransp) — so com modFrete != 9 e placa valida (ABC1234 antigo ou ABC1D23 Mercosul)
+    if (tpPlate && cfgTransp.modFrete !== '9') {
+      var tpPlaca = tpPlate.replace(/[^A-Z0-9]/g, '');
+      if (/^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(tpPlaca)) {
+        cfgTransp.veicTransp = { placa: tpPlaca, UF: (cfgTransp.transporta && cfgTransp.transporta.UF) || '' };
+      } else {
+        console.warn('[SIEG-EMIT] [TRANSP] Placa "' + tpPlate + '" fora do padrao ABC1234/ABC1D23 — veicTransp omitida (evita 225)');
+      }
+    }
+    // Volumes: pacotes anexados a fatura (stock.package) — so com modFrete != 9
+    if (tpPackageIds.length && cfgTransp.modFrete !== '9') {
+      try {
+        var pkgs = await executeKw(client, db, uid, pwd, 'stock.package', 'read', [tpPackageIds,
+          ['name', 'package_type_id', 'shipping_weight', 'weight']]);
+        var pkPesoB = 0, pkPesoL = 0, pkEsp = '';
+        for (var pkI = 0; pkI < pkgs.length; pkI++) {
+          var pk = pkgs[pkI];
+          var pkW = parseFloat(pk.shipping_weight) || parseFloat(pk.weight) || 0;
+          if (pkW > 0) { pkPesoB += pkW; pkPesoL += pkW; }
+          if (!pkEsp && pk.package_type_id && pk.package_type_id[1]) pkEsp = String(pk.package_type_id[1]);
+        }
+        cfgTransp.qVol = pkgs.length;
+        if (pkEsp) cfgTransp.espVol = pkEsp;
+        if (pkPesoB > 0) { cfgTransp.pesoBruto = round2(pkPesoB); cfgTransp.pesoLiquido = round2(pkPesoL); }
+        console.log('[SIEG-EMIT] [TRANSP] Volumes: qVol=' + cfgTransp.qVol + ' esp=' + (cfgTransp.espVol || '-') + ' pesoB=' + cfgTransp.pesoBruto + ' pesoL=' + cfgTransp.pesoLiquido);
+      } catch (ePkg) {
+        console.log('[SIEG-EMIT] [TRANSP] Falha ao ler volumes: ' + ePkg.message);
+      }
+    } else if (tpPackageIds.length && cfgTransp.modFrete === '9') {
+      console.log('[SIEG-EMIT] [TRANSP] Volumes ignorados (frete 9 — regra SEFAZ 845)');
+    }
+  }
+
   // 4. Read invoice lines diretamente de account.move.line (evita computed field)
   var allLineIds = await executeKw(client, db, uid, pwd, 'account.move.line', 'search', [[
     ['move_id', '=', moveId],
@@ -880,6 +991,13 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     } else if (opTypeTech === 'itemTransferShippingOutbound' ||
                opTypeTech === 'itemTransferShippingOutboundBetweenIPITaxPayer') {
       cfopOp = isInterstate ? '6152' : '5152';
+    } else if (opTypeCfop && /^\d{4}$/.test(opTypeCfop)) {
+      // AJL 27/10/2026: CFOP lido do cadastro do Tipo de Operacao
+      // (l10n_br.operation.type.l10n_br_cfop_code — ex: bonificação/doação/brinde
+      // = 5910 interna / 6910 interestadual). Cobre QUALQUER tipo novo sem mapping fixo.
+      var cfopTipo = opTypeCfop;
+      if (isInterstate && cfopTipo.charAt(0) === '5') cfopTipo = '6' + cfopTipo.substring(1);
+      cfopOp = cfopTipo;
     }
     if (cfopOp) {
       if (ld.cfop !== cfopOp) {
@@ -1103,6 +1221,9 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       note: move.narration || '',
       // Demanda 8: observacao livre da fatura (x_studio_obs_nfe) entra na NF
       obs_nfe: epObsNfe || '',
+      // AJL 27/10/2026: pesos do transporte (packages da fatura) para o <vol>
+      peso_bruto: cfgTransp.pesoBruto,
+      peso_liquido: cfgTransp.pesoLiquido,
       sale_order_number: saleOrderNumber || '',
       boleto_info: boletoInfo || '',
       icms_aliquota: icmsAliquotaInfCpl,
@@ -1129,6 +1250,14 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       tpAmb: process.env.SIEG_TP_AMB || config.sieg.tpAmb || '2',
       natOp: opTypeName || (isTransferencia ? 'Transferência de produtos' : 'Venda de Mercadoria'),
       mod: tipo === 'nfe' ? '55' : '01',
+      // AJL 27/10/2026: transporte da NF — modFrete/transporta/veicTransp/volumes
+      // lidos da fatura (3d). Fatura sem frete/transportadora = 9/sem transporta
+      // = XML identico ao comportamento anterior (sem risco p/ emissao normal).
+      modFrete: cfgTransp.modFrete,
+      transporta: cfgTransp.transporta,
+      veicTransp: cfgTransp.veicTransp,
+      qVol: cfgTransp.qVol,
+      espVol: cfgTransp.espVol,
     },
     tipo: tipo,
   };

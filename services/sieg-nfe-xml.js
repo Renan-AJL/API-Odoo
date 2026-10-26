@@ -668,7 +668,7 @@ ${xmlEndereco(partner, 'enderDest')}
   // padrao. A transportadora AJL continua cadastrada no Odoo (res.partner);
   // quando houver frete real, informar cfg.transporta e o grupo entra.
   const modFrete = String(cfg.modFrete || '9');
-  const hasVolume = cfg.qVol != null && Number(cfg.qVol) > 0;
+  const hasVolume = cfg.qVol != null && Number(cfg.qVol) > 0 && modFrete !== '9'; // 845: sem frete = sem volumes
   // Peso total: soma peso_unitario * quantidade de cada linha
   var pesoBrutoTotal = 0;
   var pesoLiqTotal = 0;
@@ -686,32 +686,55 @@ ${xmlEndereco(partner, 'enderDest')}
   if (order.peso_bruto && order.peso_bruto > 0) pesoBrutoTotal = order.peso_bruto;
   if (order.peso_liquido && order.peso_liquido > 0) pesoLiqTotal = order.peso_liquido;
   
-  // Transportadora: entra SOMENTE se vier cfg.transporta explicito (frete real)
+  // Transportadora: entra SOMENTE com frete real (modFrete != 9 — regra SEFAZ 845)
+  // AJL 27/10/2026: cpf de transportadora pessoa fisica; xEnder/xMun/UF OMITIDOS
+  // quando vazios (tags opcionais — nada inventado); textos com teto 60 do XSD.
   var tpCfg = (cfg.transporta && typeof cfg.transporta === 'object') ? cfg.transporta : null;
+  if (modFrete === '9') tpCfg = null; // DEFESA 845: modFrete 9 NUNCA leva transporta/veicTransp/vol
   var tpBloco = '';
   if (tpCfg && String(tpCfg.xNome || '').trim()) {
     var tpCnpj = onlyNum(tpCfg.cnpj || '');
+    var tpDocTag = tpCnpj.length === 14 ? 'CNPJ' : (tpCnpj.length === 11 ? 'CPF' : '');
     var tpIe = onlyNum(tpCfg.ie || '');
+    var tpEndTxt = saneiaTextoNFe(String(tpCfg.xEnder || ''), 60);
+    var tpMunTxt = saneiaTextoNFe(String(tpCfg.xMun || ''), 60);
+    var tpUfTxt = String(tpCfg.UF || '').trim().toUpperCase();
     tpBloco = `
       <transporta>
-        ${tpCnpj ? `<CNPJ>${tpCnpj}</CNPJ>
-        ` : ''}<xNome>${esc(String(tpCfg.xNome))}</xNome>${tpIe ? `
-        <IE>${tpIe}</IE>` : ''}
-        <xEnder>${esc(String(tpCfg.xEnder || 'S/N'))}</xEnder>
-        <xMun>${esc(String(tpCfg.xMun || 'CURITIBA'))}</xMun>
-        <UF>${esc(String(tpCfg.UF || 'PR'))}</UF>
+        ${tpDocTag ? `<${tpDocTag}>${tpCnpj}</${tpDocTag}>
+        ` : ''}<xNome>${esc(saneiaTextoNFe(String(tpCfg.xNome), 60))}</xNome>${tpIe ? `
+        <IE>${tpIe}</IE>` : ''}${tpEndTxt ? `
+        <xEnder>${esc(tpEndTxt)}</xEnder>` : ''}${tpMunTxt ? `
+        <xMun>${esc(tpMunTxt)}</xMun>` : ''}${tpUfTxt ? `
+        <UF>${esc(tpUfTxt)}</UF>` : ''}
       </transporta>`;
-    console.log('[NFE-XML] transporta: ' + tpCfg.xNome + ' (CNPJ ' + (tpCnpj || 'vazio') + ') modFrete=' + modFrete);
+    console.log('[NFE-XML] transporta: ' + tpCfg.xNome + ' (' + (tpDocTag ? tpDocTag + ' ' + tpCnpj : 'sem documento') + ') modFrete=' + modFrete);
   } else {
-    console.log('[NFE-XML] transporta: OMITIDA (sem frete — evita rejeicao 845) modFrete=' + modFrete);
+    console.log('[NFE-XML] transporta: OMITIDA (fatura sem transportadora/modFrete 9 — evita rejeicao 845) modFrete=' + modFrete);
+  }
+  // veicTransp (AJL 27/10/2026): placa do veiculo. ORDEM DO XSD (pl10v130):
+  // transp = modFrete, transporta, retTransp, veicTransp, reboque, vagao, balsa, vol
+  // — transporta vem ANTES de veicTransp (validado contra o schema oficial).
+  var veicCfg = (cfg.veicTransp && typeof cfg.veicTransp === 'object') ? cfg.veicTransp : null;
+  var veicBloco = '';
+  if (veicCfg && String(veicCfg.placa || '').trim() && modFrete !== '9') {
+    var vPlaca = String(veicCfg.placa).trim().toUpperCase();
+    var vUfTxt = String(veicCfg.UF || '').trim().toUpperCase();
+    veicBloco = `
+      <veicTransp>
+        <placa>${esc(vPlaca)}</placa>${vUfTxt ? `
+        <UF>${esc(vUfTxt)}</UF>` : ''}
+      </veicTransp>`;
+    console.log('[NFE-XML] veicTransp placa=' + vPlaca + (vUfTxt ? ' UF=' + vUfTxt : ''));
   }
   xml += `
     <transp>
-      <modFrete>${modFrete}</modFrete>${tpBloco}${hasVolume ? `
+      <modFrete>${modFrete}</modFrete>${tpBloco}${veicBloco}${hasVolume ? `
       <vol>
-        <qVol>${Math.trunc(Number(cfg.qVol))}</qVol>${pesoBrutoTotal > 0 ? `
-        <pesoB>${num(pesoBrutoTotal)}</pesoB>
-        <pesoL>${num(pesoLiqTotal)}</pesoL>` : ''}
+        <qVol>${Math.trunc(Number(cfg.qVol))}</qVol>${cfg.espVol ? `
+        <esp>${esc(saneiaTextoNFe(String(cfg.espVol), 60))}</esp>` : ''}${pesoBrutoTotal > 0 ? `
+        <pesoL>${num3(pesoLiqTotal)}</pesoL>
+        <pesoB>${num3(pesoBrutoTotal)}</pesoB>` : ''}
       </vol>` : ''}
     </transp>`;
 

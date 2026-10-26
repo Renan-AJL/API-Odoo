@@ -132,14 +132,16 @@ ok('Venc: DD/MM/AAAA no infCpl', xml.indexOf('Venc: 22/11/2026') > 0 && xml.inde
 ok('duplicata dVenc segue ISO (schema)', xml.indexOf('<dVenc>2026-11-22</dVenc>') > 0);
 ok('Acréscimo: R$ 20.00 no infCpl', xml.indexOf('Acréscimo: R$ 20.00') > 0);
 
-// Com frete real (cfg.transporta explicito): grupo transportador entra
+// Com frete real (cfg.transporta explicito): grupo transportador entra.
+// AJL 27/10/2026: com modFrete != 9 (regra SEFAZ 845 — transporta + 9 = rejeicao;
+// o builder agora omite transporta/veicTransp/vol quando modFrete 9, defesa extra)
 var xmlFrete = gerarXmlNFe({
   company: company, partner: partner, order: order, lines: lines, pagamentos: pagamentos,
   duplicatas: [
     { dVenc: '2026-11-22', vDup: '77.75' },
     { dVenc: '2026-12-07', vDup: '77.75' },
   ],
-  config: { serie: '100', tpAmb: '2', natOp: 'Venda de Mercadoria', mod: '55',
+  config: { serie: '100', tpAmb: '2', natOp: 'Venda de Mercadoria', mod: '55', modFrete: '2',
     transporta: { xNome: 'TRANSPORTADORA TESTE LTDA', cnpj: '12345678000100', ie: '1234567890',
       xEnder: 'Rodovia Teste, 1', xMun: 'CURITIBA', UF: 'PR' } },
   tipo: 'nfe',
