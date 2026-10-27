@@ -20,8 +20,9 @@ const {
   setOAuthToken,
 } = require('../services/sieg-auth');
 const { emitirNota, enviarNFe, emitirNFSe, gerarDanfe, gerarDanfse } = require('../services/sieg-api');
-const { processPendingEmissions, solicitarEmissaoComBoletos } = require('../services/sieg-odoo-emit');
+const { processPendingEmissions } = require('../services/sieg-odoo-emit');
 const { cancelarNFeOdoo } = require('../services/nfe-cancelar-odoo');
+const { cancelarNFe } = require('../services/nfe-cancelamento');
 
 // === OAuth Callback ===
 // A SIEG redireciona aqui apos o usuario autorizar o acesso.
@@ -198,30 +199,6 @@ router.post('/webhook', apiKeyAuth, async (req, res) => {
   }
 });
 
-// === EMITIR NF-e + BOLETOS (botao "Emitir NF e Boleto" do Odoo) ===
-// Recebe: { fatura_ids: [id, ...] }
-// Registra o auto-boleto, marca pendente e dispara a emissao imediatamente.
-// Se a NF autorizar, os boletos Itau saem automaticamente (mesmo fluxo do
-// /pagar manual). Responde rapido com o que foi aceito/ignorado.
-router.post('/emitir-com-boletos', apiKeyAuth, async (req, res) => {
-  var ids = req.body && req.body.fatura_ids;
-  if (!Array.isArray(ids) || !ids.length) {
-    return res.status(400).json({ sucesso: false, erro: 'fatura_ids obrigatorio (array de ids de account.move)' });
-  }
-  ids = ids.map(Number).filter(function (n) { return n > 0; });
-  if (!ids.length) {
-    return res.status(400).json({ sucesso: false, erro: 'fatura_ids invalido' });
-  }
-  console.log('[SIEG] emitir-com-boletos solicitado: ' + JSON.stringify(ids));
-  try {
-    const resultado = await solicitarEmissaoComBoletos(ids);
-    res.json({ sucesso: true, ...resultado });
-  } catch (err) {
-    console.error('[SIEG] Erro emitir-com-boletos:', err.message);
-    res.status(500).json({ sucesso: false, erro: err.message });
-  }
-});
-
 // === CANCELAR NF-e ===
 // Recebe: { move_id, justificativa }
 // Cancela na SEFAZ + reverte fatura no Odoo
@@ -235,6 +212,29 @@ router.post('/cancelar', apiKeyAuth, async (req, res) => {
     res.json(resultado);
   } catch (err) {
     console.error('[NFE-CANCEL] Erro:', err.message);
+    res.status(500).json({ sucesso: false, erro: err.message });
+  }
+});
+
+// === CANCELAR NF-e DIRETO (SEM Odoo) — emergencia ===
+// Quando o middleware nao consegue autenticar no Odoo (ODOO_API_KEY invalida),
+// esta rota envia o evento 110111 direto para a SEFAZ usando apenas
+// chave + protocolo informados. CNPJ do evento = posicoes 7-20 da chave
+// (emissor real — corrige rejeicao 574). A baixa no Odoo fica a cargo do chamador.
+router.post('/cancelar-direto', apiKeyAuth, async (req, res) => {
+  var chave = String(req.body.chave || '').replace(/\D/g, '');
+  var protocolo = String(req.body.protocolo || '').trim();
+  var justificativa = String(req.body.justificativa || 'Cancelamento solicitado pelo emitente').trim();
+  var cnpj = String(req.body.cnpj || '').replace(/\D/g, '') || chave.slice(6, 20);
+  if (chave.length !== 44) return res.status(400).json({ sucesso: false, erro: 'chave deve ter 44 digitos' });
+  if (!protocolo) return res.status(400).json({ sucesso: false, erro: 'protocolo de autorizacao obrigatorio' });
+  console.log('[NFE-CANCEL-DIRETO] chave=' + chave + ' prot=' + protocolo + ' cnpj=' + cnpj);
+  try {
+    var resultado = await cancelarNFe({ chave, protocolo, cnpj, justificativa });
+    console.log('[NFE-CANCEL-DIRETO] resultado cStat=' + resultado.cStat + ' - ' + resultado.xMotivo);
+    res.json(Object.assign({ versao: 'cancel-direto-1' }, resultado));
+  } catch (err) {
+    console.error('[NFE-CANCEL-DIRETO] Erro:', err.message);
     res.status(500).json({ sucesso: false, erro: err.message });
   }
 });
