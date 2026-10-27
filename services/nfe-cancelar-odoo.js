@@ -73,12 +73,26 @@ async function cancelarNFeOdoo({ moveId, justificativa }) {
   if (!protocolo)                    throw new Error('Protocolo de autorização ausente. A nota precisa estar autorizada (cStat 100).');
   if (status !== 'autorizada')       throw new Error('Fatura não está autorizada (status atual: "' + status + '"). Só é possível cancelar notas autorizadas.');
 
-  // 2. CNPJ do emitente (via company)
-  var companyId = Array.isArray(move.company_id) ? move.company_id[0] : move.company_id;
-  var companies = await executeKw(client, db, uid, pwd, 'res.company', 'read',
-    [[companyId], ['vat']]);
-  var cnpj = (companies && companies[0] && companies[0].vat || '').replace(/\D/g, '');
-  if (!cnpj) throw new Error('CNPJ do emitente não encontrado na empresa do Odoo');
+  // 2. CNPJ do emitente — SEMPRE pela CHAVE de acesso (autoridade SEFAZ).
+  //    A fatura pode estar na empresa Matriz (pivot de faturamento) enquanto
+  //    a NF-e foi AUTORIZADA com o CNPJ de uma filial; usar company_id.vat
+  //    causa rejeicao 574 ("O autor do evento diverge do emissor da NF-e").
+  //    Chave: posicoes 7-20 (indice 6..20) = CNPJ do emitente real.
+  var cnpjChave = chave.slice(6, 20);
+  var cnpj = cnpjChave;
+  try {
+    var companyId = Array.isArray(move.company_id) ? move.company_id[0] : move.company_id;
+    var companies = await executeKw(client, db, uid, pwd, 'res.company', 'read',
+      [[companyId], ['vat']]);
+    var cnpjFatura = (companies && companies[0] && companies[0].vat || '').replace(/\D/g, '');
+    if (cnpjFatura && cnpjFatura !== cnpjChave) {
+      console.log('[NFE-CANCEL] CNPJ da fatura (' + cnpjFatura + ') difere do emissor da NF-e ('
+        + cnpjChave + '). Usando o CNPJ da CHAVE (corrige rejeicao 574).');
+    }
+  } catch (e) {
+    console.warn('[NFE-CANCEL] Nao foi possivel ler a empresa da fatura (seguindo com CNPJ da chave): ' + e.message);
+  }
+  if (!cnpj || cnpj.length !== 14) throw new Error('CNPJ do emitente nao encontrado na chave de acesso');
 
   // 3. Enviar cancelamento à SEFAZ
   var resultado = await cancelarNFe({ chave, protocolo, cnpj, justificativa });
@@ -130,6 +144,7 @@ async function cancelarNFeOdoo({ moveId, justificativa }) {
 
   console.log('[NFE-CANCEL] Concluido: sucesso=' + resultado.sucesso + ' cStat=' + resultado.cStat);
   return {
+    versao: 'cancel-cnpj-chave-1',
     sucesso: resultado.sucesso,
     cStat: resultado.cStat,
     xMotivo: resultado.xMotivo,
