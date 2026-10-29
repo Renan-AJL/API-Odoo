@@ -85,6 +85,31 @@ async function consultarCobrancaPix(txid) {
 }
 
 /**
+ * Cancela (remove) cobranca PIX imediata — BACEN: PUT /cob/{txid} com
+ * status REMOVIDA_PELO_USUARIO_RECEBEDOR. Caso S03464 (29/10/2026): PIX
+ * com valor errado ficou ATIVA 24h sem forma de cancelar.
+ */
+async function cancelarCobrancaPix(txid) {
+  logger.info('Cancelando cobranca PIX ' + txid + '...');
+  try {
+    var resultado = await callPix('PUT', 'v2/cob/' + txid, {
+      status: 'REMOVIDA_PELO_USUARIO_RECEBEDOR',
+    });
+    logger.info('Cobranca PIX cancelada: ' + txid + ' -> ' + (resultado.status || 'sem status'));
+    return resultado;
+  } catch (error) {
+    var statusC = error.response?.status;
+    var errDataC = error.response?.data;
+    logger.error('Falha ao cancelar PIX ' + txid + ': ' + statusC + ' - ' + JSON.stringify(errDataC));
+    throw {
+      status: statusC || error.status || 502,
+      message: (errDataC && (errDataC.mensagem || errDataC.message)) || error.message || 'Erro ao cancelar cobranca PIX',
+      detail: errDataC,
+    };
+  }
+}
+
+/**
  * Gera TXID unico para a cobranca PIX
  */
 function gerarTxid(pixData) {
@@ -145,6 +170,7 @@ async function consultarWebhookPix(chave) {
 module.exports = {
   criarCobrancaPix,
   consultarCobrancaPix,
+  cancelarCobrancaPix,
   gerarTxid,
   consultarPixRecebido,
   configurarWebhookPix,

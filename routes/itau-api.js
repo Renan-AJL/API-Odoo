@@ -12,7 +12,7 @@ const { emitirBoleto, parseFormaPagamento, consultarBoletoPorNossoNumero, cancel
 const { storeBoleto, generatePdf, generatePdfFromFields } = require('../services/pdf-boleto');
 const { pushBoletosToOdoo, pushPixToOdoo, pushPixToSaleOrder, pushBoletoHtmlToSaleOrder } = require('../services/odoo-push');
 const { criarLinkPagamento } = require('../services/itau-link-pagamento');
-const { criarCobrancaPix, consultarCobrancaPix } = require('../services/itau-pix');
+const { criarCobrancaPix, consultarCobrancaPix, cancelarCobrancaPix } = require('../services/itau-pix');
 const { buildDevedorFromDoc } = require('../utils/pix-devedor');
 const { buscarExtratoNormalizado } = require('../services/itau-extrato');
 const { criarExtrato } = require('../services/odoo-bank-statement');
@@ -1344,6 +1344,23 @@ router.post('/gerar', async function(req, res) {
   }
 });
 
+// === CANCELAR COBRANCA PIX (caso S03464: PIX com valor errado ficou ATIVA 24h) ===
+// POST /api/v1/itau/pix/cancelar  body: { txid }
+router.post('/pix/cancelar', apiKeyAuth, async function(req, res) {
+  try {
+    var txidC = String(req.body.txid || '').trim().toUpperCase();
+    if (!txidC || !/^[A-Z0-9]{25,32}$/.test(txidC)) {
+      return res.status(400).json({ success: false, message: 'txid obrigatorio (25-32 alfanumerico)' });
+    }
+    console.log('[API/PIX-CANCELAR] Cancelando cobranca PIX:', txidC);
+    var resultadoC = await cancelarCobrancaPix(txidC);
+    res.json({ success: true, message: 'PIX cancelado com sucesso', txid: txidC, status: resultadoC.status, dados: resultadoC });
+  } catch (errC) {
+    console.error('[API/PIX-CANCELAR] ERRO:', errC.message || errC);
+    res.status(errC.status || 500).json({ success: false, message: 'Erro ao cancelar PIX: ' + (errC.message || 'desconhecido'), detail: errC.detail });
+  }
+});
+
 /**
  * POST /api/v1/itau/regen
  */
@@ -1572,6 +1589,13 @@ router.post('/cancelar', apiKeyAuth, async function(req, res) {
     var nn = req.body.nosso_numero || '';
     if (!nn) {
       return res.status(400).json({ success: false, message: 'nosso_numero obrigatorio' });
+    }
+    // SMART (29/10/2026): TXID de PIX = 25-26 alfanumerico maiusculo (ex. 02B8E53F747D4D73B44CE89C05)
+    // nao e nosso numero de boleto — roteia p/ cancelamento de cobranca PIX
+    if (/^[A-Z0-9]{25,26}$/.test(String(nn).trim().toUpperCase())) {
+      console.log('[API/CANCELAR] TXID PIX detectado em /cancelar:', nn);
+      var resPix = await cancelarCobrancaPix(String(nn).trim().toUpperCase());
+      return res.json({ success: true, message: 'PIX cancelado com sucesso', tipo: 'pix', dados: resPix });
     }
     console.log('[API/CANCELAR] Cancelando boleto NN:', nn);
     var resultado = await cancelarBoleto(nn);
