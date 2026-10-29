@@ -298,3 +298,22 @@ Stage Summary:
 - Emitente/prestador AJL mantem Razao Social (regra SEFAZ) — intocado
 - DANFE/canhoto le o nome do XML autorizado -> propaga automaticamente
 - Arquivos: services/sieg-nfe-xml.js (dest), services/sieg-nfse-xml.js (toma), scripts/test-nome-cliente-nfe.js (5 checks OK)
+
+---
+Task ID: 11
+Agent: main (sessão IM AJL)
+Task: 30/10 — Painel: download de XML na aba NF-e Emitidas (seleção / individual / período inteiro) — urgente
+
+Work Log:
+- Demanda: baixar XMLs das NFs EMITIDAS por seleção, individual e pelo período filtrado, igual à aba Recebidas; e todos os XMLs de 19/out até hoje
+- Fonte dos XMLs descoberta e validada: o emissor SIEG anexa o nfeProc na própria fatura (ir.attachment 'NF-e_*.xml', campo raw em base64); 398/406 NFs de 19-30/out têm anexo (diagnóstico scripts/diag_xml_anexos_30out.py) — cofre SIEG (TipoXml=2) fica como fallback (SIEG_IMPORT_XML=0, import ao cofre desativado)
+- Novas rotas no painel (routes/admin.js): GET /admin/api/sieg/xml-emitida/:id (XML individual), GET /admin/api/sieg/pdf-emitida/:id (DANFE anexo ou gerada do XML), POST /admin/api/sieg/emitidas-xml-zip {ids} (ZIP da seleção, máx 600), GET /admin/api/sieg/emitidas-zip?dataInicio&dataFim&status&busca (ZIP do período, máx 1000); helpers siegBaixarPeriodo (SIEG paginado), siegXmlPorChave, coletarXmlsEmitidas (valida chave dentro do XML, anexo mais recente primeiro), gerarZipXmlsEmitidas (ZIP + manifesto.csv + nao-encontrados.txt); POST /api/sieg/pdf-zip agora aceita {ids} (emitidas: anexo DANFE_*.pdf → XML → DANFE gerada)
+- UI aba Emitidas espelha Recebidas: checkbox por linha + selecionar todos, barra de seleção (XML Selecionados / PDF Selecionados / Limpar), menu ⋯ por linha (Baixar XML / Baixar PDF / Ver DANFE) e botão "⬇ ZIP Período" que baixa o período filtrado; verDanfe aceita URL custom (xml-emitida)
+- Bug corrigido em teste: search_read de anexos não retornava res_id (não pedido em fields) — coleção vazia; corrigido
+- Teste e2e local com Odoo real (scripts/test_painel_emitidas.sh): XML individual OK (nfeProc 9127B), PDF OK, ZIP seleção 3 XMLs OK, ZIP período 19-30/out = 398 XMLs + manifesto (9 faltantes só resolvem via SIEG no Render: 73281, 73205, 73148, 73122, 72960, 72872, 72865-X165, 2 sem nome)
+- server.js -> version 1.2.5-download-xml-emitidas p/ confirmar deploy no Render
+
+Stage Summary:
+- Aba NF-e Emitidas do painel agora tem as 3 formas de baixar XML: individual (menu ⋯), por seleção (checkboxes → ⬇ XML Selecionados) e o período inteiro (⬇ ZIP Período) — mesmo formato da aba Recebidas
+- XMLs vêm do anexo da fatura no Odoo (mais rápido/confiável) com fallback cofre SIEG; ZIP traz manifesto.csv (fatura, chave, status, data, valor, fonte)
+- Arquivos: routes/admin.js, server.js, worklog.md

@@ -392,18 +392,66 @@ router.get('/api/sieg/pdf/:chave', auth, async (req, res) => {
 // Download ZIP direto da SIEG
 
 // POST /api/sieg/pdf-zip — gera ZIP com PDFs DANFE das chaves enviadas
+// (recebidas: {chaves:[], tipoXml} | emitidas: {ids:[]} — usa anexo DANFE da fatura)
 router.post('/api/sieg/pdf-zip', auth, async (req, res) => {
   try {
     var chaves = (req.body && req.body.chaves) || [];
     var tipoXml = parseInt((req.body && req.body.tipoXml) || 1) || 1;
-    if (!chaves.length) return res.status(400).json({ erro: 'Nenhuma chave informada' });
-    if (chaves.length > 100) return res.status(400).json({ erro: 'Máximo 100 NF-e por vez' });
+    var ids = ((req.body && req.body.ids) || []).map(function(x) { return parseInt(x); }).filter(Boolean);
+    if (!chaves.length && !ids.length) return res.status(400).json({ erro: 'Nenhuma chave/fatura informada' });
+    if ((chaves.length + ids.length) > 100) return res.status(400).json({ erro: 'Máximo 100 NF-e por vez' });
 
-    var { gerarDanfePdf } = require('../services/danfe-pdf');
     var AdmZip = require('adm-zip');
     var zip = new AdmZip();
     var erros = [];
+    var total = 0;
 
+    // ── Emitidas (por id da fatura): anexo DANFE_*.pdf → XML → gerar ──
+    if (ids.length) {
+      var cfg = config.odoo;
+      if (!cfg.url) return res.status(500).json({ erro: 'ODOO_URL não configurada' });
+      var c   = odooClient(cfg.url);
+      var uid = await odooAuth(c, cfg.db, cfg.user, cfg.password);
+      var ekw = (m, mt, a, k) => odooKw(c, cfg.db, uid, cfg.password, m, mt, a, k);
+      var moves = await lerMoves(ekw, ids);
+      var coletado = await coletarXmlsEmitidas(ekw, moves);
+      var { gerarDanfePdf } = require('../services/danfe-pdf');
+      for (var mv of moves) {
+        try {
+          var chaveMv = mv.chave || ('fatura_' + mv.id);
+          // 1. anexo PDF
+          var atts = await ekw('ir.attachment', 'search_read', [[
+            ['res_model', '=', 'account.move'], ['res_id', '=', mv.id], ['mimetype', '=', 'application/pdf'],
+          ]], { fields: ['name'] });
+          atts.sort(function(a, b) { return b.id - a.id; });
+          var pdfEnviado = false;
+          if (atts.length) {
+            var raws = await ekw('ir.attachment', 'read', [[atts[0].id], ['raw']]);
+            if (raws.length && raws[0].raw) {
+              zip.addFile('NFe_' + chaveMv + '.pdf', Buffer.from(raws[0].raw, 'base64'));
+              total++; pdfEnviado = true;
+            }
+          }
+          // 2. gera do XML (anexo Odoo → SIEG)
+          if (!pdfEnviado) {
+            var xmlMv = (coletado[mv.id] && coletado[mv.id].xml) || null;
+            if (!xmlMv && mv.chave) {
+              var cacheXml = cacheGet(mv.chave);
+              if (cacheXml) xmlMv = cacheXml;
+              else xmlMv = await siegXmlPorChave(mv.chave, 2);
+            }
+            if (!xmlMv) { erros.push((mv.name || chaveMv) + ' (nem PDF nem XML)'); continue; }
+            var pdfBuf = await gerarDanfePdf(xmlMv);
+            zip.addFile('NFe_' + chaveMv + '.pdf', pdfBuf);
+            total++;
+          }
+        } catch(eMv) {
+          erros.push((mv.name || mv.id) + ' (' + eMv.message + ')');
+        }
+      }
+    }
+
+    // ── Recebidas (por chave): cache → SIEG → gerar DANFE ──
     for (var chave of chaves) {
       try {
         // 1. tenta cache
@@ -480,6 +528,319 @@ router.get('/api/sieg/download-zip', auth, async (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename="' + nome + '"');
     res.send(Buffer.from(resp.data));
   } catch(e) {
+    res.status(500).json({ erro: e.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
+// NF-e EMITIDAS — download de XML/PDF
+// Fonte primária: anexo do XML na própria fatura (ir.attachment, gravado
+// pelo emissor SIEG). Fallback: cofre SIEG (baixar-xmls TipoXml=2, mês da chave).
+// ════════════════════════════════════════════════════════════════
+
+// Baixa todos os XMLs de um período no cofre SIEG (paginado) → Map chave → xmlStr
+async function siegBaixarPeriodo(tipoXml, di, df) {
+  var axios = require('axios');
+  var AdmZip = require('adm-zip');
+  var { getAuthHeaders } = require('../services/sieg-auth');
+  var headers = await withTimeout(getAuthHeaders(), 15000);
+  var mapa = new Map();
+  var take = 300, skip = 0;
+  for (var rodada = 0; rodada < 20; rodada++) {
+    var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', {
+      TipoXml: tipoXml, Take: take, Skip: skip,
+      DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
+    }, { headers, timeout: 40000, responseType: 'arraybuffer' }), 45000);
+    var zip = new AdmZip(resp.data);
+    var entries = zip.getEntries();
+    if (!entries.length) break;
+    for (var entry of entries) {
+      if (entry.isDirectory) continue;
+      try {
+        var xmlStr = zip.readAsText(entry);
+        var km = xmlStr.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i) || xmlStr.match(/<chNFe>(\d{44})</);
+        if (km) { if (!mapa.has(km[1])) mapa.set(km[1], xmlStr); cacheSet(km[1], xmlStr); }
+      } catch (ez) { /* entry corrompida: pula */ }
+    }
+    if (entries.length < take) break;
+    skip += take;
+  }
+  return mapa;
+}
+
+// Busca o XML de UMA chave no cofre SIEG (período = mês da chave)
+async function siegXmlPorChave(chave, tipoXml) {
+  var aamm = chave.slice(2, 6);
+  var ano = '20' + aamm.slice(0, 2);
+  var mes = aamm.slice(2, 4);
+  var di = ano + '-' + mes + '-01';
+  var dfD = new Date(parseInt(ano), parseInt(mes), 0);
+  var df = ano + '-' + mes + '-' + String(dfD.getDate()).padStart(2, '0');
+  var mapa = await siegBaixarPeriodo(tipoXml || 2, di, df);
+  return mapa.get(chave) || null;
+}
+
+// Coleta os XMLs das faturas emitidas a partir dos anexos (ir.attachment).
+// Para cada fatura usa o anexo NF-e_*.xml mais recente cujo conteúdo contém a chave.
+async function coletarXmlsEmitidas(ekw, moves) {
+  var out = {};
+  var comChave = moves.filter(function(m) { return m.chave; });
+  if (!comChave.length) return out;
+  var ids = comChave.map(function(m) { return m.id; });
+
+  var atts = [];
+  for (var i = 0; i < ids.length; i += 200) {
+    var slice = ids.slice(i, i + 200);
+    var part = await ekw('ir.attachment', 'search_read', [[
+      ['res_model', '=', 'account.move'], ['res_id', 'in', slice],
+      ['mimetype', 'in', ['application/xml', 'text/xml']],
+    ]], { fields: ['res_id', 'name', 'file_size'] });
+    atts = atts.concat(part);
+  }
+
+  var byMove = {};
+  atts.forEach(function(a) { (byMove[a.res_id] = byMove[a.res_id] || []).push(a); });
+  Object.keys(byMove).forEach(function(k) {
+    byMove[k].sort(function(a, b) {
+      var ap = (a.name || '').indexOf('NF-e_') === 0 ? 1 : 0;
+      var bp = (b.name || '').indexOf('NF-e_') === 0 ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      return b.id - a.id; // mais recente primeiro
+    });
+  });
+
+  var byId = {};
+  comChave.forEach(function(m) { byId[m.id] = m; });
+  var pendentes = {};
+  comChave.forEach(function(m) {
+    if (byMove[m.id] && byMove[m.id].length) pendentes[m.id] = byMove[m.id].slice();
+  });
+
+  for (var rodada = 0; rodada < 6; rodada++) {
+    var restantes = Object.keys(pendentes).filter(function(mid) { return !out[mid] && pendentes[mid].length; });
+    if (!restantes.length) break;
+    var batch = []; var batchMap = {};
+    restantes.forEach(function(mid) {
+      var cand = pendentes[mid][0];
+      batch.push(cand.id); batchMap[cand.id] = mid;
+    });
+    for (var b = 0; b < batch.length; b += 40) {
+      var raws = await ekw('ir.attachment', 'read', [batch.slice(b, b + 40), ['raw']]);
+      raws.forEach(function(r) {
+        var mid = batchMap[r.id]; if (!mid) return;
+        var move = byId[mid];
+        var xml = null;
+        try { xml = Buffer.from(r.raw, 'base64').toString('utf-8'); } catch (e) {}
+        if (xml && move.chave && xml.indexOf(move.chave) !== -1 && !out[mid]) {
+          out[mid] = { xml: xml, fonte: 'anexo-odoo' };
+        }
+        pendentes[mid].shift();
+      });
+    }
+    restantes.forEach(function(mid) { if (pendentes[mid] && !pendentes[mid].length) delete pendentes[mid]; });
+  }
+  return out;
+}
+
+// Gera o ZIP com os XMLs das faturas (anexo Odoo → fallback SIEG por mês da chave)
+async function gerarZipXmlsEmitidas(ekw, moves) {
+  var coletado = await coletarXmlsEmitidas(ekw, moves);
+
+  var faltando = moves.filter(function(m) { return m.chave && !coletado[m.id]; });
+  var mapaSieg = new Map();
+  if (faltando.length) {
+    var meses = {};
+    faltando.forEach(function(m) {
+      var aamm = m.chave.slice(2, 6);
+      if (!meses[aamm]) meses[aamm] = { ano: '20' + aamm.slice(0, 2), mes: aamm.slice(2, 4) };
+    });
+    for (var aamm in meses) {
+      var mm = meses[aamm];
+      var di = mm.ano + '-' + mm.mes + '-01';
+      var dfD = new Date(parseInt(mm.ano), parseInt(mm.mes), 0);
+      var df = mm.ano + '-' + mm.mes + '-' + String(dfD.getDate()).padStart(2, '0');
+      try {
+        var mapa = await siegBaixarPeriodo(2, di, df);
+        mapa.forEach(function(v, k) { mapaSieg.set(k, v); });
+      } catch (eS) { console.error('[ADMIN] emitidas-zip SIEG mês ' + aamm + ': ' + eS.message); }
+    }
+  }
+
+  var AdmZip = require('adm-zip');
+  var zip = new AdmZip();
+  var usados = {};
+  var achados = 0; var naoAchados = [];
+  var man = ['fatura;chave;status;data;valor;fonte;arquivo'];
+  moves.forEach(function(m) {
+    if (!m.chave) { naoAchados.push((m.name || ('id ' + m.id)) + ' (sem chave NFe)'); return; }
+    var fonte = coletado[m.id] ? 'Odoo (anexo)' : (mapaSieg.get(m.chave) ? 'SIEG' : '');
+    var xml = (coletado[m.id] && coletado[m.id].xml) || mapaSieg.get(m.chave) || null;
+    if (!xml) { naoAchados.push(m.name + ' — ' + m.chave.slice(0, 10) + '...'); return; }
+    var nome = 'NFe_' + m.chave + '.xml';
+    if (usados[nome]) { usados[nome]++; nome = 'NFe_' + m.chave + '_' + usados[nome] + '.xml'; }
+    else usados[nome] = 1;
+    zip.addFile(nome, Buffer.from(xml, 'utf-8'));
+    achados++;
+    man.push([m.name || '', m.chave, m.status || '', m.data || '', (m.valor != null ? m.valor : ''), fonte, nome].join(';'));
+  });
+  if (!achados) return null;
+  zip.addFile('manifesto.csv', Buffer.from('\uFEFF' + man.join('\r\n'), 'utf-8'));
+  if (naoAchados.length) zip.addFile('nao-encontrados.txt', Buffer.from('\uFEFF' + naoAchados.join('\r\n'), 'utf-8'));
+  return { zip: zip, achados: achados, faltando: naoAchados.length };
+}
+
+// Move -> {id,name,data,valor,status,chave}
+async function lerMoves(ekw, ids) {
+  var rows = await ekw('account.move', 'read', [ids, [
+    'name', 'invoice_date', 'amount_total', 'x_studio_nfe_status', 'x_studio_nfe_chave',
+  ]]);
+  return rows.map(function(r) {
+    return { id: r.id, name: r.name, data: r.invoice_date, valor: r.amount_total,
+      status: r.x_studio_nfe_status, chave: r.x_studio_nfe_chave || '' };
+  });
+}
+
+// ── XML individual de fatura emitida (por id da fatura no Odoo) ──
+router.get('/api/sieg/xml-emitida/:id', auth, async (req, res) => {
+  try {
+    var cfg = config.odoo;
+    if (!cfg.url) return res.status(500).json({ erro: 'ODOO_URL não configurada' });
+    var moveId = parseInt(req.params.id);
+    if (!moveId) return res.status(400).json({ erro: 'id inválido' });
+    var c   = odooClient(cfg.url);
+    var uid = await odooAuth(c, cfg.db, cfg.user, cfg.password);
+    var ekw = (m, mt, a, k) => odooKw(c, cfg.db, uid, cfg.password, m, mt, a, k);
+    var rows = await ekw('account.move', 'read', [[moveId], ['name', 'x_studio_nfe_chave']]);
+    if (!rows.length) return res.status(404).json({ erro: 'Fatura não encontrada no Odoo' });
+    var move = { id: moveId, name: rows[0].name, chave: rows[0].x_studio_nfe_chave || '' };
+    var xml = null, fonte = '';
+    if (move.chave) {
+      var coletado = await coletarXmlsEmitidas(ekw, [move]);
+      if (coletado[moveId]) { xml = coletado[moveId].xml; fonte = 'anexo-odoo'; }
+    }
+    if (!xml && move.chave) {
+      xml = await siegXmlPorChave(move.chave, 2);
+      fonte = 'sieg';
+    }
+    if (!xml) return res.status(404).json({ erro: 'XML não encontrado (nem anexo na fatura, nem cofre SIEG)', chave: move.chave });
+    console.log('[ADMIN] xml-emitida OK — fatura:', move.name, 'fonte:', fonte, 'bytes:', xml.length);
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + (move.chave || move.name) + '.xml"');
+    res.send(xml);
+  } catch (e) {
+    console.error('[ADMIN] xml-emitida erro:', e.message);
+    res.status(500).json({ erro: e.message });
+  }
+});
+
+// ── PDF (DANFE) individual de fatura emitida — anexo DANFE_*.pdf ou gera do XML ──
+router.get('/api/sieg/pdf-emitida/:id', auth, async (req, res) => {
+  try {
+    var cfg = config.odoo;
+    if (!cfg.url) return res.status(500).json({ erro: 'ODOO_URL não configurada' });
+    var moveId = parseInt(req.params.id);
+    if (!moveId) return res.status(400).json({ erro: 'id inválido' });
+    var c   = odooClient(cfg.url);
+    var uid = await odooAuth(c, cfg.db, cfg.user, cfg.password);
+    var ekw = (m, mt, a, k) => odooKw(c, cfg.db, uid, cfg.password, m, mt, a, k);
+    var rows = await ekw('account.move', 'read', [[moveId], ['name', 'x_studio_nfe_chave']]);
+    if (!rows.length) return res.status(404).json({ erro: 'Fatura não encontrada no Odoo' });
+    var move = { id: moveId, name: rows[0].name, chave: rows[0].x_studio_nfe_chave || '' };
+
+    // 1. Anexo PDF (DANFE_*.pdf mais recente)
+    var atts = await ekw('ir.attachment', 'search_read', [[
+      ['res_model', '=', 'account.move'], ['res_id', '=', moveId], ['mimetype', '=', 'application/pdf'],
+    ]], { fields: ['name'] });
+    atts.sort(function(a, b) {
+      var ap = (a.name || '').indexOf('DANFE_') === 0 ? 1 : 0;
+      var bp = (b.name || '').indexOf('DANFE_') === 0 ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      return b.id - a.id;
+    });
+    if (atts.length) {
+      var raws = await ekw('ir.attachment', 'read', [[atts[0].id], ['raw']]);
+      if (raws.length && raws[0].raw) {
+        var pdfBuf = Buffer.from(raws[0].raw, 'base64');
+        console.log('[ADMIN] pdf-emitida OK (anexo) — fatura:', move.name, 'bytes:', pdfBuf.length);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + (move.chave || move.name) + '.pdf"');
+        return res.send(pdfBuf);
+      }
+    }
+
+    // 2. Gera DANFE a partir do XML (anexo Odoo → cofre SIEG)
+    var xml = null;
+    if (move.chave) {
+      var coletado = await coletarXmlsEmitidas(ekw, [move]);
+      if (coletado[moveId]) xml = coletado[moveId].xml;
+      if (!xml) xml = await siegXmlPorChave(move.chave, 2);
+    }
+    if (!xml) return res.status(404).json({ erro: 'Nem PDF anexo nem XML para gerar o DANFE.', chave: move.chave });
+    var { gerarDanfePdf } = require('../services/danfe-pdf');
+    var pdfGerado = await gerarDanfePdf(xml);
+    console.log('[ADMIN] pdf-emitida OK (gerado) — fatura:', move.name, 'bytes:', pdfGerado.length);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="NFe_' + (move.chave || move.name) + '.pdf"');
+    res.send(pdfGerado);
+  } catch (e) {
+    console.error('[ADMIN] pdf-emitida erro:', e.message);
+    res.status(500).json({ erro: e.message });
+  }
+});
+
+// ── ZIP com os XMLs das faturas SELECIONADAS na aba Emitidas ──
+router.post('/api/sieg/emitidas-xml-zip', auth, async (req, res) => {
+  try {
+    var cfg = config.odoo;
+    if (!cfg.url) return res.status(500).json({ erro: 'ODOO_URL não configurada' });
+    var ids = ((req.body && req.body.ids) || []).map(function(x) { return parseInt(x); }).filter(Boolean);
+    if (!ids.length) return res.status(400).json({ erro: 'Nenhuma fatura informada' });
+    if (ids.length > 600) return res.status(400).json({ erro: 'Máximo 600 NF-e por vez' });
+    var c   = odooClient(cfg.url);
+    var uid = await odooAuth(c, cfg.db, cfg.user, cfg.password);
+    var ekw = (m, mt, a, k) => odooKw(c, cfg.db, uid, cfg.password, m, mt, a, k);
+    var moves = await lerMoves(ekw, ids);
+    if (!moves.length) return res.status(404).json({ erro: 'Faturas não encontradas no Odoo' });
+    var resultado = await gerarZipXmlsEmitidas(ekw, moves);
+    if (!resultado) return res.status(404).json({ erro: 'Nenhum XML encontrado para as faturas selecionadas' });
+    var nome = 'nfe-emitidas-selecionadas-' + new Date().toISOString().slice(0, 10) + '.zip';
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + nome + '"');
+    res.send(resultado.zip.toBuffer());
+    console.log('[ADMIN] emitidas-xml-zip OK — ' + resultado.achados + ' XML(s), faltando ' + resultado.faltando);
+  } catch (e) {
+    console.error('[ADMIN] emitidas-xml-zip erro:', e.message);
+    res.status(500).json({ erro: e.message });
+  }
+});
+
+// ── ZIP com os XMLs de TODO o período filtrado na aba Emitidas ──
+router.get('/api/sieg/emitidas-zip', auth, async (req, res) => {
+  try {
+    var cfg = config.odoo;
+    if (!cfg.url) return res.status(500).json({ erro: 'ODOO_URL não configurada' });
+    var { dataInicio, dataFim, status: st, busca } = req.query;
+    var c   = odooClient(cfg.url);
+    var uid = await odooAuth(c, cfg.db, cfg.user, cfg.password);
+    var ekw = (m, mt, a, k) => odooKw(c, cfg.db, uid, cfg.password, m, mt, a, k);
+    var domain = [['move_type', '=', 'out_invoice'], ['x_studio_nfe_chave', '!=', false]];
+    if (st && st !== 'todos') domain.push(['x_studio_nfe_status', '=', st]);
+    if (dataInicio) domain.push(['invoice_date', '>=', dataInicio]);
+    if (dataFim)    domain.push(['invoice_date', '<=', dataFim]);
+    if (busca)      domain.push(['name', 'ilike', busca]);
+    var ids = await ekw('account.move', 'search', [domain], { order: 'invoice_date desc', limit: 1000 });
+    if (!ids.length) return res.status(404).json({ erro: 'Nenhuma NF-e encontrada no período' });
+    var moves = await lerMoves(ekw, ids);
+    var resultado = await gerarZipXmlsEmitidas(ekw, moves);
+    if (!resultado) return res.status(404).json({ erro: 'Nenhum XML encontrado para o período' });
+    var nome = 'nfe-emitidas-' + (dataInicio || 'inicio') + '-a-' + (dataFim || new Date().toISOString().slice(0, 10)) + '.zip';
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + nome + '"');
+    res.send(resultado.zip.toBuffer());
+    console.log('[ADMIN] emitidas-zip OK — período ' + (dataInicio || '?') + ' a ' + (dataFim || '?') +
+      ': ' + resultado.achados + ' XML(s), faltando ' + resultado.faltando);
+  } catch (e) {
+    console.error('[ADMIN] emitidas-zip erro:', e.message);
     res.status(500).json({ erro: e.message });
   }
 });
@@ -650,10 +1011,13 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
     <div class="stab" onclick="stab('rec',this)">📥 NF-e Recebidas</div>
   </div>
 
-  <!-- Emitidas (sem alteração) -->
+  <!-- Emitidas — com seleção e download de XML/PDF (fonte: anexo Odoo + cofre SIEG) -->
   <div id="sp-emit">
     <div class="panel">
-      <div class="ph"><h3>NF-e Emitidas pela AJL</h3><button class="btn btn-o" onclick="loadEmit()">↻</button></div>
+      <div class="ph"><h3>NF-e Emitidas pela AJL</h3>
+        <button class="btn btn-o" onclick="loadEmit()">↻</button>
+        <button class="btn btn-o" id="btn-zip-e" onclick="downloadEmitZip()" title="Baixar ZIP com os XMLs de todo o período filtrado">⬇ ZIP Período</button>
+      </div>
       <div class="pb">
         <div class="filters">
           <div class="fg"><label>De</label><input type="date" id="e-di"></div>
@@ -679,6 +1043,12 @@ td.dt-dl{font-size:11px;color:var(--tx2);white-space:nowrap}
           </div>
         </div>
         <div id="e-sum"></div>
+        <div class="sel-bar" id="sel-bar-e">
+          <span id="sel-count-e">0 selecionado(s)</span>
+          <button class="btn btn-o" style="font-size:12px" onclick="dlXmlSelecionadosE()">⬇ XML Selecionados</button>
+          <button class="btn btn-o" style="font-size:12px" onclick="dlPdfSelecionadosE()">⬇ PDF Selecionados</button>
+          <button class="btn btn-o" style="font-size:12px" onclick="deselectAllE()">✕ Limpar</button>
+        </div>
         <div id="e-tbl"><div class="empty">Selecione o período e clique em <b>Filtrar</b>.</div></div>
       </div>
     </div>
@@ -841,9 +1211,13 @@ async function loadEmit(){
   if(!reg.length){ document.getElementById('e-tbl').innerHTML='<div class="empty">Nenhuma NF-e encontrada.</div>'; return; }
   var tot=reg.reduce((a,r)=>a+(parseFloat(r.valor)||0),0);
   document.getElementById('e-sum').innerHTML='<div class="sum">'+reg.length+' nota(s) &nbsp;·&nbsp; Total: <b>'+fmtVal(tot)+'</b></div>';
-  var html='<div class="tw"><table><thead><tr><th>#</th><th>Fatura</th><th>Cliente</th><th>Data</th><th>Valor</th><th>Status</th><th>Protocolo</th><th>Chave</th></tr></thead><tbody>';
+  var html='<div class="tw"><table id="e-table"><thead><tr><th class="chk"><input type="checkbox" id="chk-all-e" onclick="toggleAllE(this)" title="Selecionar todos"></th><th>#</th><th>Fatura</th><th>Cliente</th><th>Data</th><th>Valor</th><th>Status</th><th>Protocolo</th><th>Chave</th><th>Download</th></tr></thead><tbody>';
   reg.forEach((r,i)=>{
+    var ce=(r.chave||'').replace(/"/g,'');
+    var xmlUrl='/admin/api/sieg/xml-emitida/'+r.id;
+    var pdfUrl='/admin/api/sieg/pdf-emitida/'+r.id;
     html+='<tr>';
+    html+='<td class="chk"><input type="checkbox" class="row-chk-e" data-id="'+r.id+'" data-chave="'+ce+'" onchange="updateSelBarE()"></td>';
     html+='<td style="color:var(--tx2);font-size:12px">'+(i+1)+'</td>';
     html+='<td style="font-family:monospace;font-size:12px">'+r.numero+'</td>';
     html+='<td>'+r.cliente+'</td>';
@@ -851,11 +1225,104 @@ async function loadEmit(){
     html+='<td>'+fmtVal(r.valor)+'</td>';
     html+='<td>'+badge(r.status)+'</td>';
     html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)">'+(r.protocolo||'—')+'</td>';
-    html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)" title="'+r.chave+'">'+fmtChave(r.chave)+'</td>';
+    html+='<td style="font-family:monospace;font-size:11px;color:var(--tx2)" title="'+(r.chave||'')+'">'+fmtChave(r.chave)+'</td>';
+    if(r.chave){
+      html+='<td><div class="row-menu">'
+        +'<button class="btn btn-o" style="padding:4px 10px;font-size:12px" onclick="toggleMenu(this)">⋯</button>'
+        +'<div class="row-dropdown">'
+        +'<a href="#" class="dl-link" data-url="'+xmlUrl+'" data-file="NFe_'+ce+'.xml">⬇ Baixar XML</a>'
+        +'<a href="#" class="dl-link" data-url="'+pdfUrl+'" data-file="NFe_'+ce+'.pdf">⬇ Baixar PDF</a>'
+        +'<a href="#" class="ver-danfe-link" data-chave="'+ce+'" data-url="'+xmlUrl+'">📋 Ver DANFE</a>'
+        +'</div></div></td>';
+    } else { html+='<td>—</td>'; }
     html+='</tr>';
   });
   html+='</tbody></table></div>';
   document.getElementById('e-tbl').innerHTML=html;
+  deselectAllE();
+}
+
+// ── Seleção/downloads da aba Emitidas ─────────────────────────────
+function updateSelBarE(){
+  var chks=document.querySelectorAll('.row-chk-e:checked');
+  var bar=document.getElementById('sel-bar-e');
+  var cnt=document.getElementById('sel-count-e');
+  if(cnt) cnt.textContent=chks.length+' selecionado(s)';
+  if(bar) bar.classList.toggle('on', chks.length>0);
+}
+function toggleAllE(chkAll){
+  document.querySelectorAll('.row-chk-e').forEach(function(c){c.checked=chkAll.checked;});
+  updateSelBarE();
+}
+function deselectAllE(){
+  document.querySelectorAll('.row-chk-e').forEach(function(c){c.checked=false;});
+  var a=document.getElementById('chk-all-e'); if(a) a.checked=false;
+  updateSelBarE();
+}
+async function idsSelecionadosE(){
+  return Array.from(document.querySelectorAll('.row-chk-e:checked'))
+    .map(function(c){return parseInt(c.dataset.id);}).filter(Boolean);
+}
+async function dlXmlSelecionadosE(){
+  var ids=await idsSelecionadosE();
+  if(!ids.length){alert('Nenhuma nota selecionada.');return;}
+  var cnt=document.getElementById('sel-count-e'); var orig=cnt?cnt.textContent:'';
+  if(cnt) cnt.textContent='Gerando ZIP com '+ids.length+' XML(s)...';
+  try{
+    var resp=await fetch('/admin/api/sieg/emitidas-xml-zip',{
+      method:'POST',credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids:ids})
+    });
+    if(!resp.ok){
+      var err=await resp.json().catch(function(){return {erro:'Erro '+resp.status};});
+      alert('Erro ao gerar ZIP: '+(err.erro||resp.status));
+    } else {
+      saveBlob(await resp.blob(),'nfe-emitidas-selecionadas-'+new Date().toISOString().slice(0,10)+'.zip');
+    }
+  }catch(e){alert('Erro: '+e.message);}
+  if(cnt) cnt.textContent=orig;
+  updateSelBarE();
+}
+async function dlPdfSelecionadosE(){
+  var ids=await idsSelecionadosE();
+  if(!ids.length){alert('Nenhuma nota selecionada.');return;}
+  var cnt=document.getElementById('sel-count-e'); var orig=cnt?cnt.textContent:'';
+  if(cnt) cnt.textContent='Gerando ZIP com '+ids.length+' PDF(s)...';
+  try{
+    var resp=await fetch('/admin/api/sieg/pdf-zip',{
+      method:'POST',credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids:ids})
+    });
+    if(!resp.ok){
+      var err=await resp.json().catch(function(){return {erro:'Erro '+resp.status};});
+      alert('Erro ao gerar ZIP: '+(err.erro||resp.status));
+    } else {
+      saveBlob(await resp.blob(),'danfe-emitidas-'+new Date().toISOString().slice(0,10)+'.zip');
+    }
+  }catch(e){alert('Erro: '+e.message);}
+  if(cnt) cnt.textContent=orig;
+  updateSelBarE();
+}
+async function downloadEmitZip(){
+  var di=document.getElementById('e-di').value;
+  var df=document.getElementById('e-df').value;
+  var st=document.getElementById('e-st').value;
+  var bq=document.getElementById('e-bq').value;
+  var url='/admin/api/sieg/emitidas-zip?';
+  if(di) url+='dataInicio='+di+'&';
+  if(df) url+='dataFim='+df+'&';
+  if(st&&st!=='todos') url+='status='+encodeURIComponent(st)+'&';
+  if(bq) url+='busca='+encodeURIComponent(bq)+'&';
+  await downloadFile(url,'nfe-emitidas-'+(di||'inicio')+'-a-'+(df||today())+'.zip');
+}
+function saveBlob(blob, filename){
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);document.body.removeChild(a);},1000);
 }
 
 function downloadZip(){
@@ -1065,7 +1532,7 @@ document.addEventListener('click',function(e){
   var danfeLink = e.target.closest('.ver-danfe-link');
   if(danfeLink){
     e.preventDefault();
-    verDanfe(danfeLink.dataset.chave, danfeLink.dataset.tipo);
+    verDanfe(danfeLink.dataset.chave, danfeLink.dataset.tipo||'1', danfeLink.dataset.url);
     document.querySelectorAll('.row-dropdown.open').forEach(function(el){el.classList.remove('open');});
     return;
   }
@@ -1123,7 +1590,7 @@ function danfeFmtVal(v){
   return 'R$ '+parseFloat(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 
-async function verDanfe(chave, tipo){
+async function verDanfe(chave, tipo, xmlUrlOverride){
   var overlay=document.getElementById('danfe-overlay');
   var body=document.getElementById('danfe-body');
   var title=document.getElementById('danfe-title');
@@ -1132,7 +1599,7 @@ async function verDanfe(chave, tipo){
   overlay.classList.add('on');
 
   try{
-    var xmlUrl='/admin/api/sieg/xml/'+chave+'?tipoXml='+tipo;
+    var xmlUrl=xmlUrlOverride||('/admin/api/sieg/xml/'+chave+'?tipoXml='+tipo);
     var resp=await fetch(xmlUrl,{credentials:'include'});
     if(!resp.ok){ body.innerHTML='<div class="err-box">⚠️ Erro ao buscar XML (HTTP '+resp.status+')</div>'; return; }
     var xmlText=await resp.text();
