@@ -290,3 +290,11 @@ Stage Summary:
 - A/B aplicados direto no Odoo prod (sem deploy necessário)
 - C precisa deploy do middleware no Render (junto com PIX 1.2.3 pendente desde 27/10)
 - Arquivos: services/danfe-pdf.js, scripts/test-danfe-v21.js, server.js, worklog.md
+
+## 30/10/2026 — NF sai com o NOME DO CLIENTE do cadastro (demanda Marcus)
+- Demanda: "usar o nome do cliente do cadastro para emitir NF, nao Razao Social"
+- Antes: <dest><xNome> e <toma><xNome> usavam partner.legal_name (Razao Social) com prioridade
+- Depois: usam partner.xNome (= res.partner.name do cadastro Odoo); legal_name vira fallback se xNome vazio
+- Emitente/prestador AJL mantem Razao Social (regra SEFAZ) — intocado
+- DANFE/canhoto le o nome do XML autorizado -> propaga automaticamente
+- Arquivos: services/sieg-nfe-xml.js (dest), services/sieg-nfse-xml.js (toma), scripts/test-nome-cliente-nfe.js (5 checks OK)

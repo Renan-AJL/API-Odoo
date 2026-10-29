@@ -78,7 +78,7 @@ function gerarXmlDPS(data) {
     </prest>
     <toma>
       <CNPJ>${onlyNum(partner.cnpj_cpf)}</CNPJ>
-      <xNome>${esc(partner.legal_name || '')}</xNome>
+      <xNome>${esc(partner.xNome || partner.legal_name || '')}</xNome><!-- 30/10: NOME DO CLIENTE do cadastro, nao Razao Social — demanda Marcus -->
       <end>
         <endNac>
           <cMun>${partner.city_ibge_code || ''}</cMun>

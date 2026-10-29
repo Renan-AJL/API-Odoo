@@ -381,7 +381,7 @@ function gerarXmlNFe(data) {
   console.log('[NFE-XML] [DESTINATARIO]');
   var docDest2 = onlyNum(partner.cnpj_cpf || '');
   logField('CNPJ/CPF', docDest2, !docDest2);
-  logField('xNome', partner.legal_name || partner.xNome, !(partner.legal_name || partner.xNome));
+  logField('xNome', partner.xNome || partner.legal_name, !(partner.xNome || partner.legal_name)); // 30/10: usa NOME DO CADASTRO do cliente (xNome), nao Razao Social — demanda Marcus
   logField('xLgr', partner.street, !partner.street);
   logField('nro', partner.number || 'S/N');
   logField('xBairro', partner.street2, !partner.street2);
@@ -393,7 +393,7 @@ function gerarXmlNFe(data) {
   logField('email', partner.email);
 
   if (!docDest2) xmlErrors.push('CNPJ/CPF destinatario vazio');
-  if (!(partner.legal_name || partner.xNome)) xmlErrors.push('Nome destinatario vazio');
+  if (!(partner.xNome || partner.legal_name)) xmlErrors.push('Nome destinatario vazio'); // 30/10: nome do cadastro primeiro
   if (!partner.street) xmlErrors.push('Logradouro destinatario vazio');
   if (!partner.city_ibge_code) xmlErrors.push('cMun destinatario vazio');
   if (!partner.city) xmlWarnings.push('xMun destinatario vazio');
@@ -535,7 +535,7 @@ ${xmlEndereco(company, 'enderEmit')}
   xml += `
     <dest>
       ${destTag ? `<${destTag}>${docDest}</${destTag}>` : '<CPF>00000000000</CPF>'}
-      <xNome>${esc(partner.legal_name || partner.xNome || '')}</xNome>
+      <xNome>${esc(partner.xNome || partner.legal_name || '')}</xNome><!-- 30/10: NOME DO CLIENTE do cadastro (res.partner.name), nao Razao Social — demanda Marcus -->
 ${xmlEndereco(partner, 'enderDest')}
       <indIEDest>${indIEDest}</indIEDest>${(() => { const ieNum = onlyNum(partner.inscr_est || ''); return (ieNum && ieNum.length >= 2 && ieNum !== 'ISENTO') ? `\n      <IE>${ieNum}</IE>` : ''; })()}${partner.email ? `
       <email>${esc(partner.email)}</email>` : ''}
