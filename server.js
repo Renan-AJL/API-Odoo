@@ -107,7 +107,7 @@ app.use('/callback/sieg', siegRoutes);
 app.get('/', (req, res) => {
   res.json({
     service: 'Odoo Middleware Unificado',
-    version: '1.2.3-pix-cancelar',
+    version: '1.2.4-danfe-valor-canhoto',
     empresa: config.empresa.nome,
     status: 'online',
     odoo_push: config.odoo.enabled ? 'ATIVO' : 'DESATIVADO',

@@ -274,3 +274,19 @@ Stage Summary:
 - NF 72857 de transferência autorizada com CFOP 5901 — caso resolvido
 - Emissor agora auto-destrava faturas duplicadas com chave de outra NF (não trava mais para sempre)
 - Arquivos: services/sieg-odoo-emit.js, scripts/ajl_20261021_destrava_157.py, scripts/ajl_20261021_nf72857_diag.py, scripts/ajl_20261021_verifica_cfop_157.py
+
+---
+Task ID: 9
+Agent: main (sessão IM AJL)
+Task: 29/10 — Demandas Odoo (A) 4 casas decimais desconto/acréscimo, (B) financeiro do contato só Admin Financeiro, (C) VALOR TOTAL junto ao canhoto do DANFE
+
+Work Log:
+- (A) Odoo: decimal.precision 'Discount' já estava 4 (linha discount herda); aplicado digits="[16, 4]" nas views 4953 (Acréscimo %/R$), 3513 (Desconto Aplicado R$), 4832 (wizard Desconto/Acréscimo %/R$) e 4830 (painel aprovação, x_desconto_solicitado 2x); backups backup_demAB_20261029_132948.json
+- (B) Odoo: page "Financeiro AJL" (views 4985 + override na 4468) e campos Limite de Crédito (4468) / Crédito Disponível (5013) restritos a ajl.group_admin_financeiro; banner VERMELHO de cliente bloqueado continua visível a todos (guarda de venda), botões já eram restritos
+- (C) Middleware: services/danfe-pdf.js v2.1 — VALOR TOTAL DA NOTA (vNF do ICMSTot) em destaque no canhoto: caixa esquerda (bold 7, direita da linha DATA/IDENTIFICACAO, acima da linha da assinatura) e caixa do número da NF (abaixo do cliente, sobrevive ao picote); testado localmente com XML real nfe_00073287 (R$ 59.557,49) — layout sem colisões (scripts/test-danfe-v21.js)
+- server.js -> version 1.2.4-danfe-valor-canhoto p/ confirmar deploy no Render
+
+Stage Summary:
+- A/B aplicados direto no Odoo prod (sem deploy necessário)
+- C precisa deploy do middleware no Render (junto com PIX 1.2.3 pendente desde 27/10)
+- Arquivos: services/danfe-pdf.js, scripts/test-danfe-v21.js, server.js, worklog.md

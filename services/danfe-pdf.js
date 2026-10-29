@@ -7,6 +7,9 @@
  * adicionais.
  *
  * v2.0 — Inclui IPI, Numero do Pedido, Boleto (cod barras / linha digitavel)
+ * v2.1 — VALOR TOTAL DA NOTA junto ao canhoto (demanda 29/10): aparece em
+ *        DESTAQUE no canhoto (caixa esquerda, ao lado da assinatura) e na
+ *        caixa do numero da NF — quem assina/recebe ve o valor ali em cima.
  */
 var PDFDocument = require('pdfkit');
 var bwipjs = require('bwip-js');
@@ -137,6 +140,11 @@ async function gerarDanfePdf(nfeProcXml, opts) {
   // Nome do cliente (destinatario) em destaque no canhoto
   doc.fontSize(7.5).font('Helvetica-Bold')
     .text('CLIENTE: ' + destNomeLongo, L + 3, y + 14, { width: W - 120 });
+  // VALOR TOTAL DA NOTA em destaque no canhoto (demanda 29/10) — a direita da
+  // linha dos rotulos, acima da linha da assinatura: quem assina ve o valor.
+  var vNFCanhoto = 'R$ ' + moeda(tag(total, 'vNF'));
+  doc.fontSize(7).font('Helvetica-Bold')
+    .text('VALOR TOTAL: ' + vNFCanhoto, L + 245, y + 35, { width: W - 368, align: 'right', lineBreak: false });
   // Labels de data/assinatura + linhas-guia para preenchimento
   doc.fontSize(5.5).font('Helvetica');
   doc.text('DATA DE RECEBIMENTO', L + 3, y + 34);
@@ -151,6 +159,12 @@ async function gerarDanfePdf(nfeProcXml, opts) {
     .text('NF-e  N. ' + tag(ide, 'nNF') + '\nSERIE ' + tag(ide, 'serie'), L + W - 105, y + 12);
   doc.fontSize(5.5).font('Helvetica')
     .text(destNomeCurto, L + W - 105, y + 36, { width: 100 });
+  // VALOR TOTAL na caixa do numero (demanda 29/10) — identifica o valor mesmo
+  // depois do picote, junto ao numero/cliente.
+  doc.fontSize(5).font('Helvetica')
+    .text('VALOR TOTAL', L + W - 105, y + 44);
+  doc.fontSize(7).font('Helvetica-Bold')
+    .text(vNFCanhoto, L + W - 105, y + 49, { width: 100, lineBreak: false, ellipsis: true });
   y += CANHOTO_H + 2;
   // Linha de corte (picotado) entre canhoto e DANFE
   doc.save().lineWidth(0.5).dash(2, { space: 2 })
