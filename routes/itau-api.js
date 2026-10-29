@@ -242,26 +242,38 @@ async function postBoletoBlockedChatter(faturaId, motivo) {
   }
 }
 
-// === VALOR DA COBRANCA = VALOR DA NF (vNF) ===
+// === VALOR DA COBRANCA = VALOR DA NF (vNF) / TOTAL DA VENDA ===
 // Regra AJL (21/10/2026): valor de NF = valor do boleto, parcelado ou a vista.
 // O valor autorizado na NF-e (vNF no XML) e exatamente o amount_total da
 // fatura no Odoo (vProd com ICMS por dentro + IPI por fora + outros).
 // A regra antiga (amount_untaxed + IPI) errava quando a fatura tem ICMS
 // "por fora" (ex: NF 72864: boleto saiu 616,07 e a NF 690,00).
 // Aqui garantimos o valor fiscal correto lendo a fatura no Odoo: amount_total.
-// So atua para FATURAS (nome 'NFe ...'); pedidos de venda ('S...') passam direto.
+//
+// Regra AJL (29/10/2026 — caso S03464): PIX/boleto gerados NO MOMENTO DA VENDA
+// (pedido/cotacao 'S...') usam o TOTAL DA VENDA — o amount_total do sale.order,
+// o mesmo valor que vai para a NF depois do faturamento.
+// Antes: pedido 'S...' passava direto com o valor enviado pela Server Action do
+// Odoo, que recalculou errado por quantidade (S03464: PIX saiu R$ 112.640,00
+// para uma venda de R$ 800,00). Agora o valor e lido autoritativamente do
+// pedido no Odoo; o valor informado e usado apenas como fallback.
 var _valorIpiCache = {};
+var SO_NAME_RE = /^S\d{3,}$/i; // pedido/cotacao de venda: S03464, S1234...
 async function corrigirValorFatura(faturaName, faturaId, valorInformado) {
   var informado = Math.round((parseFloat(valorInformado) || 0) * 100) / 100;
   try {
     var oc = config.odoo;
     if (!oc || !oc.enabled || !oc.url) return informado;
     var nm = String(faturaName || '').trim();
-    if (!/^NFe/i.test(nm)) return informado; // pedido/'S...' passa direto (comportamento historico)
+    var isNFe = /^NFe/i.test(nm);
+    var isSO = !isNFe && SO_NAME_RE.test(nm);
+    if (!isNFe && !isSO) return informado; // outros nomes: comportamento historico
     // FIX 23/10 (incidente 4 boletos): lookup por ID quando disponivel — o NOME
     // 'NFe NNNNNNNN' e renomeado pelo middleware durante a emissao e duas faturas
     // do mesmo ciclo podem dividir o mesmo nome -> leitura da fatura ERRADA.
-    var cacheKey = (faturaId > 0) ? ('id:' + faturaId) : nm;
+    // Pedido de venda: lookup SEMPRE por NOME (o id enviado pela SA e id de
+    // sale.order — usar account.move por id colidiria com outra fatura).
+    var cacheKey = isSO ? ('so:' + nm) : ((faturaId > 0) ? ('id:' + faturaId) : ('nm:' + nm));
     var cached = _valorIpiCache[cacheKey];
     if (cached && (Date.now() - cached.ts) < 60000) return cached.valor;
 
@@ -285,23 +297,36 @@ async function corrigirValorFatura(faturaName, faturaId, valorInformado) {
       });
     }
 
-    var domain = (faturaId > 0)
-      ? [['id', '=', faturaId], ['move_type', '=', 'out_invoice']]
-      : [['name', '=', nm], ['move_type', '=', 'out_invoice']];
-    var ids = await ekwV('account.move', 'search', [domain], { limit: 1 });
-    if (!ids || !ids.length) return informado;
-    var inv = await ekwV('account.move', 'read', [ids, ['amount_total']]);
-    var total = parseFloat((inv && inv[0] && inv[0].amount_total) || 0) || 0;
+    var total = 0;
+    if (isSO) {
+      // TOTAL DA VENDA: amount_total do pedido/cotacao (mesmo valor da NF futura)
+      var soKw = { limit: 1, order: 'id desc' };
+      var soIds = await ekwV('sale.order', 'search', [[['name', '=', nm]]], soKw);
+      if (soIds && soIds.length) {
+        var so = await ekwV('sale.order', 'read', [soIds, ['amount_total']]);
+        total = parseFloat((so && so[0] && so[0].amount_total) || 0) || 0;
+      }
+    } else {
+      var domain = (faturaId > 0)
+        ? [['id', '=', faturaId], ['move_type', '=', 'out_invoice']]
+        : [['name', '=', nm], ['move_type', '=', 'out_invoice']];
+      var ids = await ekwV('account.move', 'search', [domain], { limit: 1 });
+      if (ids && ids.length) {
+        var inv = await ekwV('account.move', 'read', [ids, ['amount_total']]);
+        total = parseFloat((inv && inv[0] && inv[0].amount_total) || 0) || 0;
+      }
+    }
     var valor = Math.round(total * 100) / 100;
     if (valor <= 0) return informado;
     if (Math.abs(valor - informado) > 0.01) {
-      console.log('[VALOR-NF] ' + nm + ': valor informado R$ ' + informado.toFixed(2) +
-        ' -> corrigido p/ R$ ' + valor.toFixed(2) + ' (amount_total = vNF)');
+      console.warn('[VALOR-VENDA] ' + nm + ': valor informado R$ ' + informado.toFixed(2) +
+        ' -> corrigido p/ R$ ' + valor.toFixed(2) +
+        (isSO ? ' (amount_total do pedido = total da venda)' : ' (amount_total da fatura = vNF)'));
     }
     _valorIpiCache[cacheKey] = { ts: Date.now(), valor: valor };
     return valor;
   } catch (eV) {
-    console.warn('[VALOR-NF] Correcao falhou (usando valor informado):', eV.message);
+    console.warn('[VALOR-VENDA] Correcao falhou (usando valor informado):', eV.message);
     return informado;
   }
 }
