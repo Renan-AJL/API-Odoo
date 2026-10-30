@@ -10,6 +10,7 @@ COPY package*.json ./
 RUN npm install --omit=dev
 
 COPY config/ ./config/
+COPY data/ ./data/
 COPY middleware/ ./middleware/
 COPY routes/ ./routes/
 COPY services/ ./services/

@@ -34,6 +34,7 @@ function corrigirBloco(nomeTag, corpo, correcoes) {
   var mUF = corpo.match(/<UF>\s*([^<]*?)\s*<\/UF>/);
   var mMun = corpo.match(/<xMun>\s*([^<]*?)\s*<\/xMun>/);
   var mCmun = corpo.match(/<cMun>\s*(\d*?)\s*<\/cMun>/);
+  var temCmunSelfClosed = !mCmun && /<cMun\s*\/>/.test(corpo); // 30/10: gerador pode sair <cMun/> (self-closed)
   var uf = unesc(mUF ? mUF[1] : '');
   var mun = unesc(mMun ? mMun[1] : '');
   var atual = mCmun ? mCmun[1] : '';
@@ -47,6 +48,7 @@ function corrigirBloco(nomeTag, corpo, correcoes) {
     de: atual || '(vazio)',
     para: correto,
   });
+  if (temCmunSelfClosed) return corpo.replace(/<cMun\s*\/>/, '<cMun>' + correto + '</cMun>');
   return corpo.replace(/(<cMun>\s*)\d*?(\s*<\/cMun>)/, '$1' + correto + '$2');
 }
 

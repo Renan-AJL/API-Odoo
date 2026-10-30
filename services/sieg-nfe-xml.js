@@ -484,6 +484,13 @@ function gerarXmlNFe(data) {
     for (var e = 0; e < xmlErrors.length; e++) {
       console.error('[NFE-XML]   ERRO: ' + xmlErrors[e]);
     }
+    // 30/10/2026 (rejeicao 225 NFe 00073379 ANA FLAVIA — cMun/CPF vazios):
+    // NAO mais enviar XML sabidamente rejeitavel. Antes so logava e seguia —
+    // o XML ia com <cMun/> e <CPF>00000000000</CPF> e a SEFAZ devolvia 225
+    // (cvc-pattern-valid '[0-9]{7}' / CPF zerado). Aborta ANTES de montar/enviar
+    // com mensagem clara que cai no chatter da fatura (safeUpdateError).
+    throw new Error('XML NF-e bloqueado — dados obrigatorios ausentes: ' +
+      xmlErrors.join('; ') + '. Corrija o cadastro (fatura/parceiro) e reemita.');
   }
   if (xmlWarnings.length > 0) {
     console.warn('[NFE-XML] *** AVISOS (' + xmlWarnings.length + ') ***');
@@ -548,7 +555,7 @@ ${xmlEndereco(company, 'enderEmit')}
 
   xml += `
     <dest>
-      ${destTag ? `<${destTag}>${docDest}</${destTag}>` : '<CPF>00000000000</CPF>'}
+      ${destTag ? `<${destTag}>${docDest}</${destTag}>` : (() => { throw new Error('Documento do destinatario (CPF/CNPJ) vazio — cadastre o CPF/CNPJ no parceiro antes de emitir'); })()}
       <xNome>${esc(partner.xNome || partner.legal_name || '')}</xNome><!-- 30/10: NOME DO CLIENTE do cadastro (res.partner.name), nao Razao Social — demanda Marcus -->
 ${xmlEndereco(partner, 'enderDest')}
       <indIEDest>${indIEDest}</indIEDest>${(() => { const ieNum = onlyNum(partner.inscr_est || ''); return (ieNum && ieNum.length >= 2 && ieNum !== 'ISENTO') ? `\n      <IE>${ieNum}</IE>` : ''; })()}${partner.email ? `
