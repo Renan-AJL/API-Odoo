@@ -1157,6 +1157,13 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       if (icmsManual.aliquota === 0 && icmsManual.valor === 0) {
         mld.cst_icms = '40';
         mld.mod_bc = '3';
+        // AJL 30/10/2026 (rejeicao 225 NFe 00073368): ICMS 0% em QUALQUER saida —
+        //   csosn: o branch CSOSN no gerador vence o CST; limpar para o CST 40 valer sempre
+        //   vbc_icms: isento NAO tem BC — ICMSTot.vBC soma os itens e teria que bater com 0
+        //   difal: sem DIFAL em operacao isenta (nem no infCpl informativo)
+        mld.csosn = '';
+        mld.vbc_icms = '0.00';
+        mld.difal = 0;
       }
       vIcmsManualTotal += mVicms;
       vBcManualTotal += mBc;

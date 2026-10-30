@@ -190,7 +190,17 @@ function xmlImpostoItem(line, crt, ibsInfo, difal) {
     } else {
       tag = 'ICMS00';
     }
-    icmsBlock = `<ICMS><${tag}><orig>${orig}</orig><CST>${cstIcms}</CST><modBC>${modBC || '0'}</modBC><vBC>${vBC}</vBC><pICMS>${pICMS}</pICMS><vICMS>${vICMS}</vICMS></${tag}></ICMS>`;
+    // AJL 30/10/2026 (rejeicao 225 NFe 00073368, ICMS 0% manual — coluna ~2057 em <modBC>):
+    // o XSD oficial por grupo e RIGIDO:
+    //   ICMS40/41/50: SOMENTE orig + CST (+ bloco opcional vICMSDeson/motDesICMS) —
+    //     modBC/vBC/pICMS/vICMS sao PROIBIDOS (cvc-complex-type.2.4.a).
+    //   ICMS51 (diferimento): orig + CST e tudo o mais OPCIONAL — bloco minimo valido.
+    //   CSTs tributados (00/10/90...): bloco completo obrigatorio/valido.
+    if (['40','41','50','51'].includes(cstNum)) {
+      icmsBlock = `<ICMS><${tag}><orig>${orig}</orig><CST>${cstIcms}</CST></${tag}></ICMS>`;
+    } else {
+      icmsBlock = `<ICMS><${tag}><orig>${orig}</orig><CST>${cstIcms}</CST><modBC>${modBC || '0'}</modBC><vBC>${vBC}</vBC><pICMS>${pICMS}</pICMS><vICMS>${vICMS}</vICMS></${tag}></ICMS>`;
+    }
   } else {
     // Fallback CSOSN 103
     icmsBlock = `<ICMS><ICMSSN102><orig>${orig}</orig><CSOSN>103</CSOSN></ICMSSN102></ICMS>`;
