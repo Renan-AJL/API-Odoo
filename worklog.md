@@ -325,3 +325,4 @@ Stage Summary:
 - Fix: (1) sieg-odoo-emit.js — ICMS manual 0% + CFOP 5901/5902 + UF emitente PR -> CST 41 + cbenef PR800044 (env NFE_CBENEF_INDUSTRIALIZACAO sobrescreve); demais casos continuam CST 40; (2) sieg-nfe-xml.js — campo <cBenef> no <prod> entre NCM e CFOP (NT 2025.002/XSD atual), opcional
 - Testes: scripts/test-cbenef-industrializacao.js (5 checks OK) + regressao test-nfe-icms-zero.js (14) + test-nome-cliente-nfe.js (5)
 - Complemento 30/10 14:50: CST 41 vai no grupo ICMS40 (o XSD NAO tem tag ICMS41/ICMS50 — grupo unico "40-Isenta/41-Nao tributada/50-Suspensao"); mapeamento corrigido no gerador + testes atualizados (15 regressao + 5 cBenef OK)
+- RESULTADO 30/10 15:03 (hor. Brasilia): NFe 00073368 -> NFe 00073379 AUTORIZADA — Status 100, chave 41261022603750000190551000000733791216226972, protocolo 141260442764258; XML + DANFE anexados na fatura 181; CST 41 + cBenef PR800044 aceitos pela SEFAZ PR (NOTA: validar mudanca CST 40->41 com o contador)
