@@ -187,6 +187,10 @@ function xmlImpostoItem(line, crt, ibsInfo, difal) {
     let tag = 'ICMS' + cstNum;
     if (['00','10','20','30','40','41','50','51','60','70','90'].includes(cstNum)) {
       tag = 'ICMS' + cstNum;
+      // AJL 30/10/2026 (rejeicao 225 NFe 00073368 — "Invalid content ... element ICMS41"):
+      // o XSD NAO tem tag ICMS41 nem ICMS50 — CST 41 (nao tributada) e CST 50 (suspensao)
+      // compartilham o grupo ICMS40 ("40 - Isenta / 41 - Nao tributada / 50 - Suspensao").
+      if (cstNum === '41' || cstNum === '50') tag = 'ICMS40';
     } else {
       tag = 'ICMS00';
     }

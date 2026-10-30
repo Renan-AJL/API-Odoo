@@ -324,3 +324,4 @@ Stage Summary:
 - Tabela oficial SEFAZ-PR: remessa para industrializacao por conta e ordem do adquirente = CST 41 (nao tributada, sem destaque — RICMS-PR Anexo VIII arts. 8/9) + cBenef PR800044
 - Fix: (1) sieg-odoo-emit.js — ICMS manual 0% + CFOP 5901/5902 + UF emitente PR -> CST 41 + cbenef PR800044 (env NFE_CBENEF_INDUSTRIALIZACAO sobrescreve); demais casos continuam CST 40; (2) sieg-nfe-xml.js — campo <cBenef> no <prod> entre NCM e CFOP (NT 2025.002/XSD atual), opcional
 - Testes: scripts/test-cbenef-industrializacao.js (5 checks OK) + regressao test-nfe-icms-zero.js (14) + test-nome-cliente-nfe.js (5)
+- Complemento 30/10 14:50: CST 41 vai no grupo ICMS40 (o XSD NAO tem tag ICMS41/ICMS50 — grupo unico "40-Isenta/41-Nao tributada/50-Suspensao"); mapeamento corrigido no gerador + testes atualizados (15 regressao + 5 cBenef OK)

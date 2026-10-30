@@ -52,8 +52,8 @@ const compact = xml.replace(/\s+/g, ' ');
 check('<cBenef>PR800044 presente', xml.includes('<cBenef>PR800044</cBenef>'));
 check('posicao correta: NCM -> cBenef -> CFOP',
   /<NCM>72112320<\/NCM>\s*<cBenef>PR800044<\/cBenef>\s*<CFOP>5901<\/CFOP>/.test(xml));
-check('ICMS41 minimal (orig+CST)',
-  /<ICMS><ICMS41><orig>0<\/orig><CST>41<\/CST><\/ICMS41><\/ICMS>/.test(compact));
+check('ICMS40 minimal com CST 41 (XSD nao tem tag ICMS41 — grupo compartilhado 40/41/50)',
+  /<ICMS><ICMS40><orig>0<\/orig><CST>41<\/CST><\/ICMS40><\/ICMS>/.test(compact));
 check('vBC total = 0.00 (sem base)', /<vBC>0\.00<\/vBC>/.test(xml));
 
 console.log('=== regressao: sem cbenef na linha -> XML sem <cBenef> ===');

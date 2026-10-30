@@ -74,12 +74,13 @@ check('CFOP 5901', xml1.includes('<CFOP>5901</CFOP>'));
 console.log('=== CENARIO 2: CST 41 (nao tributada) — mesmo bloco minimal ===');
 var l41 = [{ ...base({}).lines[0], cst_icms: '41' }];
 var xml2 = gerarXmlNFe(base({ lines: l41 })).replace(/\n/g, '');
-check('ICMS41 = orig+CST minimal', /<ICMS><ICMS41><orig>0<\/orig><CST>41<\/CST><\/ICMS41><\/ICMS>/.test(xml2));
+check('CST 41 -> grupo ICMS40 (XSD nao tem tag ICMS41) = orig+CST minimal',
+  /<ICMS><ICMS40><orig>0<\/orig><CST>41<\/CST><\/ICMS40><\/ICMS>/.test(xml2));
 
 console.log('=== CENARIO 3: CST 50/51 — bloco minimal (XSD) ===');
 var l50 = [{ ...base({}).lines[0], cst_icms: '50' }];
 var xml3 = gerarXmlNFe(base({ lines: l50 })).replace(/\n/g, '');
-check('ICMS50 = orig+CST minimal', /<ICMS50><orig>0<\/orig><CST>50<\/CST><\/ICMS50>/.test(xml3));
+check('CST 50 -> grupo ICMS40 (XSD nao tem tag ICMS50) = orig+CST minimal', /<ICMS40><orig>0<\/orig><CST>50<\/CST><\/ICMS40>/.test(xml3));
 var l51 = [{ ...base({}).lines[0], cst_icms: '51' }];
 var xml3b = gerarXmlNFe(base({ lines: l51 })).replace(/\n/g, '');
 check('ICMS51 = orig+CST minimal (diferimento, demais opcionais)',
