@@ -317,3 +317,10 @@ Stage Summary:
 - Aba NF-e Emitidas do painel agora tem as 3 formas de baixar XML: individual (menu ⋯), por seleção (checkboxes → ⬇ XML Selecionados) e o período inteiro (⬇ ZIP Período) — mesmo formato da aba Recebidas
 - XMLs vêm do anexo da fatura no Odoo (mais rápido/confiável) com fallback cofre SIEG; ZIP traz manifesto.csv (fatura, chave, status, data, valor, fonte)
 - Arquivos: routes/admin.js, server.js, worklog.md
+
+## 30/10/2026 — Rejeicao 930 (cBenef) na NFe 00073368 STEELALLOY — CST 41 + PR800044
+- Fatura 181 (NFe 00073368, R$ 58.038,00, CFOP 5901 industrializacao, ICMS manual 0%): apos o fix do 225, SEFAZ PR rejeitou com 930 "CST com beneficio fiscal e nao informado o codigo de beneficio fiscal [nItem:1]"
+- Causa: CST 40 (isenta) SEM cBenef — NT 2019.001 regra 930_N12-85; literal "SEM CBENEF" desativado 01/07/2026; regras 929/946 (producao 06/04/2026) validam o codigo contra a tabela da UF
+- Tabela oficial SEFAZ-PR: remessa para industrializacao por conta e ordem do adquirente = CST 41 (nao tributada, sem destaque — RICMS-PR Anexo VIII arts. 8/9) + cBenef PR800044
+- Fix: (1) sieg-odoo-emit.js — ICMS manual 0% + CFOP 5901/5902 + UF emitente PR -> CST 41 + cbenef PR800044 (env NFE_CBENEF_INDUSTRIALIZACAO sobrescreve); demais casos continuam CST 40; (2) sieg-nfe-xml.js — campo <cBenef> no <prod> entre NCM e CFOP (NT 2025.002/XSD atual), opcional
+- Testes: scripts/test-cbenef-industrializacao.js (5 checks OK) + regressao test-nfe-icms-zero.js (14) + test-nome-cliente-nfe.js (5)

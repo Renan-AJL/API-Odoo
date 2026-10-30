@@ -1153,14 +1153,31 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       mld.vbc_icms = String(mBc);
       mld.picms = String(mPicms);
       mld.vicms = String(mVicms);
-      // Alíquota 0 e valor 0 => ICMS isento (CST 40); senão mantém CST atual
+      // Alíquota 0 e valor 0 => ICMS sem destaque; senão mantém CST atual
       if (icmsManual.aliquota === 0 && icmsManual.valor === 0) {
-        mld.cst_icms = '40';
+        // AJL 30/10/2026 (rejeicao 930 — NFe 00073368, CFOP 5901 remessa p/ industrializacao):
+        // SEFAZ PR exige cBenef para CST 40/41/50 (NT 2019.001 regra 930_N12-85; literal
+        // "SEM CBENEF" desativado 01/07/2026 e regras 929/946 em producao desde 06/04/2026
+        // validam o codigo contra a tabela da UF). Na tabela oficial SEFAZ-PR a remessa
+        // para industrializacao por conta e ordem do adquirente e CST 41 (nao tributada,
+        // sem destaque do ICMS — RICMS-PR Anexo VIII, arts. 8 e 9) + cBenef PR800044.
+        // CST 40 (isenta) sem codigo de isencao aplicavel e sempre rejeitado.
+        var cfopLin = String(mld.cfop || '').replace(/\D/g, '');
+        var cBenefInd = (process.env.NFE_CBENEF_INDUSTRIALIZACAO != null && process.env.NFE_CBENEF_INDUSTRIALIZACAO !== '')
+          ? process.env.NFE_CBENEF_INDUSTRIALIZACAO : 'PR800044';
+        var ufEmpIcms = String((company && company.state) || 'PR').toUpperCase();
+        if (['5901', '5902'].indexOf(cfopLin) >= 0 && ufEmpIcms === 'PR' && cBenefInd) {
+          mld.cst_icms = '41';
+          mld.cbenef = cBenefInd;
+          console.log('[SIEG-EMIT] ICMS MANUAL 0% + CFOP ' + cfopLin + ' -> CST 41 + cBenef ' + cBenefInd + ' (rejeicao 930)');
+        } else {
+          mld.cst_icms = '40';
+        }
         mld.mod_bc = '3';
         // AJL 30/10/2026 (rejeicao 225 NFe 00073368): ICMS 0% em QUALQUER saida —
-        //   csosn: o branch CSOSN no gerador vence o CST; limpar para o CST 40 valer sempre
-        //   vbc_icms: isento NAO tem BC — ICMSTot.vBC soma os itens e teria que bater com 0
-        //   difal: sem DIFAL em operacao isenta (nem no infCpl informativo)
+        //   csosn: o branch CSOSN no gerador vence o CST; limpar para o CST valer sempre
+        //   vbc_icms: isento/NT NAO tem BC — ICMSTot.vBC soma os itens e teria que bater com 0
+        //   difal: sem DIFAL em operacao isenta/nao tributada (nem no infCpl informativo)
         mld.csosn = '';
         mld.vbc_icms = '0.00';
         mld.difal = 0;

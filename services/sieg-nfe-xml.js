@@ -584,7 +584,8 @@ ${xmlEndereco(partner, 'enderDest')}
         <cProd>${esc(String(line.default_code || line.cProd || ''))}</cProd>
         <cEAN>${line.barcode || 'SEM GTIN'}</cEAN>
         <xProd>${esc(line.product_name || line.xProd || '')}</xProd>
-        <NCM>${esc(String(line.ncm || line.NCM || ''))}</NCM>
+        <NCM>${esc(String(line.ncm || line.NCM || ''))}</NCM>${line.cbenef ? `
+        <cBenef>${esc(String(line.cbenef))}</cBenef>` : ''}
         <CFOP>${esc(String(line.cfop || '5102'))}</CFOP>
         <uCom>${esc(line.uom || 'UN')}</uCom>
         <qCom>${num3(line.qty)}</qCom>
