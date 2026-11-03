@@ -49,6 +49,24 @@ const config = {
     nome: process.env.EMPRESA_NOME || 'AJL FERRO E ACO LTDA',
   },
 
+  // --- AJL 04/11/2026: EMITENTES do grupo (cofre de certificados + DANFE) ---
+  // Matriz Curitiba (fluxo de sempre) + Filial Florianópolis (NF de
+  // transferência CFOP 6152 ida/retorno entre lojas).
+  nfeEmitentes: {
+    matriz: {
+      id: 'matriz',
+      cnpj: '22603750000190',
+      nome: 'AJL Curitiba (Matriz)',
+      razao: 'AJL COMERCIO ATACADISTA DE FERRAGENS E FERRAMENTAS LTDA',
+    },
+    florianopolis: {
+      id: 'florianopolis',
+      cnpj: '22603750000514',
+      nome: 'AJL Florianópolis (Filial)',
+      razao: 'AJL FERRO E ACO FILIAL FLORIANOPOLIS',
+    },
+  },
+
   mtls: {
     cert: process.env.ITAU_CERT_CRT || '',
     key: process.env.ITAU_CERT_KEY || '',

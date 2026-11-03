@@ -485,6 +485,26 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     console.log('[SIEG-EMIT] Tipo de operacao nao lido (segue padrao): ' + eOT.message);
   }
 
+  // 1c-4. NFs REFERENCIADAS (AJL 04/11/2026 — Transferência entre lojas 6152):
+  // campo x_studio_nfs_referenciadas da FATURA (texto livre). O financeiro cola
+  // as chaves de 44 dígitos das NFs a referenciar:
+  //  - IDA (Floripa -> Curitiba): NFs de venda a ordem entregues em Curitiba
+  //    (fornecedor — CFOP 5122/6122/6123 "que foi pra Curitiba");
+  //  - RETORNO (Curitiba -> Floripa): a chave da NF de ida (6152).
+  // Vira <NFref><refNFe>...</refNFe></NFref> no <ide> (sieg-nfe-xml.js).
+  var nfrefChavesFatura = '';
+  try {
+    var mvRef = await executeKw(client, db, uid, pwd, 'account.move', 'read',
+      [[moveId], ['x_studio_nfs_referenciadas']]);
+    if (mvRef && mvRef[0] && mvRef[0].x_studio_nfs_referenciadas) {
+      nfrefChavesFatura = String(mvRef[0].x_studio_nfs_referenciadas);
+      var nRefs = (nfrefChavesFatura.match(/\d{44}/g) || []).length;
+      console.log('[SIEG-EMIT] NFs referenciadas na fatura: ' + nRefs + ' chave(s)');
+    }
+  } catch (eRef) {
+    console.log('[SIEG-EMIT] Campo x_studio_nfs_referenciadas nao disponivel (segue sem NFref): ' + eRef.message);
+  }
+
   // 1a. GUARDA ANTI-DUPLICAÇÃO: se a NF-e já foi autorizada (ou já tem chave),
   // NUNCA reemitir. Evita emissão duplicada em corrida de pollers
   // (ex: sobreposição de instâncias durante deploy no Render).
@@ -1213,6 +1233,21 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     qtdParcelas: epQtdParcelas,
   });
 
+  // AJL 04/11/2026 (Transferência entre lojas CFOP 6152 — igual ao XML modelo
+  // 42260922603750000514550010000000141081562740): NF de transferência NÃO tem
+  // cobrança — <pag> fixo tPag 90 ("sem pagamento") + vPag 0.00, SEM <cobr>,
+  // SEM boletos/PIX e SEM E+P. (Erro 777/786 se vPag != vNF sem cobr coerente;
+  // tPag 90 com vNF > 0 e vPag 0 é o padrão oficial para transferência.)
+  if (isTransferencia) {
+    pagInfo = {
+      pagamentos: [{ tPag: '90', vPag: '0.00' }],
+      duplicatas: [],
+      boletoDetalhes: [],
+      formaLabel: 'Transferencia entre lojas — sem pagamento (tPag 90)',
+    };
+    console.log('[SIEG-EMIT] Transferência: pagamento fixo tPag 90 (sem cobr/duplicatas/boletos)');
+  }
+
   // Calcular Difal total para infCpl (Difal NAO soma no total — só informativo)
   var difalTotal = 0;
   for (var di = 0; di < linesData.length; di++) {
@@ -1272,7 +1307,15 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     config: {
       serie: serie,
       tpAmb: process.env.SIEG_TP_AMB || config.sieg.tpAmb || '2',
-      natOp: opTypeName || (isTransferencia ? 'Transferência de produtos' : 'Venda de Mercadoria'),
+      // AJL 21/10/2026: natOp pelo TIPO DE OPERACAO do Odoo; transferência
+      // sem tipo = nomenclatura oficial do CFOP 6152 (igual ao XML modelo:
+      // "Transferencia de mercadoria adquirida/recebida de").
+      natOp: opTypeName || (isTransferencia ? 'Transferencia de mercadoria adquirida/recebida de' : 'Venda de Mercadoria'),
+      // AJL 04/11/2026: transferência sai com indPres 0 (não se aplica —
+      // igual ao XML modelo) e sem indIntermed; venda mantém indPres 9.
+      indPres: isTransferencia ? '0' : undefined,
+      // AJL 04/11/2026: NFs referenciadas da fatura (1c-4) -> <NFref><refNFe>
+      nfrefChaves: nfrefChavesFatura,
       mod: tipo === 'nfe' ? '55' : '01',
       // AJL 27/10/2026: transporte da NF — modFrete/transporta/veicTransp/volumes
       // lidos da fatura (3d). Fatura sem frete/transportadora = 9/sem transporta
@@ -1434,7 +1477,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   // boleto NAO afeta a NF; resultado/erro vira nota no chatter da fatura.
   // SO dispara quando a emissao veio do botao "Emitir NF e Boleto" (flag
   // consumida no inicio de processOne) — o fluxo comum de NF fica intacto.
-  if (info.sucesso && tipo === 'nfe' && autoBoletoArmado) {
+  if (info.sucesso && tipo === 'nfe' && autoBoletoArmado && !isTransferencia) {
     try {
       agendarBoletosAutomaticos({
         moveId: moveId,

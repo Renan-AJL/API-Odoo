@@ -509,6 +509,32 @@ function gerarXmlNFe(data) {
   var cDV = accessKey[43];
   console.log('[NFE-XML] cDV calculado: ' + cDV + ' (chave sem DV: ' + accessKey.slice(0, 43) + ')');
 
+  // === NFref (AJL 04/11/2026 — Transferência entre lojas CFOP 6152) ===
+  // NFs referenciadas via <NFref><refNFe>...</refNFe></NFref> DENTRO do <ide>
+  // (depois de verProc — ordem do XSD). Fonte: cfg.nfrefChaves /
+  // data.nfrefChaves / cfg.nfs_referenciadas (array ou TEXTO LIVRE — extrai
+  // todas as sequencias de 44 digitos). Uso:
+  //  - IDA (Floripa -> Curitiba): referencia as NFs de venda a ordem entregues
+  //    em Curitiba (fornecedor, CFOP 5122/6122/6123);
+  //  - RETORNO (Curitiba -> Floripa): referencia a chave da NF de ida (6152).
+  var nfrefBloco = '';
+  var nfrefFonte = cfg.nfrefChaves || data.nfrefChaves || cfg.nfs_referenciadas || data.nfs_referenciadas || '';
+  var nfrefTexto = Array.isArray(nfrefFonte) ? nfrefFonte.join(',') : String(nfrefFonte || '');
+  var nfrefLista = [];
+  nfrefTexto.replace(/\d{44}/g, function (c) {
+    if (nfrefLista.indexOf(c) === -1 && c !== accessKey) nfrefLista.push(c);
+    return c;
+  });
+  if (nfrefLista.length) {
+    var nfrefParts = [];
+    for (var nr = 0; nr < nfrefLista.length && nr < 100; nr++) {
+      nfrefParts.push('\n      <NFref><refNFe>' + nfrefLista[nr] + '</refNFe></NFref>');
+    }
+    nfrefBloco = nfrefParts.join('');
+    console.log('[NFE-XML] NFref: ' + nfrefLista.length + ' NF-e(s) referenciada(s): ' +
+      nfrefLista.slice(0, 2).join(', ') + (nfrefLista.length > 2 ? ' ...' : ''));
+  }
+
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <NFe xmlns="${NFE_NS}">
   <infNFe versao="4.00" Id="NFe${accessKey}">
@@ -534,7 +560,7 @@ function gerarXmlNFe(data) {
       <indPres>${indPres}</indPres>${indIntermed ? `
       <indIntermed>${indIntermed}</indIntermed>` : ''}
       <procEmi>0</procEmi>
-      <verProc>${esc(verProc)}</verProc>
+      <verProc>${esc(verProc)}</verProc>${nfrefBloco}
     </ide>`;
 
   // === emit ===

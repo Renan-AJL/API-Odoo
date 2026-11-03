@@ -13,6 +13,7 @@
  */
 var PDFDocument = require('pdfkit');
 var bwipjs = require('bwip-js');
+var { logoPathFor } = require('./nfe-cert');
 
 function tag(xml, name) {
   var m = String(xml || '').match(new RegExp('<' + name + '[^>]*>([\\s\\S]*?)<\\/' + name + '>', 'i'));
@@ -60,6 +61,8 @@ function dataFmt(iso) {
   var p = function (n) { return String(n).padStart(2, '0'); };
   return p(br.getUTCDate()) + '/' + p(br.getUTCMonth() + 1) + '/' + br.getUTCFullYear() + ' ' + p(br.getUTCHours()) + ':' + p(br.getUTCMinutes());
 }
+
+var fs = require('fs');
 
 async function barcode(chave) {
   return bwipjs.toBuffer({
@@ -173,18 +176,33 @@ async function gerarDanfePdf(nfeProcXml, opts) {
   y += 4;
 
   // --- Cabecalho: emitente + chave ---
+  // AJL 04/11/2026 (demanda Transferência): LOGO do emitente (upload no painel
+  // /api/v1/nfe/painel por aba) aparece no cabecalho do DANFE, ao lado da
+  // razao social. Sem logo = layout identico ao anterior.
   var hHead = 78;
   box(L, y, W, hHead);
+  var logoPng = null;
+  try {
+    var logoFile = logoPathFor(tag(emit, 'CNPJ'));
+    if (logoFile) logoPng = fs.readFileSync(logoFile);
+  } catch (eLogo) { console.warn('[DANFE] logo nao carregado: ' + eLogo.message); }
+  var headTextX = L + 6, headTextW = 202;
+  if (logoPng) {
+    // logo cabendo em 76x32 — desloca o bloco de texto do emitente p/ direita
+    doc.image(logoPng, L + 6, y + 6, { fit: [76, 32], align: 'center', valign: 'center' });
+    headTextX = L + 88;
+    headTextW = 128;
+  }
   // FIX (demanda usuario): nome do emitente desalinhado / "tudo muito junto" —
   // nome com espaco entre as linhas (lineGap) e bloco de endereco mais abaixo.
-  doc.fontSize(8.5).font('Helvetica-Bold').text(tag(emit, 'xNome'), L + 6, y + 5, { width: 202, lineGap: 2 });
+  doc.fontSize(8.5).font('Helvetica-Bold').text(tag(emit, 'xNome'), headTextX, y + 5, { width: headTextW, lineGap: 2 });
   var eEnd = bloco(emit, 'enderEmit');
   doc.fontSize(6.2).font('Helvetica').text(
     tag(eEnd, 'xLgr') + ', ' + tag(eEnd, 'nro') + ' ' + tag(eEnd, 'xBairro') + '\n' +
     tag(eEnd, 'xMun') + ' - ' + tag(eEnd, 'UF') + '  CEP ' + tag(eEnd, 'CEP') + '\n' +
     'CNPJ ' + cnpjFmt(tag(emit, 'CNPJ')) + '   IE ' + tag(emit, 'IE') + '\n' +
     'Fone ' + (tag(eEnd, 'fone') || '-'),
-    L + 6, y + 31, { width: 202, lineGap: 1.2 }
+    headTextX, y + 31, { width: headTextW, lineGap: 1.2 }
   );
 
   doc.fontSize(13).font('Helvetica-Bold').text('DANFE', L + 215, y + 6, { width: 90, align: 'center' });
@@ -370,6 +388,32 @@ async function gerarDanfePdf(nfeProcXml, opts) {
   box(L, y, W, 60);
   doc.fontSize(6.5).font('Helvetica').text(infoAd.trim() || '-', L + 4, y + 4, { width: W - 8, height: 52 });
   y += 66;
+
+  // --- NF-e(s) REFERENCIADA(S) (AJL 04/11/2026 — Transferência entre lojas) ---
+  // Chaves de <NFref><refNFe> do <ide> (venda a ordem entregue em outra loja,
+  // CFOP 5122/6122/6123 na IDA; chave da NF de ida 6152 no RETORNO).
+  var ideBlc = bloco(infNFe, 'ide');
+  var refs = blocos(ideBlc, 'NFref').map(function (r) { return tag(r, 'refNFe'); }).filter(Boolean);
+  if (refs.length > 0) {
+    if (y > doc.page.height - 90) { doc.addPage(); y = doc.page.margins.top; }
+    doc.fontSize(6).font('Helvetica-Bold').text('NF-E REFERENCIADA(S)', L, y); y += 8;
+    var porLinha = 2;
+    var linhas = Math.ceil(refs.length / porLinha);
+    var colW = W / porLinha;
+    for (var ri = 0; ri < linhas; ri++) {
+      if (y > doc.page.height - 50) { doc.addPage(); y = doc.page.margins.top; }
+      box(L, y, W, 13);
+      for (var ci = 0; ci < porLinha; ci++) {
+        var refVal = refs[ri * porLinha + ci];
+        if (!refVal) break;
+        if (ci > 0) doc.moveTo(L + colW * ci, y).lineTo(L + colW * ci, y + 13).stroke();
+        doc.fontSize(6.3).font('Helvetica')
+          .text(chaveFmt(refVal), L + colW * ci + 4, y + 4, { width: colW - 8, lineBreak: false, ellipsis: true });
+      }
+      y += 13;
+    }
+    y += 4;
+  }
 
   // --- Cobranca (Duplicatas / Boleto) ---
   var cobr = bloco(infNFe, 'cobr');
