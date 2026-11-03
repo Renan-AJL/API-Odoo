@@ -834,6 +834,11 @@ ${xmlEndereco(partner, 'enderDest')}
     infCplText = infCplText ? infCplText + '. ' + obsNfeTxt : obsNfeTxt;
   }
   // Pagamento: boleto com parcelas/vencimentos/valores, PIX, ou a vista
+  // AJL 04/11/2026 — REMESSA ARMAZENAGEM (CFOP 5905/6905, modelo SIEG cStat 100):
+  // detPag sai tPag 90 / vPag 0.00 e o infCpl NAO recebe texto de pagamento
+  // (nem 'Pagamento a vista' default — remessa nao tem cobranca).
+  var semPagamento = pag.length > 0 && String(pag[0].tPag) === '90';
+  if (!semPagamento) {
   if (order.boleto_detalhes && order.boleto_detalhes.length > 0) {
     var boletoParts = [];
     for (var bi = 0; bi < order.boleto_detalhes.length; bi++) {
@@ -858,6 +863,7 @@ ${xmlEndereco(partner, 'enderDest')}
   } else if (infCplText.indexOf('Pagamento') === -1 && infCplText.indexOf('pagamento') === -1) {
     // Sem informacao de pagamento = pagamento a vista
     infCplText = 'Pagamento a vista. ' + infCplText;
+  }
   }
   if (infCplText) {
     // PADRÃO AJL 23/10/2026 (nfe-texto.js): saneia zero-width (WhatsApp),

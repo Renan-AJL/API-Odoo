@@ -66,6 +66,24 @@ function round2(n) {
 }
 
 // ============================================================
+// REMESSA DESTINADA A ARMAZENAGEM (CFOP 5905 interna / 6905 interestadual)
+// AJL 04/11/2026 — detecta o Tipo de Operacao (Odoo id 157, tech
+// generalStorageShippingOutboundAJL, l10n_br_cfop_code 5905) e o tipo nativo do
+// modulo (generalStorageShippingOutbound). Detecta tambem por CFOP 5905 no
+// cadastro ou por 'armazenagem' no nome — triple rede de seguranca.
+// ============================================================
+function detectarArmazenagem(opType) {
+  var t = opType || {};
+  var tech = String(t.tech || '').toLowerCase();
+  var cfop = String(t.cfop || '').replace(/\D/g, '');
+  var nome = String(t.nome || '').toLowerCase();
+  return tech === 'generalstorageshippingoutboundajl' ||
+    tech === 'generalstorageshippingoutbound' ||
+    cfop === '5905' ||
+    nome.indexOf('armazenagem') >= 0;
+}
+
+// ============================================================
 // buildPagamentoInfo — Forma de pagamento da NF-e
 // ============================================================
 // Fonte da verdade: campo x_studio_forma_de_pagamento da fatura
@@ -483,6 +501,18 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     }
   } catch (eOT) {
     console.log('[SIEG-EMIT] Tipo de operacao nao lido (segue padrao): ' + eOT.message);
+  }
+
+  // 1c-4. REMESSA DESTINADA A ARMAZENAGEM (CFOP 5905/6905) — AJL 04/11/2026
+  // Modelo autorizado na SEFAZ (chave 41260922603750000190550010000719281022473776,
+  // cStat 100): natOp 'Remessa Destinado a Armazenagem', indPres 3 + indIntermed 0,
+  // pagamento tPag 90 / vPag 0.00 SEM cobr/dup/boletos, ICMS00 12%, IPI IPINT CST 51,
+  // PIS/COFINS 01 (1,65/7,60). Tipo de operacao Odoo criado via RPC (id 157,
+  // tech generalStorageShippingOutboundAJL, l10n_br_cfop_code 5905).
+  // Restante da NF segue o fluxo normal — emissao corrente NAO muda.
+  var isArmazenagem = detectarArmazenagem({ tech: opTypeTech, cfop: opTypeCfop, nome: opTypeName });
+  if (isArmazenagem) {
+    console.log('[SIEG-EMIT] REMESSA ARMAZENAGEM (' + opTypeName + '): indPres 3, tPag 90/vPag 0.00, sem cobr/boletos (modelo SIEG cStat 100)');
   }
 
   // 1a. GUARDA ANTI-DUPLICAÇÃO: se a NF-e já foi autorizada (ou já tem chave),
@@ -1213,6 +1243,13 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     qtdParcelas: epQtdParcelas,
   });
 
+  // AJL 04/11/2026 — REMESSA ARMAZENAGEM: NF sem cobranca (igual ao modelo SIEG
+  // autorizado: detPag tPag 90 / vPag 0.00, SEM bloco cobr/dup e SEM boletos).
+  // Sobrescreve o pagInfo da forma de pagamento — so para este tipo de operacao.
+  if (isArmazenagem) {
+    pagInfo = { pagamentos: [{ tPag: '90', vPag: '0.00' }], duplicatas: [], formaLabel: '', boletoDetalhes: [] };
+  }
+
   // Calcular Difal total para infCpl (Difal NAO soma no total — só informativo)
   var difalTotal = 0;
   for (var di = 0; di < linesData.length; di++) {
@@ -1285,6 +1322,10 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     },
     tipo: tipo,
   };
+  if (isArmazenagem) {
+    // Modelo: <indPres>3</indPres> + <indIntermed>0</indIntermed> (obrigatorio p/ indPres 3)
+    emitData.config.indPres = '3';
+  }
   console.log('[SIEG-EMIT] Pagamento NF: ' + pagInfo.formaLabel + ' | tPag=' +
     (pagInfo.pagamentos[0] || {}).tPag + ' | indPag=' + (pagInfo.pagamentos[0] || {}).indPag +
     ' | parcelas=' + (pagInfo.duplicatas ? pagInfo.duplicatas.length : 0) +
@@ -3017,5 +3058,5 @@ async function solicitarEmissaoComBoletos(moveIds) {
 
 module.exports = {
   processPendingEmissions, processPendingCancellations, buildPagamentoInfo, brNowStr,
-  solicitarEmissaoComBoletos, marcarAutoBoleto, consumirAutoBoleto,
+  solicitarEmissaoComBoletos, marcarAutoBoleto, consumirAutoBoleto, detectarArmazenagem,
 };

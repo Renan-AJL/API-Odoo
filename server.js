@@ -107,7 +107,7 @@ app.use('/callback/sieg', siegRoutes);
 app.get('/', (req, res) => {
   res.json({
     service: 'Odoo Middleware Unificado',
-    version: '1.2.6-icms-zero',
+    version: '1.2.8-armazenagem',
     empresa: config.empresa.nome,
     status: 'online',
     odoo_push: config.odoo.enabled ? 'ATIVO' : 'DESATIVADO',
