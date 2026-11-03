@@ -1,22 +1,12 @@
 /**
- * services/nfe-cert.js — Cofre do certificado digital A1 (.pfx/.p12) MULTI-EMITENTE
- * ==================================================================================
- * AJL 04/11/2026 (demanda Transferência entre Filiais): o cofre passa a guardar
- * UM certificado POR EMITENTE (CNPJ). Hoje temos:
- *   - Matriz Curitiba  : CNPJ 22603750000190 (AJL FERRO E ACO LTDA)
- *   - Filial Florianópolis: CNPJ 22603750000514 (AJL FERRO E ACO FILIAL FLORIANOPOLIS)
- *
+ * services/nfe-cert.js — Cofre do certificado digital A1 (.pfx/.p12)
+ * =================================================================
  * O certificado eh enviado por endpoint protegido (routes/nfe-cert.js) ou,
- * como fallback da MATRIZ, lido das variaveis de ambiente
- * NFE_CERT_PFX_BASE64 / NFE_CERT_SENHA (compatibilidade com o fluxo antigo).
+ * como fallback, lido das variaveis de ambiente NFE_CERT_PFX_BASE64 / NFE_CERT_SENHA.
  *
  * Persistencia: grava em NFE_CERT_DIR (default /var/data, fallback os.tmpdir()).
- *   - Matriz (slot legado, sem CNPJ) : nfe-cert.pfx + nfe-cert.meta.json
- *   - Por emitente                   : nfe-cert-<CNPJ>.pfx + nfe-cert-<CNPJ>.meta.json
  * No Render, configure um Disk persistente em /var/data para nao precisar
  * reenviar o certificado a cada deploy.
- *
- * Logo do emitente (DANFE): logo-<CNPJ>.png|jpg|jpeg no mesmo diretorio.
  *
  * Nunca logamos a senha nem o conteudo do .pfx.
  */
@@ -28,12 +18,10 @@ var forge = require('node-forge');
 var openPfxWithOpenssl = require('./pfx-openssl').openPfxWithOpenssl;
 
 var DIR = process.env.NFE_CERT_DIR || '/var/data';
-var PFX_FILE = 'nfe-cert.pfx';          // slot legado (matriz)
+var PFX_FILE = 'nfe-cert.pfx';
 var META_FILE = 'nfe-cert.meta.json';
-var LOGO_EXTS = ['png', 'jpg', 'jpeg'];
 
-var cache = null;   // slot legado (matriz) — { pfx, senha, privateKeyPem, certPem, chainPem, info }
-var cachesPorCnpj = {}; // { '<cnpj>': { ...mesma estrutura } }
+var cache = null; // { pfx: Buffer, senha: string, info: {...} }
 
 function ensureDir() {
   var dir = DIR;
@@ -70,19 +58,6 @@ function decryptSenha(blob) {
 }
 
 function onlyNum(s) { return String(s || '').replace(/\D/g, ''); }
-
-function cnpjKey(cnpj) { return onlyNum(cnpj); }
-
-function pfxPathFor(cnpj) {
-  var dir = ensureDir();
-  var k = cnpjKey(cnpj);
-  return k ? path.join(dir, 'nfe-cert-' + k + '.pfx') : path.join(dir, PFX_FILE);
-}
-function metaPathFor(cnpj) {
-  var dir = ensureDir();
-  var k = cnpjKey(cnpj);
-  return k ? path.join(dir, 'nfe-cert-' + k + '.meta.json') : path.join(dir, META_FILE);
-}
 
 /** Monta as infos publicas a partir do certificado do titular em PEM. */
 function infoFromCertPem(certPem) {
@@ -177,34 +152,21 @@ function openPfx(pfxBuffer, senha) {
   };
 }
 
-/**
- * Salva o certificado (upload). Retorna as infos publicas do certificado.
- * @param {Buffer} pfxBuffer conteudo do .pfx
- * @param {string} senha senha do .pfx
- * @param {object} [opts] { emitente: CNPJ (14 digitos) — omitido/'' = slot legado (matriz) }
- */
-function salvarCertificado(pfxBuffer, senha, opts) {
+/** Salva o certificado (upload). Retorna as infos publicas do certificado. */
+function salvarCertificado(pfxBuffer, senha) {
   if (!pfxBuffer || !pfxBuffer.length) throw new Error('Arquivo .pfx vazio.');
   if (!senha) throw new Error('Senha do certificado obrigatoria.');
 
   var aberto = openPfx(pfxBuffer, senha); // valida senha antes de persistir
-  var emitCnpj = cnpjKey(opts && opts.emitente);
-  var pfxPath = pfxPathFor(emitCnpj);
-  var metaPath = metaPathFor(emitCnpj);
-
-  fs.writeFileSync(pfxPath, pfxBuffer, { mode: 0o600 });
+  var dir = ensureDir();
+  fs.writeFileSync(path.join(dir, PFX_FILE), pfxBuffer, { mode: 0o600 });
   fs.writeFileSync(
-    metaPath,
-    JSON.stringify({
-      senha: encryptSenha(senha),
-      info: aberto.info,
-      emitente: emitCnpj || null,
-      uploadEm: new Date().toISOString(),
-    }),
+    path.join(dir, META_FILE),
+    JSON.stringify({ senha: encryptSenha(senha), info: aberto.info, uploadEm: new Date().toISOString() }),
     { mode: 0o600 }
   );
 
-  var slot = {
+  cache = {
     pfx: pfxBuffer,
     senha: String(senha),
     privateKeyPem: aberto.privateKeyPem,
@@ -212,59 +174,13 @@ function salvarCertificado(pfxBuffer, senha, opts) {
     chainPem: aberto.chainPem,
     info: aberto.info,
   };
-  if (emitCnpj) {
-    cachesPorCnpj[emitCnpj] = slot;
-    // Aviso importante: a SEFAZ valida o CNPJ do certificado contra o emitente da NF
-    if (aberto.info.cnpj && aberto.info.cnpj !== emitCnpj) {
-      console.warn('[NFE-CERT] ATENCAO: certificado tem CNPJ ' + aberto.info.cnpj +
-        ' mas foi enviado para o emitente ' + emitCnpj + ' — a SEFAZ pode rejeitar (203/298).');
-    }
-  } else {
-    cache = slot;
-  }
-  console.log('[NFE-CERT] Certificado A1 armazenado' + (emitCnpj ? ' p/ emitente ' + emitCnpj : ' (slot legado matriz)') +
-    '. Titular: ' + aberto.info.titular +
+  console.log('[NFE-CERT] Certificado A1 armazenado. Titular: ' + aberto.info.titular +
     ' | CNPJ: ' + aberto.info.cnpj + ' | valido ate ' + aberto.info.validoAte);
   return aberto.info;
 }
 
-/** Carrega do cache/disco para UM emitente (CNPJ). Retorna null se nao houver. */
-function carregarCertificadoPorCnpj(cnpj) {
-  var k = cnpjKey(cnpj);
-  if (!k) return null;
-  if (cachesPorCnpj[k]) return cachesPorCnpj[k];
-
-  try {
-    var pfxPath = pfxPathFor(k);
-    var metaPath = metaPathFor(k);
-    if (fs.existsSync(pfxPath) && fs.existsSync(metaPath)) {
-      var meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-      var pfx = fs.readFileSync(pfxPath);
-      var senha = decryptSenha(meta.senha);
-      var aberto = openPfx(pfx, senha);
-      cachesPorCnpj[k] = {
-        pfx: pfx, senha: senha,
-        privateKeyPem: aberto.privateKeyPem, certPem: aberto.certPem,
-        chainPem: aberto.chainPem, info: aberto.info,
-      };
-      console.log('[NFE-CERT] Certificado carregado do disco p/ emitente ' + k + '. Titular: ' + aberto.info.titular);
-      return cachesPorCnpj[k];
-    }
-  } catch (e) {
-    console.error('[NFE-CERT] Falha ao ler certificado do emitente ' + k + ': ' + e.message);
-  }
-  return null;
-}
-
-/**
- * Carrega o certificado do cache, do disco ou das variaveis de ambiente.
- * Sem argumento = slot legado (matriz) — comportamento identico ao anterior.
- * Com CNPJ = cofre daquele emitente (null se nao configurado).
- */
-function carregarCertificado(cnpj) {
-  var k = cnpjKey(cnpj);
-  if (k) return carregarCertificadoPorCnpj(k);
-
+/** Carrega o certificado do cache, do disco ou das variaveis de ambiente. */
+function carregarCertificado() {
   if (cache) return cache;
 
   // 1) Variaveis de ambiente (PRIORIDADE — sobrevive a deploys/reinicios no Render)
@@ -314,35 +230,7 @@ function carregarCertificado(cnpj) {
   return null;
 }
 
-/**
- * Certificado do EMITENTE de uma NF-e, com fallback legado:
- * 1) cofre do CNPJ do emitente; 2) slot legado (matriz) — mantem compatibilidade
- * com deployments que so tem o certificado antigo (env vars / nfe-cert.pfx).
- */
-function certificadoParaEmitente(cnpj, uf) {
-  var k = cnpjKey(cnpj);
-  var proprio = k ? carregarCertificadoPorCnpj(k) : null;
-  if (proprio) return proprio;
-  var legado = carregarCertificado(); // matriz/env
-  if (legado) {
-    var mesmoCnpj = legado.info && legado.info.cnpj === k;
-    console.log('[NFE-CERT] Emitente ' + (k || '?') + ' sem cofre proprio — usando certificado ' +
-      (mesmoCnpj ? 'correspondente' : 'LEGADO (' + (legado.info ? legado.info.cnpj : 's/ CNPJ') + ') — SEFAZ pode rejeitar se CNPJ divergir'));
-    return legado;
-  }
-  return null;
-}
-
-function statusCertificado(cnpj) {
-  var k = cnpjKey(cnpj);
-  if (k) {
-    var c2;
-    try { c2 = carregarCertificadoPorCnpj(k); } catch (e2) {
-      return { configurado: false, emitente: k, erro: e2.message };
-    }
-    if (!c2) return { configurado: false, emitente: k, mensagem: 'Nenhum certificado A1 carregado para o emitente ' + k + '.' };
-    return Object.assign({ configurado: true, emitente: k }, c2.info);
-  }
+function statusCertificado() {
   var c;
   try { c = carregarCertificado(); } catch (e) {
     return { configurado: false, erro: e.message };
@@ -351,88 +239,18 @@ function statusCertificado(cnpj) {
   return Object.assign({ configurado: true }, c.info);
 }
 
-/** Lista os emitentes com certificado no cofre (por CNPJ) + slot legado. */
-function listarEmitentes() {
-  var lista = [];
+function removerCertificado() {
   var dir = ensureDir();
-  try {
-    var files = fs.readdirSync(dir);
-    files.forEach(function (f) {
-      var m = f.match(/^nfe-cert-(\d{14})\.pfx$/);
-      if (!m) return;
-      var st = statusCertificado(m[1]);
-      st.emitente = m[1];
-      lista.push(st);
-    });
-  } catch (e) { /* diretorio ainda nao existe */ }
-  return lista;
-}
-
-function removerCertificado(cnpj) {
-  var k = cnpjKey(cnpj);
-  var dir = ensureDir();
-  var files = k ? ['nfe-cert-' + k + '.pfx', 'nfe-cert-' + k + '.meta.json'] : [PFX_FILE, META_FILE];
-  files.forEach(function (f) {
+  [PFX_FILE, META_FILE].forEach(function (f) {
     try { fs.unlinkSync(path.join(dir, f)); } catch (e) { /* ignore */ }
   });
-  if (k) delete cachesPorCnpj[k]; else cache = null;
-  return true;
-}
-
-// ============================================================
-// LOGO do emitente (DANFE) — logo-<CNPJ>.png|jpg|jpeg
-// ============================================================
-function logoPathFor(cnpj) {
-  var k = cnpjKey(cnpj) || 'default';
-  var dir = ensureDir();
-  for (var i = 0; i < LOGO_EXTS.length; i++) {
-    var p = path.join(dir, 'logo-' + k + '.' + LOGO_EXTS[i]);
-    if (fs.existsSync(p)) return p;
-  }
-  return null;
-}
-
-function salvarLogo(cnpj, buffer, nomeArquivo) {
-  if (!buffer || !buffer.length) throw new Error('Arquivo de logo vazio.');
-  var ext = String(nomeArquivo || '').toLowerCase().match(/\.(png|jpe?g)$/);
-  ext = ext ? (ext[1] === 'jpeg' ? 'jpg' : ext[1]) : null;
-  if (!ext) {
-    // deduzir do conteudo
-    var isPng = buffer.length > 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
-    var isJpg = buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
-    ext = isPng ? 'png' : (isJpg ? 'jpg' : null);
-    if (!ext) throw new Error('Formato de logo nao suportado (use PNG ou JPG).');
-  }
-  var k = cnpjKey(cnpj) || 'default';
-  var dir = ensureDir();
-  // remove versoes antigas (outras extensoes)
-  LOGO_EXTS.forEach(function (e2) {
-    try { fs.unlinkSync(path.join(dir, 'logo-' + k + '.' + e2)); } catch (er) { /* ignore */ }
-  });
-  var dest = path.join(dir, 'logo-' + k + '.' + ext);
-  fs.writeFileSync(dest, buffer);
-  console.log('[NFE-CERT] Logo do emitente ' + k + ' armazenado (' + buffer.length + ' bytes): ' + dest);
-  return { path: dest, bytes: buffer.length, formato: ext };
-}
-
-function removerLogo(cnpj) {
-  var k = cnpjKey(cnpj) || 'default';
-  var dir = ensureDir();
-  LOGO_EXTS.forEach(function (e2) {
-    try { fs.unlinkSync(path.join(dir, 'logo-' + k + '.' + e2)); } catch (er) { /* ignore */ }
-  });
+  cache = null;
   return true;
 }
 
 module.exports = {
   salvarCertificado,
   carregarCertificado,
-  carregarCertificadoPorCnpj,
-  certificadoParaEmitente,
   statusCertificado,
-  listarEmitentes,
   removerCertificado,
-  logoPathFor,
-  salvarLogo,
-  removerLogo,
 };

@@ -10,7 +10,7 @@
  *   - <Signature> fica logo apos </infNFe>, dentro de <NFe>
  */
 var { SignedXml } = require('xml-crypto');
-var { certificadoParaEmitente } = require('./nfe-cert');
+var { carregarCertificado } = require('./nfe-cert');
 
 var C14N = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
 var ENVELOPED = 'http://www.w3.org/2000/09/xmldsig#enveloped-signature';
@@ -23,29 +23,14 @@ function minify(xml) {
 }
 
 /**
- * Extrai o CNPJ do emitente a partir da CHAVE da NF-e no XML (posicoes 7-20
- * da chave de 44 digitos — 0-based 6..20). Chave: cUF(2) AAMM(4) CNPJ(14) ...
- */
-function cnpjEmitenteDoXml(xml) {
-  var m = String(xml || '').match(/Id="NFe(\d{44})"/);
-  if (!m) return '';
-  return m[1].slice(6, 20);
-}
-
-/**
  * Assina um XML de NF-e (elemento raiz <NFe>).
- * AJL 04/11/2026 (multi-emitente): seleciona o certificado A1 do COFRE do
- * CNPJ do emitente (chave pos. 7-20). Sem cofre proprio, cai no certificado
- * legado (matriz) — compatibilidade com o fluxo atual.
  * @param {string} xmlNFe XML da NF-e nao assinado
- * @param {string} [cnpjEmitente] opcional — se vazio, deriva da chave no XML
  * @returns {{ xml: string, chave: string, certInfo: object }}
  */
-function assinarNFe(xmlNFe, cnpjEmitente) {
-  var cnpj = String(cnpjEmitente || '').replace(/\D/g, '') || cnpjEmitenteDoXml(xmlNFe);
-  var cert = certificadoParaEmitente(cnpj);
+function assinarNFe(xmlNFe) {
+  var cert = carregarCertificado();
   if (!cert) {
-    var err = new Error('Certificado digital A1 nao configurado' + (cnpj ? ' para o emitente ' + cnpj : '') + '. Envie no painel /api/v1/nfe/painel (aba do emitente) ou defina as variaveis de ambiente NFE_CERT_PFX_BASE64 + NFE_CERT_SENHA.');
+    var err = new Error('Certificado digital A1 nao configurado. No Render, defina as variaveis de ambiente NFE_CERT_PFX_BASE64 (conteudo do .pfx em base64) e NFE_CERT_SENHA. Alternativamente, envie via POST /api/v1/nfe/certificado (mas o arquivo sera perdido em reinicios).');
     err.code = 'CERT_AUSENTE';
     throw err;
   }
@@ -93,4 +78,4 @@ function assinarNFe(xmlNFe, cnpjEmitente) {
   return { xml: assinado, chave: chave, certInfo: cert.info };
 }
 
-module.exports = { assinarNFe, minify, cnpjEmitenteDoXml };
+module.exports = { assinarNFe, minify };

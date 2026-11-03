@@ -15,7 +15,7 @@
  */
 var https = require('https');
 var axios = require('axios');
-var { carregarCertificado, certificadoParaEmitente } = require('./nfe-cert');
+var { carregarCertificado } = require('./nfe-cert');
 var { assinarNFe, minify } = require('./nfe-signer');
 
 // ============================================================
@@ -58,30 +58,12 @@ var WS = {
 };
 
 var CUF = { PR: '41', SP: '35', RS: '43', SC: '42', MG: '31', RJ: '33', BA: '29', GO: '52', MS: '50', MT: '51' };
-// Reverso — cUF (posicoes 1-2 da chave de acesso) -> UF do emitente/autorizadora.
-// AJL 04/11/2026 (multi-emitente): a UF da NF-e agora vem da PROPIA CHAVE,
-// assim a Filial Florianópolis (SC, cUF 42) cai no SVRS automaticamente.
-var CUF_REV = {
-  '11': 'RO', '12': 'AC', '13': 'AM', '14': 'RR', '15': 'PA', '16': 'AP', '17': 'TO',
-  '21': 'MA', '22': 'PI', '23': 'CE', '24': 'RN', '25': 'PB', '26': 'PE', '27': 'AL',
-  '28': 'SE', '29': 'BA', '31': 'MG', '32': 'ES', '33': 'RJ', '35': 'SP',
-  '41': 'PR', '42': 'SC', '43': 'RS', '50': 'MS', '51': 'MT', '52': 'GO', '53': 'DF',
-};
 
 function uf() { return String(process.env.NFE_UF || 'PR').toUpperCase(); }
-/** UF de uma chave de acesso (44 digitos) — null se invalida/desconhecida. */
-function ufDaChave(chave) {
-  var c = String(chave || '').replace(/\D/g, '');
-  if (c.length < 2) return null;
-  return CUF_REV[c.slice(0, 2)] || null;
-}
 function tpAmb() { return String(process.env.SIEG_TP_AMB || process.env.NFE_TP_AMB || '2'); }
 function isHomolog() { return tpAmb() === '2'; }
-function autorizador(ufParam) {
-  var u = String(ufParam || uf()).toUpperCase();
-  return WS[u] ? u : 'SVRS';
-}
-function endpoint(tipo, ufParam) { return WS[autorizador(ufParam)][tipo][isHomolog() ? 1 : 0]; }
+function autorizador() { return WS[uf()] ? uf() : 'SVRS'; }
+function endpoint(tipo) { return WS[autorizador()][tipo][isHomolog() ? 1 : 0]; }
 function cUF() { return CUF[uf()] || '41'; }
 
 function tag(xml, name) {
@@ -89,8 +71,8 @@ function tag(xml, name) {
   return m ? m[1].trim() : '';
 }
 
-function agent(certRef) {
-  var cert = certRef || carregarCertificado();
+function agent() {
+  var cert = carregarCertificado();
   if (!cert) throw new Error('Certificado A1 nao configurado — impossivel abrir conexao mTLS com a SEFAZ.');
   // Montar lista de CAs confiáveis para validar o certificado TLS do servidor SEFAZ:
   // 1. CAs do proprio certificado A1 (intermediarias ICP-Brasil do emitente)
@@ -142,10 +124,10 @@ function envelope(servico, conteudo) {
     '</soap12:Body></soap12:Envelope>';
 }
 
-async function soapPost(url, servico, conteudo, timeout, certRef) {
+async function soapPost(url, servico, conteudo, timeout) {
   var body = envelope(servico, conteudo);
   var resp = await axios.post(url, body, {
-    httpsAgent: agent(certRef),
+    httpsAgent: agent(),
     timeout: timeout || 60000,
     headers: {
       'Content-Type': 'application/soap+xml; charset=utf-8',
@@ -158,30 +140,17 @@ async function soapPost(url, servico, conteudo, timeout, certRef) {
   return { status: resp.status, xml: String(resp.data || '') };
 }
 
-/**
- * Status do servico da SEFAZ — util para testar o certificado e a conexao.
- * AJL 04/11/2026 (multi-emitente): aceita { emitenteCnpj, emitenteNome, uf } —
- * usa o certificado do cofre daquele emitente e a autorizadora da UF informada
- * (ex: uf=SC para testar a Filial Florianópolis contra o SVRS).
- */
-async function statusServico(opts) {
-  opts = opts || {};
-  var certRef = null;
-  if (opts.emitenteCnpj) {
-    certRef = certificadoParaEmitente(opts.emitenteCnpj);
-    if (!certRef) throw new Error('Certificado A1 do emitente ' + opts.emitenteCnpj + ' nao configurado — envie no painel.');
-  }
-  var ufSel = String(opts.uf || '').toUpperCase() || null;
+/** Status do servico da SEFAZ — util para testar o certificado e a conexao. */
+async function statusServico() {
   var cons = '<consStatServ xmlns="' + NS + '" versao="4.00">' +
-    '<tpAmb>' + tpAmb() + '</tpAmb><cUF>' + (CUF[ufSel] || cUF()) + '</cUF><xServ>STATUS</xServ></consStatServ>';
-  var r = await soapPost(endpoint('status', ufSel), 'NFeStatusServico4', cons, 30000, certRef);
+    '<tpAmb>' + tpAmb() + '</tpAmb><cUF>' + cUF() + '</cUF><xServ>STATUS</xServ></consStatServ>';
+  var r = await soapPost(endpoint('status'), 'NFeStatusServico4', cons, 30000);
   return {
     httpStatus: r.status,
     ambiente: tpAmb() === '2' ? 'homologacao' : 'producao',
-    uf: ufSel || uf(),
-    emitente: opts.emitenteNome || (opts.emitenteCnpj || null),
-    autorizador: autorizador(ufSel),
-    endpoint: endpoint('status', ufSel),
+    uf: uf(),
+    autorizador: autorizador(),
+    endpoint: endpoint('status'),
     cStat: tag(r.xml, 'cStat'),
     xMotivo: tag(r.xml, 'xMotivo'),
     online: tag(r.xml, 'cStat') === '107',
@@ -193,28 +162,18 @@ function sanitizeNFe(xmlAssinado) {
 }
 
 /** Consulta o recibo do lote (assincrono). */
-async function consultarRecibo(nRec, chaveRef) {
-  var ufCh = ufDaChave(chaveRef);
+async function consultarRecibo(nRec) {
   var cons = '<consReciNFe xmlns="' + NS + '" versao="4.00">' +
     '<tpAmb>' + tpAmb() + '</tpAmb><nRec>' + nRec + '</nRec></consReciNFe>';
-  var r = await soapPost(endpoint('retAutorizacao', ufCh), 'NFeRetAutorizacao4', cons, 45000,
-    chaveRef ? certificadoParaEmitente(chaveRef.slice(6, 20)) : null);
+  var r = await soapPost(endpoint('retAutorizacao'), 'NFeRetAutorizacao4', cons, 45000);
   return r.xml;
 }
 
-/**
- * Consulta a situacao da NF-e pela chave (usado como ultimo recurso).
- * AJL 04/11/2026 (multi-emitente): UF e certificado derivados da PROPIA chave
- * (cUF pos. 1-2 e CNPJ pos. 7-20) — consulta de NF da Filial SC vai ao SVRS
- * com o certificado da Filial.
- */
+/** Consulta a situacao da NF-e pela chave (usado como ultimo recurso). */
 async function consultarChave(chave) {
-  var c = String(chave || '').replace(/\D/g, '').slice(0, 44);
-  var ufCh = ufDaChave(c);
-  var certRef = certificadoParaEmitente(c.slice(6, 20));
   var cons = '<consSitNFe xmlns="' + NS + '" versao="4.00">' +
-    '<tpAmb>' + tpAmb() + '</tpAmb><xServ>CONSULTAR</xServ><chNFe>' + c + '</chNFe></consSitNFe>';
-  var r = await soapPost(endpoint('consulta', ufCh), 'NFeConsultaProtocolo4', cons, 45000, certRef);
+    '<tpAmb>' + tpAmb() + '</tpAmb><xServ>CONSULTAR</xServ><chNFe>' + chave + '</chNFe></consSitNFe>';
+  var r = await soapPost(endpoint('consulta'), 'NFeConsultaProtocolo4', cons, 45000);
   return r.xml;
 }
 
@@ -234,15 +193,11 @@ function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
 /**
  * Assina e autoriza a NF-e na SEFAZ.
- * AJL 04/11/2026 (multi-emitente): UF da autorizadora e certificado derivados
- * da CHAVE da NF-e (cUF + CNPJ do emitente) — a Filial Florianópolis (SC)
- * sai pelo SVRS com o certificado da Filial; a Matriz (PR) segue igual.
  * @param {string} xmlNFe XML <NFe> gerado (sem assinatura)
  */
 async function autorizarNFe(xmlNFe) {
   var assinado = assinarNFe(xmlNFe);
   var chave = assinado.chave;
-  var ufCh = ufDaChave(chave);
   var idLote = String(Date.now()).slice(-15);
 
   var enviNFe = '<enviNFe xmlns="' + NS + '" versao="4.00">' +
@@ -251,18 +206,17 @@ async function autorizarNFe(xmlNFe) {
     sanitizeNFe(assinado.xml) +
     '</enviNFe>';
 
-  console.log('[SEFAZ] Enviando NF-e ' + chave + ' | UF=' + (ufCh || uf()) + ' | amb=' + tpAmb() +
-    ' | ' + endpoint('autorizacao', ufCh));
+  console.log('[SEFAZ] Enviando NF-e ' + chave + ' | UF=' + uf() + ' | amb=' + tpAmb() +
+    ' | ' + endpoint('autorizacao'));
 
   var r;
   try {
-    r = await soapPost(endpoint('autorizacao', ufCh), 'NFeAutorizacao4', enviNFe, 90000,
-      certificadoParaEmitente(chave.slice(6, 20)));
+    r = await soapPost(endpoint('autorizacao'), 'NFeAutorizacao4', enviNFe, 90000);
   } catch (err) {
     return {
       autorizada: false, chave: chave, xmlAssinado: assinado.xml,
       cStat: '', xMotivo: 'Falha de comunicacao com a SEFAZ: ' + err.message,
-      erro: err.message, endpoint: endpoint('autorizacao', ufCh),
+      erro: err.message, endpoint: endpoint('autorizacao'),
     };
   }
 
@@ -278,7 +232,7 @@ async function autorizarNFe(xmlNFe) {
     var nRec = tag(respXml, 'nRec');
     for (var i = 0; i < 8 && nRec; i++) {
       await sleep(2500);
-      var retXml = await consultarRecibo(nRec, chave);
+      var retXml = await consultarRecibo(nRec);
       console.log('[SEFAZ] Consulta recibo ' + nRec + ' tentativa ' + (i + 1) + ': ' + tag(retXml, 'cStat') + ' ' + tag(retXml, 'xMotivo'));
       protNFe = extrairProtNFe(retXml);
       if (protNFe) { respXml = retXml; break; }
@@ -298,8 +252,8 @@ async function autorizarNFe(xmlNFe) {
     cStat: cStat,
     xMotivo: xMotivo,
     ambiente: tpAmb() === '2' ? 'homologacao' : 'producao',
-    uf: ufCh || uf(),
-    endpoint: endpoint('autorizacao', ufCh),
+    uf: uf(),
+    endpoint: endpoint('autorizacao'),
     httpStatus: r.status,
     xmlAssinado: assinado.xml,
     respostaSefaz: respXml.slice(0, 6000),
@@ -324,7 +278,6 @@ module.exports = {
   montarNfeProc,
   endpoint,
   uf,
-  ufDaChave,
   tpAmb,
   cUF,
   soapPost,
