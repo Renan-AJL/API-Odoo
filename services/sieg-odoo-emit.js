@@ -3303,6 +3303,30 @@ async function verificarTransferenciasSieg() {
         if (String(mv.name || '').trim() !== nomeNovo) {
           try { await executeKw(client, db, uid, pwd, 'account.move', 'write', [[mv.id], { name: nomeNovo }]); } catch (eN) {}
         }
+        // AJL 05/11 (v1.2.19) — anexa XML autorizado + DANFE (paridade com o fluxo SEFAZ-direta)
+        try {
+          if (hit.xml) {
+            var xmlB64T = Buffer.from(hit.xml, 'utf-8').toString('base64');
+            await executeKw(client, db, uid, pwd, 'ir.attachment', 'create', [{
+              name: 'NF-e_' + nomeNovo + '.xml', raw: xmlB64T,
+              res_model: 'account.move', res_id: mv.id, mimetype: 'application/xml' }]);
+            console.log('[SIEG-EMIT] [TRANSF-FLN] XML autorizado anexado: ' + nomeNovo);
+          }
+          try {
+            var { gerarDanfe } = require('./sieg-api');
+            var pdfB64T = await gerarDanfe(hit.xml, {});
+            if (pdfB64T) {
+              await executeKw(client, db, uid, pwd, 'ir.attachment', 'create', [{
+                name: 'DANFE_' + nomeNovo + '.pdf', raw: pdfB64T,
+                res_model: 'account.move', res_id: mv.id, mimetype: 'application/pdf' }]);
+              console.log('[SIEG-EMIT] [TRANSF-FLN] DANFE anexada: ' + nomeNovo);
+            }
+          } catch (eDanfeT) {
+            console.error('[SIEG-EMIT] [TRANSF-FLN] DANFE (NF continua autorizada): ' + eDanfeT.message);
+          }
+        } catch (eAttT) {
+          console.error('[SIEG-EMIT] [TRANSF-FLN] anexos: ' + eAttT.message);
+        }
         try {
           await executeKw(client, db, uid, pwd, 'account.move', 'message_post', [[mv.id], {
             body: '<b>NF-e de transferência AUTORIZADA (via SIEG — certificado da filial)</b><br/>Chave: ' + chave +
