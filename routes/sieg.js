@@ -194,14 +194,47 @@ router.get('/probe-endpoints', apiKeyAuth, async (req, res) => {
 router.post('/send-xml-test', apiKeyAuth, async (req, res) => {
   try {
     const axios = require('axios');
+    const AdmZip = require('adm-zip');
     const { getAuthHeaders } = require('../services/sieg-auth');
     const headers = await getAuthHeaders();
     const xmlB64 = String(req.body.xmlBase64 || '');
-    if (!xmlB64) return res.status(400).json({ sucesso: false, erro: 'xmlBase64 obrigatorio' });
-    const resp = await axios.post('https://api.sieg.com/api/v1/send-xml', { Xml: xmlB64 },
-      { headers, timeout: 90000, validateStatus: s => s < 500 });
-    const txt = typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data || {});
-    return res.json({ sucesso: resp.status === 200, httpStatus: resp.status, resposta: txt.slice(0, 1500) });
+    const xmlPlain = String(req.body.xmlPlain || '');
+    const modo = String(req.body.modo || 'b64json'); // b64json | plainjson | formb64 | formplain
+    const endpoint = String(req.body.endpoint || 'send-xml'); // send-xml | enviar-xml | classic
+    if (!xmlB64 && !xmlPlain) return res.status(400).json({ sucesso: false, erro: 'xmlBase64 ou xmlPlain obrigatorio' });
+    const xml = xmlPlain || Buffer.from(xmlB64, 'base64').toString('utf-8');
+    const xmlB64OfPlain = xmlPlain ? Buffer.from(xmlPlain, 'utf-8').toString('base64') : xmlB64;
+
+    let url, payload, opts;
+    if (endpoint === 'classic') {
+      // classic up.sieg.com/EnviarXml?api_key — formato documentado: FORM-URLENCODED
+      const apiKey = process.env.SIEG_API_KEY || '';
+      url = 'https://up.sieg.com/EnviarXml?api_key=' + encodeURIComponent(apiKey);
+      payload = (modo === 'formplain')
+        ? new URLSearchParams({ Xml: xml }).toString()
+        : new URLSearchParams({ Xml: xmlB64OfPlain }).toString();
+      opts = { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 90000, validateStatus: s => s < 500 };
+    } else {
+      url = 'https://api.sieg.com/api/v1/' + endpoint;
+      if (modo === 'plainjson') payload = { Xml: xml };
+      else payload = { Xml: xmlB64OfPlain };
+      opts = { headers, timeout: 90000, validateStatus: s => s < 500 };
+    }
+    console.log('[SIEG-TEST] ' + endpoint + ' modo=' + modo + ' url=' + url.split('?')[0] + ' payload=' + (typeof payload === 'string' ? 'form(' + payload.length + 'b)' : JSON.stringify(payload).slice(0, 80)));
+    const resp = await axios.post(url, payload, opts);
+    let txt = typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data || {});
+    let extra = '';
+    // se veio ZIP (PK..), converte e lista as entradas
+    const ehZip = (typeof resp.data === 'string' && resp.data.slice(0, 2) === 'PK') ||
+      (Buffer.isBuffer(resp.data) && resp.data.length > 4 && resp.data[0] === 0x50 && resp.data[1] === 0x4b);
+    if (ehZip) {
+      try {
+        const buf = Buffer.isBuffer(resp.data) ? resp.data : Buffer.from(resp.data, 'binary');
+        const zip = new AdmZip(buf);
+        extra = ' ZIP entradas=' + zip.getEntries().map(e => e.entryName).slice(0, 5).join(',');
+      } catch (e) { extra = ' (zip ilegivel)'; }
+    }
+    return res.json({ sucesso: resp.status === 200, httpStatus: resp.status, modo, endpoint, resposta: txt.slice(0, 1200) + extra });
   } catch (err) {
     return res.status(500).json({ sucesso: false, erro: err.message });
   }
