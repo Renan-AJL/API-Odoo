@@ -1446,22 +1446,23 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     }).join(' | ');
     emitData.order.infCpl += '. ' + transfLocalEntrega + (transfRefs ? '. ' + transfRefs : '');
     console.log('[SIEG-EMIT] Referencias FLN->Matriz: ' + transfLocalEntrega + (transfRefs ? ' | ' + transfRefs : '(sem NFref)'));
-    // Emitente FLN (22603750000514): XML vai para a SIEG (EnviarXml) — a SIEG
-    // assina com o certificado A1 da filial que esta no cofre e autoriza.
-    // Matriz segue SEFAZ-direta como sempre (intocada).
-    // AJL 04/11 (noite, v1.2.15) — PRIORIDADE: SEFAZ-direta com o certificado A1
-    // da FILIAL quando ele estiver no cofre local (nfe-cert-22603750000514.pfx)
-    // — MESMO fluxo da Matriz (assinatura local, envio ao SVRS pela cUF 42,
-    // autorizacao sincrona, write-back/contador iguais). Sem cert local,
-    // cai no caminho SIEG (import/assinatura no cofre SIEG).
-    if (String(company.cnpj_cpf || '').replace(/\D/g, '') === '22603750000514') {
-      var certFln = null;
-      try { certFln = carregarCertificadoPorCnpj('22603750000514'); } catch (eCertFln) { certFln = null; }
-      if (certFln && certFln.pfx) {
-        console.log('[SIEG-EMIT] Transferência FLN: certificado A1 da filial no cofre local — SEFAZ-direta SVRS (igual Matriz)');
+    // AJL 05/11/2026 (v1.2.18) — GENERALIZADO P/ TODAS AS FILIAIS: Ivaipora
+    // (22603750000271), Ponta Grossa (22603750000352) e Florianopolis
+    // (22603750000514). NF de transferencia emitida pela FILIAL usa SEFAZ-direta
+    // com o certificado A1 da filial quando existir no cofre local
+    // (nfe-cert-<CNPJ>.pfx) — MESMO fluxo da Matriz (assinatura local, autorizacao
+    // sincrona, write-back/contador iguais). Sem cert local, XML vai para a SIEG
+    // (import/assinatura no cofre SIEG). Matriz segue SEFAZ-direta (intocada).
+    var cnpjEmitTransf = String(company.cnpj_cpf || '').replace(/\D/g, '');
+    var FILIAIS_TRANSFER = ['22603750000271', '22603750000352', '22603750000514'];
+    if (FILIAIS_TRANSFER.indexOf(cnpjEmitTransf) >= 0) {
+      var certFilial = null;
+      try { certFilial = carregarCertificadoPorCnpj(cnpjEmitTransf); } catch (eCertFln) { certFilial = null; }
+      if (certFilial && certFilial.pfx) {
+        console.log('[SIEG-EMIT] Transferência filial ' + cnpjEmitTransf + ': certificado A1 no cofre local — SEFAZ-direta (igual Matriz)');
       } else {
         emitData.config.viaSiegTransferencia = true;
-        console.log('[SIEG-EMIT] Transferência FLN: sem cert local — XML vai para a SIEG (assinatura no cofre SIEG)');
+        console.log('[SIEG-EMIT] Transferência filial ' + cnpjEmitTransf + ': sem cert local — XML vai para a SIEG (assinatura no cofre SIEG)');
       }
     }
   }
@@ -3247,14 +3248,21 @@ async function verificarTransferenciasSieg() {
     var db = odoo.db;
     var pwd = odoo.password;
 
-    // 1) Faturas aguardando a SIEG: chave com o CNPJ da filial Florianópolis
-    //    (a chave tem o CNPJ do emitente nas posicoes 6-20)
+    // 1) Faturas aguardando a SIEG: chave com o CNPJ de QUALQUER filial emissor
+    //    (a chave tem o CNPJ do emitente nas posicoes 6-20).
+    //    AJL 05/11/2026 (v1.2.18) — generalizado: Ivaipora (22603750000271),
+    //    Ponta Grossa (22603750000352) e Florianopolis (22603750000514).
+    var FILIAIS_SIEG = ['22603750000271', '22603750000352', '22603750000514'];
+    var domChaveOr = null;
+    for (var fi = 0; fi < FILIAIS_SIEG.length; fi++) {
+      var leaf = [['x_studio_nfe_chave', 'ilike', FILIAIS_SIEG[fi]]];
+      domChaveOr = (domChaveOr === null) ? leaf : ['|'].concat(domChaveOr, leaf);
+    }
     var ids = await executeKw(client, db, uid, pwd, 'account.move', 'search', [[
       ['move_type', '=', 'out_invoice'],
       ['state', '=', 'posted'],
       ['x_studio_nfe_status', '=', 'processando'],
-      ['x_studio_nfe_chave', 'ilike', '22603750000514'],
-    ]], { order: 'id asc', limit: 10 });
+    ].concat(domChaveOr)], { order: 'id asc', limit: 10 });
     if (!ids || !ids.length) return { processed: 0 };
 
     // 2) Cofre SIEG (nfeProc do periodo recente)

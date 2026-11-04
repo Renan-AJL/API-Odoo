@@ -65,6 +65,20 @@ const config = {
       nome: 'AJL Florianópolis (Filial)',
       razao: 'AJL FERRO E ACO FILIAL FLORIANOPOLIS',
     },
+    // AJL 05/11/2026 (v1.2.18) — transferência entre filiais liberada:
+    // Ivaiporã e Ponta Grossa entram como emitentes (cert A1 por CNPJ no cofre).
+    ivaipora: {
+      id: 'ivaipora',
+      cnpj: '22603750000271',
+      nome: 'AJL Ivaiporã (Filial)',
+      razao: 'AJL COMERCIO ATACADISTA DE FERRAGENS E FERRAMENTAS LTDA',
+    },
+    pontagrossa: {
+      id: 'pontagrossa',
+      cnpj: '22603750000352',
+      nome: 'AJL Ponta Grossa (Filial)',
+      razao: 'AJL COMERCIO ATACADISTA DE FERRAGENS E FERRAMENTAS LTDA',
+    },
   },
 
   mtls: {
