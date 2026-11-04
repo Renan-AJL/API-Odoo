@@ -156,6 +156,57 @@ router.get('/cofre', apiKeyAuth, async (req, res) => {
   }
 });
 
+// === Diagnostico: sondar endpoints SIEG + reenviar XML arbitrario ===
+// AJL 04/11 (noite) — identificar o canal correto de EMISSAO NF-e (mod 55) via
+// REST. GET /probe-endpoints testa candidatos com body vazio (seguro — nada e
+// emitido). POST /send-xml-test encaminha {xmlBase64} ao send-xml e devolve a
+// resposta BRUTA da SIEG (para bisect: import de nfeProc autorizado x NFe nova).
+router.get('/probe-endpoints', apiKeyAuth, async (req, res) => {
+  try {
+    const axios = require('axios');
+    const { getAuthHeaders } = require('../services/sieg-auth');
+    const headers = await getAuthHeaders();
+    const candidatos = [
+      ['send-xml', 'https://api.sieg.com/api/v1/send-xml'],
+      ['enviar-xml', 'https://api.sieg.com/api/v1/enviar-xml'],
+      ['enviar-nfe', 'https://api.sieg.com/api/v1/enviar-nfe'],
+      ['emitir', 'https://api.sieg.com/api/v1/emitir'],
+      ['emissao', 'https://api.sieg.com/api/v1/emissao'],
+      ['nfe-emissao', 'https://api.sieg.com/api/v1/nfe/emissao'],
+      ['enviar-documento', 'https://api.sieg.com/api/v1/enviar-documento'],
+    ];
+    const resultados = [];
+    for (const [nome, url] of candidatos) {
+      try {
+        const r = await axios.post(url, { Xml: '' }, { headers, timeout: 20000, validateStatus: s => s < 500 });
+        const txt = typeof r.data === 'string' ? r.data : JSON.stringify(r.data || {});
+        resultados.push({ nome, url, http: r.status, corpo: txt.slice(0, 200) });
+      } catch (e) {
+        resultados.push({ nome, url, http: e.response ? e.response.status : -1, corpo: (e.message || '').slice(0, 120) });
+      }
+    }
+    return res.json({ sucesso: true, resultados });
+  } catch (err) {
+    return res.status(500).json({ sucesso: false, erro: err.message });
+  }
+});
+
+router.post('/send-xml-test', apiKeyAuth, async (req, res) => {
+  try {
+    const axios = require('axios');
+    const { getAuthHeaders } = require('../services/sieg-auth');
+    const headers = await getAuthHeaders();
+    const xmlB64 = String(req.body.xmlBase64 || '');
+    if (!xmlB64) return res.status(400).json({ sucesso: false, erro: 'xmlBase64 obrigatorio' });
+    const resp = await axios.post('https://api.sieg.com/api/v1/send-xml', { Xml: xmlB64 },
+      { headers, timeout: 90000, validateStatus: s => s < 500 });
+    const txt = typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data || {});
+    return res.json({ sucesso: resp.status === 200, httpStatus: resp.status, resposta: txt.slice(0, 1500) });
+  } catch (err) {
+    return res.status(500).json({ sucesso: false, erro: err.message });
+  }
+});
+
 // === Gerar URL de autorizacao OAuth ===
 // Retorna a URL que o usuario deve visitar para autorizar o acesso
 router.get('/oauth-url', apiKeyAuth, async (req, res) => {
