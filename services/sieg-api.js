@@ -154,11 +154,14 @@ async function enviarNFeViaSieg(dadosOdoo) {
  * AJL 04/11/2026 — TRANSFERÊNCIA ENTRE FILIAIS (AJL Florianópolis -> AJL Curitiba
  * Matriz, CFOP 6152). O certificado A1 da filial está no COFRE SIEG (só a Matriz
  * tem .pfx local para SEFAZ-direta). O XML (NÃO assinado, montado com os dados
- * do cadastro + NFref do modelo autorizado 422609...562740) vai para
- * up.sieg.com/EnviarXml?api_key=... — a SIEG assina com o cert da filial,
- * envia à SEFAZ e importa no cofre. A autorizacao é ASSÍNCRONA: a chave já é
- * calculada aqui; o fechamento (chave/protocolo/cStat) acontece no poll
- * verificarTransferenciasSieg (sieg-odoo-emit.js) consultando baixar-xmls.
+ * do cadastro + NFref do modelo autorizado 422609...562740) é ENVIADO a SIEG:
+ *   1) REST api.sieg.com/api/v1/send-xml (JWT+OAuth — getAuthHeaders) — caminho
+ *      principal (o classic api_key ficou rejeitando tudo em 04/11);
+ *   2) fallback classic up.sieg.com/EnviarXml?api_key — apenas erro de rede.
+ * A SIEG assina com o cert da filial, envia à SEFAZ e importa no cofre. A
+ * autorizacao é ASSÍNCRONA: a chave já é calculada aqui; o fechamento
+ * (chave/protocolo/cStat) acontece no poll verificarTransferenciasSieg
+ * (sieg-odoo-emit.js) consultando baixar-xmls.
  * Matriz e demais emissoes NAO passam por aqui (config.viaSiegTransferencia).
  */
 async function enviarNFeSiegTransferencia(dadosOdoo) {
@@ -174,25 +177,43 @@ async function enviarNFeSiegTransferencia(dadosOdoo) {
       erro: 'Chave de acesso nao calculada no XML da transferencia', statusCode: 422 };
   }
   const apiKey = process.env.SIEG_API_KEY || '';
-  if (!apiKey) {
-    return { sucesso: false, httpStatus: 422, xmlEnviado: xml, resposta: null, data: null,
-      erro: 'SIEG_API_KEY nao configurada no Render — obrigatoria para emitir a NF de transferencia da filial Florianópolis (cofre SIEG)', statusCode: 422 };
-  }
-  const url = 'https://up.sieg.com/EnviarXml?api_key=' + encodeURIComponent(apiKey);
-  console.log('[SIEG-API] Transferencia FLN chave ' + chave + ' -> up.sieg.com/EnviarXml (' + xmlMin.length + ' chars)');
+  // AJL 04/11 (tarde) — o caminho CLASSICO up.sieg.com/EnviarXml?api_key esta
+  // REJEITANDO todas as api keys com "Não Autenticado: Erro ao obter dados de
+  // usuário" (probe: chave nova e chave controle -> mesmo 401; sem chave ->
+  // "Api Key Não Informada"). O caminho REST api.sieg.com/api/v1/send-xml com
+  // JWT+OAuth (getAuthHeaders) esta comprovado em producao (baixar-xmls do
+  // poller + NFS-e DPS). Enviar pelo REST PRIMEIRO; classic fica como fallback
+  // apenas para erro de REDE (nunca apos erro de negocio, p/ nao duplicar chave).
   let resp;
+  let via = 'rest';
   try {
-    resp = await axios.post(url, { Xml: Buffer.from(xmlMin, 'utf-8').toString('base64') },
-      { timeout: 90000, validateStatus: function (s) { return s < 500; } });
-  } catch (err) {
-    console.error('[SIEG-API] Erro de conexao EnviarXml (transferencia):', err.message);
-    return { sucesso: false, httpStatus: err.response ? err.response.status : 500, xmlEnviado: xml,
-      resposta: err.response ? err.response.data : null, data: null,
-      erro: 'Falha de conexao com a SIEG (EnviarXml): ' + err.message, statusCode: null };
+    const headers = await getAuthHeaders();
+    console.log('[SIEG-API] Transferencia FLN chave ' + chave + ' -> api.sieg.com/api/v1/send-xml REST (' + xmlMin.length + ' chars)');
+    resp = await axios.post(SIEG_BASE + '/api/v1/send-xml',
+      { Xml: Buffer.from(xmlMin, 'utf-8').toString('base64') },
+      { headers, timeout: 90000, validateStatus: function (s) { return s < 500; } });
+  } catch (errRest) {
+    console.error('[SIEG-API] Erro de conexao send-xml REST (transferencia):', errRest.message);
+    if (!apiKey) {
+      return { sucesso: false, httpStatus: 422, xmlEnviado: xml, resposta: null, data: null,
+        erro: 'REST send-xml indisponivel (' + errRest.message + ') e SIEG_API_KEY nao configurada para fallback classic', statusCode: 422 };
+    }
+    via = 'classic';
+    const url = 'https://up.sieg.com/EnviarXml?api_key=' + encodeURIComponent(apiKey);
+    console.log('[SIEG-API] Transferencia FLN chave ' + chave + ' -> up.sieg.com/EnviarXml fallback (' + xmlMin.length + ' chars)');
+    try {
+      resp = await axios.post(url, { Xml: Buffer.from(xmlMin, 'utf-8').toString('base64') },
+        { timeout: 90000, validateStatus: function (s) { return s < 500; } });
+    } catch (err) {
+      console.error('[SIEG-API] Erro de conexao EnviarXml (transferencia):', err.message);
+      return { sucesso: false, httpStatus: err.response ? err.response.status : 500, xmlEnviado: xml,
+        resposta: err.response ? err.response.data : null, data: null,
+        erro: 'Falha de conexao com a SIEG (REST: ' + errRest.message + ' | classic EnviarXml: ' + err.message + ')', statusCode: null };
+    }
   }
   const result = resp.data;
   const txt = typeof result === 'string' ? result : JSON.stringify(result || {});
-  console.log('[SIEG-API] Resposta EnviarXml (transferencia) HTTP ' + resp.status + ': ' + txt.slice(0, 400));
+  console.log('[SIEG-API] Resposta ' + (via === 'rest' ? 'send-xml REST' : 'EnviarXml classic') + ' (transferencia) HTTP ' + resp.status + ': ' + txt.slice(0, 400));
   const importOk = resp.status === 200 && (
     txt.toLowerCase().indexOf('sucesso') >= 0 ||
     (result && (result.IsSuccess === true || result.Status === 200 || result.status === 200)));
