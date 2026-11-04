@@ -320,6 +320,48 @@ async function emitirNFSe(dadosOdoo) {
 }
 
 /**
+ * AJL 04/11/2026 — REMESSA DESTINADA A ARMAZENAGEM (CFOP 5905/6905):
+ * DANFE com PESO BRUTO/LIQUIDO. O XML fiscal autorizado sai SEM <vol>
+ * (builder: modFrete 9 => sem volumes, regra 845). A injecao abaixo vale
+ * SOMENTE para o PDF de impressao — mesmo padrao da remonta manual da
+ * NF 73487 (download/DANFE_NFe_00073487_com_peso_liquido.pdf); o XML fiscal
+ * anexado na fatura permanece intocado. Peso = soma(qCom): TO x1000, KG x1.
+ * Unidade diferente de TO/KG ou <vol> ja presente => nao injeta (nada inventado).
+ */
+function injetarVolArmazenagemPrint(xml) {
+  try {
+    if (!xml || /<vol>/.test(xml)) return xml;
+    var natOp = (String(xml).match(/<natOp>([^<]*)<\/natOp>/) || [])[1] || '';
+    if (!/armazenagem/i.test(natOp)) return xml;
+    var transpPadrao = '<transp><modFrete>9</modFrete></transp>';
+    if (xml.indexOf(transpPadrao) === -1) return xml;
+    var dets = String(xml).match(/<det nItem="\d+">[\s\S]*?<\/det>/g) || [];
+    if (!dets.length) return xml;
+    var peso = 0;
+    for (var i = 0; i < dets.length; i++) {
+      var q = parseFloat((dets[i].match(/<qCom>([^<]*)<\/qCom>/) || [])[1] || '0');
+      var u = ((dets[i].match(/<uCom>([^<]*)<\/uCom>/) || [])[1] || '').toUpperCase();
+      if (!(q > 0)) return xml;
+      if (u === 'TO') peso += q * 1000;
+      else if (u === 'KG') peso += q;
+      else return xml;
+    }
+    if (!(peso > 0)) return xml;
+    var sNum = peso.toFixed(3).split('.');
+    var ip = sNum[0], dp = sNum[1] || '000';
+    var out = '';
+    while (ip.length > 3) { out = '.' + ip.slice(-3) + out; ip = ip.slice(0, -3); }
+    var sPeso = ip + out + ',' + dp; // pt-BR '2.920,000' (igual remonta 73487)
+    console.log('[DANFE] [ARMAZENAGEM] <vol> injetado no XML de impressao: pesoL/pesoB=' + sPeso + ' kg (XML fiscal intocado)');
+    return xml.replace(transpPadrao,
+      '<transp><modFrete>9</modFrete><vol><pesoL>' + sPeso + '</pesoL><pesoB>' + sPeso + '</pesoB></vol></transp>');
+  } catch (eVol) {
+    console.warn('[DANFE] [ARMAZENAGEM] Falha ao injetar vol (PDF segue sem peso): ' + eVol.message);
+    return xml;
+  }
+}
+
+/**
  * DANFE (PDF) — local por padrao; SIEG apenas se NFE_DANFE_PROVIDER=sieg
  * @param {string} xmlAutorizado XML nfeProc autorizado
  * @param {Object} [opts] Opcoes adicionais para o DANFE
@@ -376,7 +418,7 @@ async function emitirNota(dadosOdoo) {
       }
       resultado.pdfBase64 = tipo === 'nfse'
         ? await gerarDanfse(xmlAutorizado)
-        : await gerarDanfe(xmlAutorizado, {
+        : await gerarDanfe(injetarVolArmazenagemPrint(xmlAutorizado), {
             saleOrderNumber: (dadosOdoo.order && dadosOdoo.order.sale_order_number) || '',
             boletoData: dadosOdoo.boletoData || [],
           });
@@ -401,4 +443,5 @@ module.exports = {
   gerarDanfe,
   gerarDanfse,
   emitirNota,
+  injetarVolArmazenagemPrint,
 };
