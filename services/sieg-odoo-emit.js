@@ -1349,7 +1349,11 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       // AJL 21/10/2026: natOp pelo TIPO DE OPERACAO do Odoo; transferência
       // sem tipo = nomenclatura oficial do CFOP 6152 (igual ao XML modelo
       // SIEG SC 422609...562740: 'Transferencia de mercadoria adquirida/recebida de').
-      natOp: opTypeName || (isTransferencia ? 'Transferencia de mercadoria adquirida/recebida de' : 'Venda de Mercadoria'),
+      // AJL 04/11 (noite): transferencia SEMPRE com a natOp do modelo autorizado
+      // SIEG SC 422609...562740 ('Transferencia de mercadoria adquirida/recebida
+      // de') — o nome do tipo de operacao ('Transferência de produtos') NAO vai
+      // mais na natOp (padrao do modelo).
+      natOp: isTransferencia ? 'Transferencia de mercadoria adquirida/recebida de' : (opTypeName || 'Venda de Mercadoria'),
       mod: tipo === 'nfe' ? '55' : '01',
       // AJL 27/10/2026: transporte da NF — modFrete/transporta/veicTransp/volumes
       // lidos da fatura (3d). Fatura sem frete/transportadora = 9/sem transporta
@@ -1373,6 +1377,25 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     emitData.config.indIntermed = '0';
     // NFs referenciadas da fatura (1c-4) -> <NFref><refNFe> no <ide>
     emitData.config.nfrefChaves = nfrefChavesFatura;
+    // AJL 04/11 (noite) — infCpl PADRAO da transferencia (igual ao modelo autorizado
+    // SIEG SC 422609...562740):
+    //   Rep: {REP}- ({cliente} Pedido:{pedido} F.PGTO: {FORMA} {forma}
+    // + texto livre OPCIONAL do financeiro (x_studio_nfs_referenciadas sem as
+    //   chaves de 44 digitos — as chaves viram <NFref><refNFe> no <ide>).
+    var transfRep = String(partner.cnpj_cpf || '').replace(/\D/g, '') === '22603750000190'
+      ? 'AJL CURITIBA'
+      : String(partner.xNome || partner.name || '').toUpperCase().substring(0, 20);
+    var transfCliente = String(partner.xNome || partner.name || '').toUpperCase().substring(0, 40);
+    var transfPedido = saleOrderNumber || move.invoice_origin || '';
+    var transfForma = String(formaPagamento || '').trim();
+    var transfRefExtra = String(nfrefChavesFatura || '').replace(/\d{44}/g, ' ')
+      .replace(/[,;]/g, ' ').replace(/\s+/g, ' ').trim();
+    emitData.order.infCpl = 'Rep: ' + transfRep + '- (' + transfCliente +
+      ' Pedido:' + (transfPedido || '-') +
+      ' F.PGTO: ' + (transfForma ? transfForma.toUpperCase() : 'SEM PAGAMENTO') +
+      (transfForma ? ' ' + transfForma : '') +
+      (transfRefExtra ? ' ' + transfRefExtra : '');
+    console.log('[SIEG-EMIT] infCpl transferencia (padrao modelo): ' + emitData.order.infCpl);
     // Emitente FLN (22603750000514): XML vai para a SIEG (EnviarXml) — a SIEG
     // assina com o certificado A1 da filial que esta no cofre e autoriza.
     // Matriz segue SEFAZ-direta como sempre (intocada).
@@ -1694,10 +1717,24 @@ async function readCompany(client, db, uid, pwd, companyId) {
   var stateCode = '', stateIbge = '';
   var stateId = tupId(c.state_id || p.state_id);
   if (stateId) {
-    try {
-      var sts = await executeKw(client, db, uid, pwd, 'res.country.state', 'read', [[stateId], ['code', 'ibge_code', 'x_ibge_code']]);
-      if (sts && sts[0]) { stateCode = sts[0].code || ''; stateIbge = sts[0].x_ibge_code || sts[0].ibge_code || ''; }
-    } catch (e) {}
+    // AJL 04/11 (noite) FIX: o Odoo 19 SaaS NAO tem ibge_code em res.country.state
+    // (so x_ibge_code) — a leitura com os 3 campos falhava e o catch silencioso
+    // deixava stateCode='' -> default 'PR' -> cUF 41 / UF PR / idDest 1 / CFOP 5152
+    // na filial Florianópolis (a Matriz "funcionava" por sorte do default PR).
+    // Agora: tenta com x_ibge_code; se falhar, tenta so 'code' (sempre existe).
+    var stateFieldsTentativas = [['code', 'x_ibge_code'], ['code']];
+    for (var stT = 0; stT < stateFieldsTentativas.length; stT++) {
+      try {
+        var sts = await executeKw(client, db, uid, pwd, 'res.country.state', 'read', [[stateId], stateFieldsTentativas[stT]]);
+        if (sts && sts[0] && sts[0].code) {
+          stateCode = sts[0].code || '';
+          stateIbge = sts[0].x_ibge_code || sts[0].ibge_code || '';
+          if (stT > 0) console.warn('[SIEG-EMIT] state lido sem x_ibge_code (fallback ' + stT + '): ' + stateCode);
+          break;
+        }
+      } catch (eSt) { /* tenta a proxima combinacao de campos */ }
+    }
+    if (!stateCode) console.error('[SIEG-EMIT] UF do emitente NAO lida (state_id=' + stateId + ') — cUF pode sair errado!');
   }
 
   var cityIbge = '';

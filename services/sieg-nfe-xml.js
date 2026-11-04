@@ -851,7 +851,9 @@ ${xmlEndereco(partner, 'enderDest')}
     infCplText = 'Desconto: R$ ' + num(descVal.toFixed(2)) + '. ' + infCplText;
   }
   // Incluir alíquota ICMS quando houver
-  if (order.icms_aliquota && infCplText.indexOf('ICMS') === -1) {
+  // AJL 04/11 (noite): quando a fatura traz infCpl proprio (transferencia — padrao
+  // do modelo SIEG SC 422609...562740), NAO prefixar com 'ICMS x%' (o modelo nao tem).
+  if (order.icms_aliquota && !order.infCpl && infCplText.indexOf('ICMS') === -1) {
     infCplText = 'ICMS ' + order.icms_aliquota + '%. ' + infCplText;
   }
   // Incluir numero do pedido de venda (sale order origin)

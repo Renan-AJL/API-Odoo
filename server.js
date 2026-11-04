@@ -88,7 +88,7 @@ app.get('/', (req, res) => res.redirect('/admin'));
 // AJL 04/11/2026: JSON de versao acessivel (o GET / redireciona ao painel e a
 // rota JSON da raiz era codigo morto — travava a conferencia de deploy).
 app.get('/version', (req, res) => {
-  res.json({ service: 'Odoo Middleware Unificado', version: '1.2.11-sieg-rest-emit', status: 'online' });
+  res.json({ service: 'Odoo Middleware Unificado', version: '1.2.12-transfer-padrao', status: 'online' });
 });
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/cnpj', cnpjRoutes);
@@ -112,7 +112,7 @@ app.use('/callback/sieg', siegRoutes);
 app.get('/', (req, res) => {
   res.json({
     service: 'Odoo Middleware Unificado',
-    version: '1.2.11-sieg-rest-emit',
+    version: '1.2.12-transfer-padrao',
     empresa: config.empresa.nome,
     status: 'online',
     odoo_push: config.odoo.enabled ? 'ATIVO' : 'DESATIVADO',
