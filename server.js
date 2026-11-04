@@ -85,6 +85,11 @@ const fabricacaoRoutes  = require('./routes/fabricacao');
 
 app.use('/admin', adminRoutes);
 app.get('/', (req, res) => res.redirect('/admin'));
+// AJL 04/11/2026: JSON de versao acessivel (o GET / redireciona ao painel e a
+// rota JSON da raiz era codigo morto — travava a conferencia de deploy).
+app.get('/version', (req, res) => {
+  res.json({ service: 'Odoo Middleware Unificado', version: '1.2.9-transferencia-fln', status: 'online' });
+});
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/cnpj', cnpjRoutes);
 app.use('/api/v1/itau', itauApiRoutes);
