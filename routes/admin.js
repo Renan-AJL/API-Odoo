@@ -306,21 +306,30 @@ router.get('/api/sieg/xml/:chave', auth, async (req, res) => {
     var dfDate = new Date(parseInt(ano), parseInt(mes), 0);
     var df   = ano + '-' + mes + '-' + String(dfDate.getDate()).padStart(2,'0');
     console.log('[ADMIN] xml/chave fallback SIEG — chave:', chave.slice(0,10)+'...', 'período:', di, '-', df);
-    var body = { TipoXml: tipoXml, Take: 500, Skip: 0,
-      DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
-    };
-    var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
-      headers, timeout: 30000, responseType: 'arraybuffer',
-    }), 35000);
-    var zip     = new AdmZip(resp.data);
-    var entries = zip.getEntries();
+    // AJL 05/11 (v1.2.20) — SIEG limitou Take <= 50: paginacao Skip (max 600 docs)
     var found   = null;
-    for (var entry of entries) {
-      if (entry.isDirectory) continue;
-      var xmlStr = zip.readAsText(entry);
-      var km = xmlStr.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
-      if (km) cacheSet(km[1], xmlStr);
-      if (xmlStr.indexOf(chave) !== -1) found = xmlStr;
+    for (var pgX = 0; pgX < 12 && !found; pgX++) {
+      var body = { TipoXml: tipoXml, Take: 50, Skip: pgX * 50,
+        DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
+      };
+      var resp;
+      try {
+        resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+          headers, timeout: 30000, responseType: 'arraybuffer', validateStatus: function (s) { return s < 500; },
+        }), 35000);
+      } catch (ePgX) { break; }
+      if (resp.status === 404) break;
+      if (resp.status !== 200) break;
+      var zip     = new AdmZip(resp.data);
+      var entries = zip.getEntries();
+      if (!entries.length) break;
+      for (var entry of entries) {
+        if (entry.isDirectory) continue;
+        var xmlStr = zip.readAsText(entry);
+        var km = xmlStr.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
+        if (km) cacheSet(km[1], xmlStr);
+        if (xmlStr.indexOf(chave) !== -1) found = xmlStr;
+      }
     }
     if (!found) return res.status(404).json({ erro: 'XML não encontrado no cofre SIEG para esta chave' });
     res.setHeader('Content-Type', 'application/xml; charset=utf-8');
@@ -354,17 +363,27 @@ router.get('/api/sieg/pdf/:chave', auth, async (req, res) => {
       var dfD  = new Date(parseInt(ano), parseInt(mes), 0);
       var df   = ano + '-' + mes + '-' + String(dfD.getDate()).padStart(2,'0');
       console.log('[ADMIN] pdf fallback SIEG — chave:', chave.slice(0,10)+'...', 'período:', di, '-', df);
-      var zResp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', {
-        TipoXml: tipoXml, Take: 500, Skip: 0,
-        DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
-      }, { headers, timeout: 30000, responseType: 'arraybuffer' }), 35000);
-      var zip = new AdmZip(zResp.data);
-      for (var entry of zip.getEntries()) {
-        if (entry.isDirectory) continue;
-        var xs = zip.readAsText(entry);
-        var km = xs.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
-        if (km) cacheSet(km[1], xs);
-        if (xs.indexOf(chave) !== -1) xmlStr = xs;
+      // AJL 05/11 (v1.2.20) — Take <= 50 + paginacao Skip (max 600 docs)
+      for (var pgY = 0; pgY < 12 && !xmlStr; pgY++) {
+        var zResp;
+        try {
+          zResp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', {
+            TipoXml: tipoXml, Take: 50, Skip: pgY * 50,
+            DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
+          }, { headers, timeout: 30000, responseType: 'arraybuffer', validateStatus: function (s) { return s < 500; } }), 35000);
+        } catch (ePgY) { break; }
+        if (zResp.status === 404) break;
+        if (zResp.status !== 200) break;
+        var zip = new AdmZip(zResp.data);
+        var zEntries = zip.getEntries();
+        if (!zEntries.length) break;
+        for (var entry of zEntries) {
+          if (entry.isDirectory) continue;
+          var xs = zip.readAsText(entry);
+          var km = xs.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
+          if (km) cacheSet(km[1], xs);
+          if (xs.indexOf(chave) !== -1) xmlStr = xs;
+        }
       }
     }
 
@@ -467,17 +486,27 @@ router.post('/api/sieg/pdf-zip', auth, async (req, res) => {
           var di   = ano + '-' + mes + '-01';
           var dfD  = new Date(parseInt(ano), parseInt(mes), 0);
           var df   = ano + '-' + mes + '-' + String(dfD.getDate()).padStart(2,'0');
-          var zResp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', {
-            TipoXml: tipoXml, Take: 500, Skip: 0,
-            DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
-          }, { headers, timeout: 30000, responseType: 'arraybuffer' }), 35000);
-          var tmpZip = new AdmZip(zResp.data);
-          for (var entry of tmpZip.getEntries()) {
-            if (entry.isDirectory) continue;
-            var xs = tmpZip.readAsText(entry);
-            var km = xs.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
-            if (km) cacheSet(km[1], xs);
-            if (xs.indexOf(chave) !== -1) xmlStr = xs;
+          var zResp = null;
+          // AJL 05/11 (v1.2.20) — Take <= 50 + paginacao Skip (max 600 docs)
+          for (var pgZ = 0; pgZ < 12 && !xmlStr; pgZ++) {
+            try {
+              zResp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', {
+                TipoXml: tipoXml, Take: 50, Skip: pgZ * 50,
+                DataEmissaoInicio: di + 'T00:00:00Z', DataEmissaoFim: df + 'T23:59:59Z',
+              }, { headers, timeout: 30000, responseType: 'arraybuffer', validateStatus: function (s) { return s < 500; } }), 35000);
+            } catch (ePgZ) { break; }
+            if (!zResp || zResp.status === 404) break;
+            if (zResp.status !== 200) break;
+            var tmpZip = new AdmZip(zResp.data);
+            var tEntries = tmpZip.getEntries();
+            if (!tEntries.length) break;
+            for (var entry of tEntries) {
+              if (entry.isDirectory) continue;
+              var xs = tmpZip.readAsText(entry);
+              var km = xs.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
+              if (km) cacheSet(km[1], xs);
+              if (xs.indexOf(chave) !== -1) xmlStr = xs;
+            }
           }
         }
         if (!xmlStr) { erros.push(chave.slice(0,10)+'... (XML não encontrado)'); continue; }
@@ -515,18 +544,37 @@ router.get('/api/sieg/download-zip', auth, async (req, res) => {
     var df = dataFim    || hoje.toISOString().slice(0,10);
     var body = {
       TipoXml: parseInt(tipoXml) || 1,
-      Take: 200, Skip: 0,
+      Take: 50, Skip: 0,
       DataEmissaoInicio: di + 'T00:00:00Z',
       DataEmissaoFim:    df + 'T23:59:59Z',
     };
+    // AJL 05/11 (v1.2.20) — Take <= 50: agrega ate 12 paginas no zip de saida
     var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
       headers, timeout: 30000, responseType: 'arraybuffer',
     }), 35000);
+    var saida = new AdmZip(resp.data);
+    for (var pgW = 1; pgW < 12; pgW++) {
+      var rW;
+      try {
+        rW = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', Object.assign({}, body, { Skip: pgW * 50 }), {
+          headers, timeout: 30000, responseType: 'arraybuffer', validateStatus: function (s) { return s < 500; },
+        }), 35000);
+      } catch (eW) { break; }
+      if (rW.status !== 200) break;
+      var zW = new AdmZip(rW.data);
+      var eW2 = zW.getEntries();
+      if (!eW2.length) break;
+      for (var eW3 of eW2) {
+        if (eW3.isDirectory) continue;
+        try { saida.addFile(eW3.entryName, zW.readFile(eW3)); } catch (eW4) {}
+      }
+      if (eW2.length < 50) break;
+    }
     var tipoLabel = { 1:'recebidas', 2:'emitidas-cofre', 3:'cte', 4:'nfse', 6:'nfce' };
     var nome = 'sieg-nfe-' + (tipoLabel[parseInt(tipoXml)||1] || 'docs') + '-' + di + '-a-' + df + '.zip';
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="' + nome + '"');
-    res.send(Buffer.from(resp.data));
+    res.send(saida.toBuffer());
   } catch(e) {
     res.status(500).json({ erro: e.message });
   }
@@ -545,7 +593,7 @@ async function siegBaixarPeriodo(tipoXml, di, df) {
   var { getAuthHeaders } = require('../services/sieg-auth');
   var headers = await withTimeout(getAuthHeaders(), 15000);
   var mapa = new Map();
-  var take = 300, skip = 0;
+  var take = 50, skip = 0;
   for (var rodada = 0; rodada < 20; rodada++) {
     var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', {
       TipoXml: tipoXml, Take: take, Skip: skip,

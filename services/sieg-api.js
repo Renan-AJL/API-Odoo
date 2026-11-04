@@ -256,43 +256,62 @@ async function enviarNFeSiegTransferencia(dadosOdoo) {
  * AJL 04/11/2026 — Baixa XMLs do cofre SIEG (mesmo endpoint usado pelo Painel
  * admin: api.sieg.com/api/v1/baixar-xmls, JWT+OAuth). Retorna itens parseados
  * (chave/cStat/nProt/xMotivo/xml) do periodo [hoje-dias, hoje].
+ * AJL 05/11/2026 (v1.2.20) — SIEG limitou Take <= 50 ("take invalido. Informar
+ * valor menor ou igual a 50"): paginacao Skip em paginas de 50 ate esgotar o
+ * periodo ou atingir o teto (take arredondado p/ cima em paginas de 50, max
+ * 600 docs — 12 paginas). Pagina 404 = fim da paginacao (nao e erro).
  */
 async function baixarXmlsSieg(dias, take) {
   const headers = await getAuthHeaders();
   const ini = new Date(Date.now() - (parseInt(dias, 10) || 4) * 86400000);
-  const body = {
-    TipoXml: 1, Take: parseInt(take, 10) || 300, Skip: 0,
-    DataEmissaoInicio: ini.toISOString(), DataEmissaoFim: new Date().toISOString(),
-  };
-  const resp = await axios.post('https://api.sieg.com/api/v1/baixar-xmls', body,
-    { headers, timeout: 60000, responseType: 'arraybuffer', validateStatus: function (s) { return s < 500; } });
-  if (resp.status !== 200) {
-    return { sucesso: false, httpStatus: resp.status, itens: [], erro: 'HTTP ' + resp.status };
-  }
+  const PAGINA = 50;
+  const teto = Math.max(PAGINA, Math.min(parseInt(take, 10) || 300, 600));
+  const maxPaginas = Math.ceil(teto / PAGINA);
   const itens = [];
-  try {
-    const zip = new AdmZip(resp.data);
-    zip.getEntries().forEach(function (entry) {
-      if (entry.isDirectory) return;
-      let xmlStr = '';
-      try { xmlStr = zip.readAsText(entry); } catch (e) { return; }
-      const m = xmlStr.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
-      const cStatM = xmlStr.match(/<cStat>(\d+)<\/cStat>/);
-      const nProtM = xmlStr.match(/<nProt>([^<]+)<\/nProt>/);
-      const xMotM = xmlStr.match(/<xMotivo>([^<]*)<\/xMotivo>/);
-      itens.push({
-        chave: m ? m[1] : '',
-        cStat: cStatM ? cStatM[1] : '',
-        nProt: nProtM ? nProtM[1] : '',
-        xMotivo: xMotM ? xMotM[1] : '',
-        xml: xmlStr,
+  let httpStatus = 0;
+  for (let pag = 0; pag < maxPaginas; pag++) {
+    const body = {
+      TipoXml: 1, Take: PAGINA, Skip: pag * PAGINA,
+      DataEmissaoInicio: ini.toISOString(), DataEmissaoFim: new Date().toISOString(),
+    };
+    const resp = await axios.post('https://api.sieg.com/api/v1/baixar-xmls', body,
+      { headers, timeout: 60000, responseType: 'arraybuffer', validateStatus: function (s) { return s < 500; } });
+    httpStatus = resp.status;
+    if (resp.status !== 200) {
+      // 404 = "Nenhum arquivo XML localizado" nesta pagina -> fim da paginacao.
+      if (resp.status === 404 && itens.length) break;
+      if (resp.status === 404) break;
+      return { sucesso: false, httpStatus: resp.status, itens: [], erro: 'HTTP ' + resp.status };
+    }
+    const nAntes = itens.length;
+    try {
+      const zip = new AdmZip(resp.data);
+      zip.getEntries().forEach(function (entry) {
+        if (entry.isDirectory) return;
+        let xmlStr = '';
+        try { xmlStr = zip.readAsText(entry); } catch (e) { return; }
+        const m = xmlStr.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
+        const chave = m ? m[1] : '';
+        if (chave && itens.some(function (it) { return it.chave === chave; })) return;
+        const cStatM = xmlStr.match(/<cStat>(\d+)<\/cStat>/);
+        const nProtM = xmlStr.match(/<nProt>([^<]+)<\/nProt>/);
+        const xMotM = xmlStr.match(/<xMotivo>([^<]*)<\/xMotivo>/);
+        itens.push({
+          chave: chave,
+          cStat: cStatM ? cStatM[1] : '',
+          nProt: nProtM ? nProtM[1] : '',
+          xMotivo: xMotM ? xMotM[1] : '',
+          xml: xmlStr,
+        });
       });
-    });
-  } catch (eZip) {
-    return { sucesso: false, httpStatus: resp.status, itens: [], erro: 'ZIP invalido: ' + eZip.message };
+    } catch (eZip) {
+      return { sucesso: false, httpStatus: resp.status, itens: [], erro: 'ZIP invalido: ' + eZip.message };
+    }
+    // Pagina veio vazia (ou so duplicados) -> esgotou o periodo.
+    if (itens.length === nAntes) break;
   }
-  console.log('[SIEG-API] baixar-xmls: ' + itens.length + ' documento(s) no periodo');
-  return { sucesso: true, httpStatus: resp.status, itens: itens };
+  console.log('[SIEG-API] baixar-xmls: ' + itens.length + ' documento(s) no periodo (' + maxPaginas + ' paginas max)');
+  return { sucesso: true, httpStatus: httpStatus, itens: itens };
 }
 
 async function enviarNFe(dadosOdoo) {

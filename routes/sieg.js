@@ -93,36 +93,50 @@ router.get('/cofre', apiKeyAuth, async (req, res) => {
     const hoje = new Date();
     const ini = String(req.query.dataInicio || new Date(hoje.getTime() - 90 * 86400000).toISOString().slice(0, 10));
     const fim = String(req.query.dataFim || hoje.toISOString().slice(0, 10));
-    const body = {
-      TipoXml: parseInt(req.query.tipoXml, 10) || 1,
-      Take: parseInt(req.query.take, 10) || 200,
-      Skip: parseInt(req.query.skip, 10) || 0,
-      DataEmissaoInicio: ini + 'T00:00:00Z',
-      DataEmissaoFim: fim + 'T23:59:59Z',
-    };
-    if (req.query.cnpjEmitente) body.CNPJemit = String(req.query.cnpjEmitente).replace(/\D/g, '');
-    if (req.query.cnpjDestinatario) body.CNPJdest = String(req.query.cnpjDestinatario).replace(/\D/g, '');
+    // AJL 05/11 (v1.2.20) — SIEG limitou Take <= 50: paginacao Skip (max 600 docs).
+    const takeMax = Math.min(parseInt(req.query.take, 10) || 50, 600);
+    const skipIni = parseInt(req.query.skip, 10) || 0;
+    const paginas = Math.ceil((skipIni + takeMax) / 50);
+    const docs = [];
+    let ultimoStatus = 0;
+    for (let pg = 0; pg < paginas; pg++) {
+      const body = {
+        TipoXml: parseInt(req.query.tipoXml, 10) || 1,
+        Take: 50, Skip: skipIni + pg * 50,
+        DataEmissaoInicio: ini + 'T00:00:00Z',
+        DataEmissaoFim: fim + 'T23:59:59Z',
+      };
+      if (req.query.cnpjEmitente) body.CNPJemit = String(req.query.cnpjEmitente).replace(/\D/g, '');
+      if (req.query.cnpjDestinatario) body.CNPJdest = String(req.query.cnpjDestinatario).replace(/\D/g, '');
 
-    console.log('[SIEG-COFRE] body:', JSON.stringify(body));
-    const resp = await axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
-      headers, timeout: 60000, responseType: 'arraybuffer',
-      validateStatus: s => s < 500,
-    });
-    if (resp.status !== 200) {
-      const txt = Buffer.isBuffer(resp.data) ? resp.data.toString('utf-8').slice(0, 300) : String(resp.data).slice(0, 300);
-      return res.json({ sucesso: false, httpStatus: resp.status, erro: 'SIEG HTTP ' + resp.status + ': ' + txt, registros: [] });
+      console.log('[SIEG-COFRE] body:', JSON.stringify(body));
+      const resp = await axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+        headers, timeout: 60000, responseType: 'arraybuffer',
+        validateStatus: s => s < 500,
+      });
+      ultimoStatus = resp.status;
+      if (resp.status === 404) break;
+      if (resp.status !== 200) {
+        const txt = Buffer.isBuffer(resp.data) ? resp.data.toString('utf-8').slice(0, 300) : String(resp.data).slice(0, 300);
+        return res.json({ sucesso: false, httpStatus: resp.status, erro: 'SIEG HTTP ' + resp.status + ': ' + txt, registros: docs });
+      }
+      const zip = new AdmZip(resp.data);
+      const entries = zip.getEntries();
+      if (!entries.length) break;
+      for (const entry of entries) {
+        if (entry.isDirectory) continue;
+        let xmlStr = '';
+        try { xmlStr = zip.readAsText(entry); } catch (e) { continue; }
+        docs.push(xmlStr);
+      }
+      if (entries.length < 50) break;
     }
-
-    const zip = new AdmZip(resp.data);
     const registros = [];
     const vistos = {};
-    zip.getEntries().forEach(function (entry) {
-      if (entry.isDirectory) return;
-      let xmlStr = '';
-      try { xmlStr = zip.readAsText(entry); } catch (e) { return; }
+    for (const xmlStr of docs) {
       const chaveM = xmlStr.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i) || xmlStr.match(/<chNFe>(\d{44})</);
       const chave = chaveM ? chaveM[1] : '';
-      if (!chave || vistos[chave]) return;
+      if (!chave || vistos[chave]) continue;
       vistos[chave] = true;
       function tag(nome, de) {
         const s = de || xmlStr;
@@ -147,9 +161,9 @@ router.get('/cofre', apiKeyAuth, async (req, res) => {
         nProt: tag('nProt'),
         xMotivo: tag('xMotivo'),
       });
-    });
+    }
     console.log('[SIEG-COFRE] ' + registros.length + ' documento(s)');
-    return res.json({ sucesso: true, total: registros.length, filtros: body, registros });
+    return res.json({ sucesso: true, total: registros.length, filtros: { ini, fim, takeMax, skipIni }, registros });
   } catch (err) {
     console.error('[SIEG-COFRE] erro:', err.message);
     return res.status(500).json({ sucesso: false, erro: err.message, registros: [] });

@@ -832,7 +832,9 @@ router.post('/nfe-remontar', apiKeyAuth, async function(req, res) {
       }
     } catch (eB) {}
 
-    // 5. Buscar XML autorizado no SIEG (cofre)
+    // 5. Buscar XML autorizado no SIEG (cofre) — AJL 05/11 (v1.2.20): SIEG
+    // limitou Take <= 50 ("take invalido") -> paginacao Skip de 50 em 50 ate
+    // achar a chave (max 600 docs). Pagina 404 = fim.
     var axios = require('axios');
     var AdmZip = require('adm-zip');
     var { getAuthHeaders } = require('../services/sieg-auth');
@@ -841,21 +843,34 @@ router.post('/nfe-remontar', apiKeyAuth, async function(req, res) {
     var ano = '20' + aamm.slice(0, 2);
     var mes = aamm.slice(2, 4);
     var dfDate = new Date(parseInt(ano), parseInt(mes), 0);
-    var body = {
-      TipoXml: 1, Take: 500, Skip: 0,
-      DataEmissaoInicio: ano + '-' + mes + '-01T00:00:00Z',
-      DataEmissaoFim: ano + '-' + mes + '-' + String(dfDate.getDate()).padStart(2, '0') + 'T23:59:59Z',
-    };
-    var resp = await axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
-      headers: headers, timeout: 45000, responseType: 'arraybuffer',
-    });
-    var zip = new AdmZip(resp.data);
-    var entries = zip.getEntries();
     var xmlAutorizado = '';
-    for (var ei = 0; ei < entries.length; ei++) {
-      if (entries[ei].isDirectory) continue;
-      var xmlStr = zip.readAsText(entries[ei]);
-      if (xmlStr.indexOf(chave) !== -1) { xmlAutorizado = xmlStr; break; }
+    for (var pgBx = 0; pgBx < 12 && !xmlAutorizado; pgBx++) {
+      var body = {
+        TipoXml: 1, Take: 50, Skip: pgBx * 50,
+        DataEmissaoInicio: ano + '-' + mes + '-01T00:00:00Z',
+        DataEmissaoFim: ano + '-' + mes + '-' + String(dfDate.getDate()).padStart(2, '0') + 'T23:59:59Z',
+      };
+      var resp;
+      try {
+        resp = await axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+          headers: headers, timeout: 45000, responseType: 'arraybuffer',
+          validateStatus: function (s) { return s < 500; },
+        });
+      } catch (eBx) {
+        return res.status(502).json({ success: false, error: 'Falha consultando o cofre SIEG: ' + eBx.message });
+      }
+      if (resp.status === 404) break;
+      if (resp.status !== 200) {
+        var txtBx = Buffer.isBuffer(resp.data) ? resp.data.toString('utf-8').slice(0, 200) : String(resp.data).slice(0, 200);
+        return res.status(502).json({ success: false, error: 'Cofre SIEG HTTP ' + resp.status + ': ' + txtBx });
+      }
+      var zip = new AdmZip(resp.data);
+      var entries = zip.getEntries();
+      for (var ei = 0; ei < entries.length; ei++) {
+        if (entries[ei].isDirectory) continue;
+        var xmlStr = zip.readAsText(entries[ei]);
+        if (xmlStr.indexOf(chave) !== -1) { xmlAutorizado = xmlStr; break; }
+      }
     }
     if (!xmlAutorizado) {
       return res.status(404).json({ success: false, error: 'XML da chave ' + chave + ' nao encontrado no cofre SIEG (NF pode estar cancelada/inexistente)' });
