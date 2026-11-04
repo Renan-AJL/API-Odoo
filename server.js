@@ -107,7 +107,7 @@ app.use('/callback/sieg', siegRoutes);
 app.get('/', (req, res) => {
   res.json({
     service: 'Odoo Middleware Unificado',
-    version: '1.2.8-armazenagem',
+    version: '1.2.9-transferencia-fln',
     empresa: config.empresa.nome,
     status: 'online',
     odoo_push: config.odoo.enabled ? 'ATIVO' : 'DESATIVADO',
@@ -243,6 +243,17 @@ function runSiegPoll() {
   }).catch(function(err) {
     console.error('  [SIEG-POLL] Erro cancelamento:', err.message);
   });
+  // AJL 04/11/2026 — Transferência FLN: fecha as NFs importadas na SIEG
+  // (assina/autoriza lá; aqui consulta o cofre e grava chave/protocolo/status)
+  if (emit.verificarTransferenciasSieg) {
+    emit.verificarTransferenciasSieg().then(function(result) {
+      if (result && result.processed > 0) {
+        console.log('  [SIEG-POLL] [TRANSF-FLN] ' + result.processed + ' transferencia(s) fechada(s)');
+      }
+    }).catch(function(err) {
+      console.error('  [SIEG-POLL] Erro transferencia FLN:', err.message);
+    });
+  }
 }
 
 // ============================================================

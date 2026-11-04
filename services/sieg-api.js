@@ -16,6 +16,7 @@
  *   SIEG_IMPORT_XML    1 = apos autorizar, importa o nfeProc no cofre SIEG
  */
 const axios = require('axios');
+const AdmZip = require('adm-zip');
 const { getAuthHeaders } = require('./sieg-auth');
 const { gerarXmlNFe } = require('./sieg-nfe-xml');
 const { corrigirCmunNoXml } = require('./nfe-xml-sanitize');
@@ -149,7 +150,114 @@ async function enviarNFeViaSieg(dadosOdoo) {
   };
 }
 
+/**
+ * AJL 04/11/2026 — TRANSFERÊNCIA ENTRE FILIAIS (AJL Florianópolis -> AJL Curitiba
+ * Matriz, CFOP 6152). O certificado A1 da filial está no COFRE SIEG (só a Matriz
+ * tem .pfx local para SEFAZ-direta). O XML (NÃO assinado, montado com os dados
+ * do cadastro + NFref do modelo autorizado 422609...562740) vai para
+ * up.sieg.com/EnviarXml?api_key=... — a SIEG assina com o cert da filial,
+ * envia à SEFAZ e importa no cofre. A autorizacao é ASSÍNCRONA: a chave já é
+ * calculada aqui; o fechamento (chave/protocolo/cStat) acontece no poll
+ * verificarTransferenciasSieg (sieg-odoo-emit.js) consultando baixar-xmls.
+ * Matriz e demais emissoes NAO passam por aqui (config.viaSiegTransferencia).
+ */
+async function enviarNFeSiegTransferencia(dadosOdoo) {
+  const fixCmunTransf = corrigirCmunNoXml(gerarXmlNFe(dadosOdoo));
+  const xml = fixCmunTransf.xml;
+  if (fixCmunTransf.correcoes.length) {
+    console.log('[SIEG-API] cMun corrigido no XML pos-montagem (transferencia): ' + JSON.stringify(fixCmunTransf.correcoes));
+  }
+  const xmlMin = xml.replace(/>\s+</g, '><');
+  const chave = (xmlMin.match(/Id="NFe(\d{44})"/) || [])[1] || '';
+  if (!chave) {
+    return { sucesso: false, httpStatus: 422, xmlEnviado: xml, resposta: null, data: null,
+      erro: 'Chave de acesso nao calculada no XML da transferencia', statusCode: 422 };
+  }
+  const apiKey = process.env.SIEG_API_KEY || '';
+  if (!apiKey) {
+    return { sucesso: false, httpStatus: 422, xmlEnviado: xml, resposta: null, data: null,
+      erro: 'SIEG_API_KEY nao configurada no Render — obrigatoria para emitir a NF de transferencia da filial Florianópolis (cofre SIEG)', statusCode: 422 };
+  }
+  const url = 'https://up.sieg.com/EnviarXml?api_key=' + encodeURIComponent(apiKey);
+  console.log('[SIEG-API] Transferencia FLN chave ' + chave + ' -> up.sieg.com/EnviarXml (' + xmlMin.length + ' chars)');
+  let resp;
+  try {
+    resp = await axios.post(url, { Xml: Buffer.from(xmlMin, 'utf-8').toString('base64') },
+      { timeout: 90000, validateStatus: function (s) { return s < 500; } });
+  } catch (err) {
+    console.error('[SIEG-API] Erro de conexao EnviarXml (transferencia):', err.message);
+    return { sucesso: false, httpStatus: err.response ? err.response.status : 500, xmlEnviado: xml,
+      resposta: err.response ? err.response.data : null, data: null,
+      erro: 'Falha de conexao com a SIEG (EnviarXml): ' + err.message, statusCode: null };
+  }
+  const result = resp.data;
+  const txt = typeof result === 'string' ? result : JSON.stringify(result || {});
+  console.log('[SIEG-API] Resposta EnviarXml (transferencia) HTTP ' + resp.status + ': ' + txt.slice(0, 400));
+  const importOk = resp.status === 200 && (
+    txt.toLowerCase().indexOf('sucesso') >= 0 ||
+    (result && (result.IsSuccess === true || result.Status === 200 || result.status === 200)));
+  return {
+    sucesso: importOk,
+    aguardandoSieg: importOk,
+    chave: chave,
+    httpStatus: resp.status,
+    xmlEnviado: xml,
+    resposta: result,
+    data: null,
+    erro: importOk ? null : (typeof result === 'object' && result ?
+      (result.ErrorMessage || result.Message || result.Erro || txt.slice(0, 500)) : txt.slice(0, 500)) ||
+      'SIEG nao confirmou o import do XML da transferencia',
+    statusCode: importOk ? null : 'SIEG_IMPORT',
+  };
+}
+
+/**
+ * AJL 04/11/2026 — Baixa XMLs do cofre SIEG (mesmo endpoint usado pelo Painel
+ * admin: api.sieg.com/api/v1/baixar-xmls, JWT+OAuth). Retorna itens parseados
+ * (chave/cStat/nProt/xMotivo/xml) do periodo [hoje-dias, hoje].
+ */
+async function baixarXmlsSieg(dias, take) {
+  const headers = await getAuthHeaders();
+  const ini = new Date(Date.now() - (parseInt(dias, 10) || 4) * 86400000);
+  const body = {
+    TipoXml: 1, Take: parseInt(take, 10) || 300, Skip: 0,
+    DataEmissaoInicio: ini.toISOString(), DataEmissaoFim: new Date().toISOString(),
+  };
+  const resp = await axios.post('https://api.sieg.com/api/v1/baixar-xmls', body,
+    { headers, timeout: 60000, responseType: 'arraybuffer', validateStatus: function (s) { return s < 500; } });
+  if (resp.status !== 200) {
+    return { sucesso: false, httpStatus: resp.status, itens: [], erro: 'HTTP ' + resp.status };
+  }
+  const itens = [];
+  try {
+    const zip = new AdmZip(resp.data);
+    zip.getEntries().forEach(function (entry) {
+      if (entry.isDirectory) return;
+      let xmlStr = '';
+      try { xmlStr = zip.readAsText(entry); } catch (e) { return; }
+      const m = xmlStr.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i);
+      const cStatM = xmlStr.match(/<cStat>(\d+)<\/cStat>/);
+      const nProtM = xmlStr.match(/<nProt>([^<]+)<\/nProt>/);
+      const xMotM = xmlStr.match(/<xMotivo>([^<]*)<\/xMotivo>/);
+      itens.push({
+        chave: m ? m[1] : '',
+        cStat: cStatM ? cStatM[1] : '',
+        nProt: nProtM ? nProtM[1] : '',
+        xMotivo: xMotM ? xMotM[1] : '',
+        xml: xmlStr,
+      });
+    });
+  } catch (eZip) {
+    return { sucesso: false, httpStatus: resp.status, itens: [], erro: 'ZIP invalido: ' + eZip.message };
+  }
+  console.log('[SIEG-API] baixar-xmls: ' + itens.length + ' documento(s) no periodo');
+  return { sucesso: true, httpStatus: resp.status, itens: itens };
+}
+
 async function enviarNFe(dadosOdoo) {
+  if (dadosOdoo.config && dadosOdoo.config.viaSiegTransferencia) {
+    return enviarNFeSiegTransferencia(dadosOdoo);
+  }
   return modoEmissao() === 'sieg' ? enviarNFeViaSieg(dadosOdoo) : emitirNFePropria(dadosOdoo);
 }
 
@@ -266,6 +374,8 @@ module.exports = {
   enviarNFe,
   emitirNFSe,
   emitirNFePropria,
+  enviarNFeSiegTransferencia,
+  baixarXmlsSieg,
   importarXmlSieg,
   gerarDanfe,
   gerarDanfse,

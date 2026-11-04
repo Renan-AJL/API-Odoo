@@ -478,6 +478,25 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     console.log('[SIEG-EMIT] Journal read falhou (seguindo como venda): ' + eJ.message);
   }
 
+  // 1c-4. NFs REFERENCIADAS (AJL 04/11/2026 — Transferência entre lojas 6152):
+  // campo x_studio_nfs_referenciadas da FATURA (texto livre). O financeiro cola
+  // as chaves de 44 dígitos das NFs a referenciar:
+  //  - IDA (Floripa -> Matriz): NFs de venda a ordem entregues na Matriz
+  //    (fornecedor — CFOP 5122/6122/6123);
+  //  - RETORNO: a chave da NF de ida (6152).
+  // Vira <NFref><refNFe>...</refNFe></NFref> no <ide> (sieg-nfe-xml.js).
+  var nfrefChavesFatura = '';
+  try {
+    var mvRef = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], ['x_studio_nfs_referenciadas']]);
+    if (mvRef && mvRef[0] && mvRef[0].x_studio_nfs_referenciadas) {
+      nfrefChavesFatura = String(mvRef[0].x_studio_nfs_referenciadas);
+      var nRefs = (nfrefChavesFatura.match(/\d{44}/g) || []).length;
+      console.log('[SIEG-EMIT] NFs referenciadas na fatura: ' + nRefs + ' chave(s)');
+    }
+  } catch (eRef) {
+    console.log('[SIEG-EMIT] Campo x_studio_nfs_referenciadas nao disponivel (segue sem NFref): ' + eRef.message);
+  }
+
   // 1c-3. TIPO DE OPERACAO (l10n_br.operation.type) — AJL 21/10/2026
   // A NF deve sair com a NOMENCLATURA usada no Odoo (nome do tipo em pt_BR) e o
   // CFOP correto: transferencia -> 5152/6152; remessa industrializacao -> 5901/6901.
@@ -1250,6 +1269,24 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     pagInfo = { pagamentos: [{ tPag: '90', vPag: '0.00' }], duplicatas: [], formaLabel: '', boletoDetalhes: [] };
   }
 
+  // AJL 04/11/2026 — TRANSFERÊNCIA ENTRE LOJAS (igual ao XML modelo SIEG SC
+  // 422609...562740, cStat 100): detPag tPag 90 / vPag 0.00, SEM bloco cobr/dup,
+  // SEM boletos/PIX e SEM E+P.
+  if (isTransferencia) {
+    pagInfo = { pagamentos: [{ tPag: '90', vPag: '0.00' }], duplicatas: [], formaLabel: 'Transferencia entre lojas — sem pagamento (tPag 90)', boletoDetalhes: [] };
+    console.log('[SIEG-EMIT] Transferência: pagamento fixo tPag 90 (sem cobr/duplicatas/boletos)');
+  }
+
+  // AJL 04/11/2026 — guarda: transferência emitida pela FLN só vale para a
+  // Matriz (destinatario AJL Curitiba 22603750000190). Evita emitir uma NF de
+  // transferencia (CFOP 6152) para um cliente qualquer por engano.
+  if (isTransferencia && String(company.cnpj_cpf || '').replace(/\D/g, '') === '22603750000514') {
+    var cnpjDestTransf = String(partner.cnpj_cpf || partner.vat || '').replace(/\D/g, '');
+    if (cnpjDestTransf !== '22603750000190') {
+      throw new Error('NF de transferência da filial Florianópolis deve ter como destinatário a AJL Curitiba (CNPJ 22.603.750/0001-90). Destinatário atual: ' + (partner.name || partner.xNome || cnpjDestTransf || '?') + '. Corrija o cliente da fatura e reemita.');
+    }
+  }
+
   // Calcular Difal total para infCpl (Difal NAO soma no total — só informativo)
   var difalTotal = 0;
   for (var di = 0; di < linesData.length; di++) {
@@ -1309,7 +1346,10 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     config: {
       serie: serie,
       tpAmb: process.env.SIEG_TP_AMB || config.sieg.tpAmb || '2',
-      natOp: opTypeName || (isTransferencia ? 'Transferência de produtos' : 'Venda de Mercadoria'),
+      // AJL 21/10/2026: natOp pelo TIPO DE OPERACAO do Odoo; transferência
+      // sem tipo = nomenclatura oficial do CFOP 6152 (igual ao XML modelo
+      // SIEG SC 422609...562740: 'Transferencia de mercadoria adquirida/recebida de').
+      natOp: opTypeName || (isTransferencia ? 'Transferencia de mercadoria adquirida/recebida de' : 'Venda de Mercadoria'),
       mod: tipo === 'nfe' ? '55' : '01',
       // AJL 27/10/2026: transporte da NF — modFrete/transporta/veicTransp/volumes
       // lidos da fatura (3d). Fatura sem frete/transportadora = 9/sem transporta
@@ -1325,6 +1365,21 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   if (isArmazenagem) {
     // Modelo: <indPres>3</indPres> + <indIntermed>0</indIntermed> (obrigatorio p/ indPres 3)
     emitData.config.indPres = '3';
+  }
+  if (isTransferencia) {
+    // AJL 04/11/2026 — modelo autorizado SIEG SC (422609...562740, cStat 100):
+    // <indPres>0</indPres> + <indIntermed>0</indIntermed>.
+    emitData.config.indPres = '0';
+    emitData.config.indIntermed = '0';
+    // NFs referenciadas da fatura (1c-4) -> <NFref><refNFe> no <ide>
+    emitData.config.nfrefChaves = nfrefChavesFatura;
+    // Emitente FLN (22603750000514): XML vai para a SIEG (EnviarXml) — a SIEG
+    // assina com o certificado A1 da filial que esta no cofre e autoriza.
+    // Matriz segue SEFAZ-direta como sempre (intocada).
+    if (String(company.cnpj_cpf || '').replace(/\D/g, '') === '22603750000514') {
+      emitData.config.viaSiegTransferencia = true;
+      console.log('[SIEG-EMIT] Transferência FLN: XML sera assinado/autorizado pela SIEG (cert da filial no cofre)');
+    }
   }
   console.log('[SIEG-EMIT] Pagamento NF: ' + pagInfo.formaLabel + ' | tPag=' +
     (pagInfo.pagamentos[0] || {}).tPag + ' | indPag=' + (pagInfo.pagamentos[0] || {}).indPag +
@@ -1378,6 +1433,14 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     }
     console.log('[SIEG-EMIT] SIEG retornou - sucesso: ' + resultado.sucesso + (resultado.httpStatus ? ' (HTTP ' + resultado.httpStatus + ')' : ''));
 
+    // AJL 04/11/2026 — TRANSFERÊNCIA FLN via SIEG (assíncrono): a SIEG importou
+    // o XML (vai assinar com o cert da filial e autorizar). A chave já é nossa;
+    // a confirmacao (cStat 100/protocolo) chega pelo verificarTransferenciasSieg.
+    if (resultado && resultado.aguardandoSieg) {
+      info = { sucesso: true, aguardandoSieg: true, chave: resultado.chave || '', protocolo: '', cStat: '', motivo: 'XML de transferência importado na SIEG — aguardando autorizacao' };
+      break;
+    }
+
     // Se SIEG retornou erro (IsSuccess=false), extrair mensagem detalhada
     if (!resultado.sucesso && resultado.erro) {
       console.error('[SIEG-EMIT] SIEG rejeitou o XML: ' + resultado.erro);
@@ -1411,7 +1474,14 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
 
   // 11. Update account.move with results
   var updateVals = {};
-  if (info.sucesso) {
+  if (info.sucesso && info.aguardandoSieg) {
+    // AJL 04/11/2026 — TRANSFERÊNCIA FLN via SIEG: XML importado; a SIEG assina
+    // e autoriza, e o poll verificarTransferenciasSieg grava chave/protocolo/
+    // status. Aqui: 'processando' + chave (protegida do anti-fantasma).
+    updateVals.x_studio_nfe_status = 'processando';
+    if (info.chave) updateVals.x_studio_nfe_chave = info.chave;
+    console.log('[SIEG-EMIT] Transferência: XML na SIEG (chave ' + (info.chave || '?') + ') — aguardando autorizacao SEFAZ (poll SIEG)');
+  } else if (info.sucesso) {
     if (tipo === 'nfe') {
       updateVals.x_studio_nfe_status = 'autorizada';
       updateVals.x_studio_nfe_chave = info.chave;
@@ -1475,7 +1545,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   // boleto NAO afeta a NF; resultado/erro vira nota no chatter da fatura.
   // SO dispara quando a emissao veio do botao "Emitir NF e Boleto" (flag
   // consumida no inicio de processOne) — o fluxo comum de NF fica intacto.
-  if (info.sucesso && tipo === 'nfe' && autoBoletoArmado) {
+  if (info.sucesso && tipo === 'nfe' && autoBoletoArmado && !isTransferencia) {
     try {
       agendarBoletosAutomaticos({
         moveId: moveId,
@@ -3056,7 +3126,120 @@ async function solicitarEmissaoComBoletos(moveIds) {
   };
 }
 
+// ============================================================
+// AJL 04/11/2026 — TRANSFERÊNCIA FLN: fechamento assíncrono via SIEG
+// ============================================================
+// O XML da transferência foi importado na SIEG (up.sieg.com/EnviarXml) e a SIEG
+// assina/autoriza com o certificado A1 da filial (cofre). Esta funcao roda no
+// poll (runSiegPoll) e consulta o cofre SIEG (api.sieg.com/api/v1/baixar-xmls —
+// mesmo endpoint do Painel) para achar o nfeProc de cada fatura em
+// 'processando' cuja chave é do emitente FLN (CNPJ 22603750000514) e gravar:
+//   cStat 100         -> autorizada + protocolo + renomeio + contador da empresa
+//   rejeicao/denegada -> erro (motivo no chatter)
+//   ainda nao veio    -> segue 'processando' (timeout 24h -> erro no chatter)
+var _verifTransfBusy = false;
+async function verificarTransferenciasSieg() {
+  if (_verifTransfBusy) return { processed: 0, reason: 'busy' };
+  _verifTransfBusy = true;
+  try {
+    var odoo = config.odoo;
+    if (!odoo || !odoo.enabled || !odoo.url) return { processed: 0, reason: 'odoo_not_configured' };
+    var client = createClient(odoo.url);
+    var uid = await authenticate(client, odoo.db, odoo.user, odoo.password);
+    var db = odoo.db;
+    var pwd = odoo.password;
+
+    // 1) Faturas aguardando a SIEG: chave com o CNPJ da filial Florianópolis
+    //    (a chave tem o CNPJ do emitente nas posicoes 6-20)
+    var ids = await executeKw(client, db, uid, pwd, 'account.move', 'search', [[
+      ['move_type', '=', 'out_invoice'],
+      ['state', '=', 'posted'],
+      ['x_studio_nfe_status', '=', 'processando'],
+      ['x_studio_nfe_chave', 'ilike', '22603750000514'],
+    ]], { order: 'id asc', limit: 10 });
+    if (!ids || !ids.length) return { processed: 0 };
+
+    // 2) Cofre SIEG (nfeProc do periodo recente)
+    var { baixarXmlsSieg } = require('./sieg-api');
+    var sacado = await baixarXmlsSieg(5, 300);
+    if (!sacado || !sacado.sucesso || !sacado.itens || !sacado.itens.length) {
+      console.log('[SIEG-EMIT] [TRANSF-FLN] baixar-xmls sem resultados (' + ((sacado && sacado.erro) || 'ok') + ')');
+      return { processed: 0 };
+    }
+    var porChave = {};
+    for (var si = 0; si < sacado.itens.length; si++) {
+      if (sacado.itens[si].chave) porChave[sacado.itens[si].chave] = sacado.itens[si];
+    }
+
+    var moves = await executeKw(client, db, uid, pwd, 'account.move', 'read', [ids, [
+      'name', 'company_id', 'x_studio_nfe_chave', 'x_studio_nfe_status', 'write_date']]);
+    var processed = 0;
+    for (var i = 0; i < moves.length; i++) {
+      var mv = moves[i];
+      var chave = String(mv.x_studio_nfe_chave || '').replace(/\D/g, '');
+      if (chave.length !== 44) continue;
+      var hit = porChave[chave];
+      if (hit && hit.cStat === '100') {
+        var nNFNum = parseInt(chave.slice(25, 34), 10);
+        var nomeNovo = 'NFe ' + String(nNFNum).padStart(8, '0');
+        await executeKw(client, db, uid, pwd, 'account.move', 'write', [[mv.id], {
+          x_studio_nfe_status: 'autorizada',
+          x_studio_nfe_protocolo: hit.nProt || '',
+        }]);
+        // contador da empresa = numero real autorizado (chave pos. 26-34)
+        var companyIdTransf = (mv.company_id && mv.company_id[0]) || 5;
+        try {
+          await executeKw(client, db, uid, pwd, 'res.company', 'write', [[companyIdTransf],
+            { x_studio_sieg_ultimo_nfe: nNFNum }]);
+        } catch (eSeq) {
+          console.error('[SIEG-EMIT] [TRANSF-FLN] contador empresa: ' + eSeq.message);
+        }
+        if (String(mv.name || '').trim() !== nomeNovo) {
+          try { await executeKw(client, db, uid, pwd, 'account.move', 'write', [[mv.id], { name: nomeNovo }]); } catch (eN) {}
+        }
+        try {
+          await executeKw(client, db, uid, pwd, 'account.move', 'message_post', [[mv.id], {
+            body: '<b>NF-e de transferência AUTORIZADA (via SIEG — certificado da filial)</b><br/>Chave: ' + chave +
+                  '<br/>Protocolo: ' + (hit.nProt || '-') + '<br/>Numero: ' + nomeNovo,
+            message_type: 'comment', subtype_xmlid: 'mail.mt_note',
+          }]);
+        } catch (eCh) {}
+        processed++;
+        console.log('[SIEG-EMIT] [TRANSF-FLN] Autorizada ' + nomeNovo + ' prot=' + (hit.nProt || '-'));
+      } else if (hit && hit.cStat && hit.cStat !== '100') {
+        var motivoRej = 'cStat ' + hit.cStat + (hit.xMotivo ? ' - ' + hit.xMotivo : '');
+        await executeKw(client, db, uid, pwd, 'account.move', 'write', [[mv.id], { x_studio_nfe_status: 'erro' }]);
+        try {
+          await executeKw(client, db, uid, pwd, 'account.move', 'message_post', [[mv.id], {
+            body: '<b>NF-e de transferência REJEITADA na SEFAZ (via SIEG)</b><br/>' + motivoRej,
+            message_type: 'comment', subtype_xmlid: 'mail.mt_note',
+          }]);
+        } catch (eCh2) {}
+        processed++;
+        console.log('[SIEG-EMIT] [TRANSF-FLN] Rejeitada ' + mv.name + ': ' + motivoRej);
+      } else {
+        // ainda nao apareceu no cofre — timeout de 24h devolve para erro
+        var wdMs = Date.parse(mv.write_date || '') || 0;
+        if (wdMs && (Date.now() - wdMs) > 24 * 3600 * 1000) {
+          await executeKw(client, db, uid, pwd, 'account.move', 'write', [[mv.id], { x_studio_nfe_status: 'erro' }]);
+          try { await executeKw(client, db, uid, pwd, 'account.move', 'message_post', [[mv.id], {
+            body: '<b>NF-e de transferência: a SIEG nao retornou a autorizacao em 24h</b> — verifique o cofre SIEG. Se a NF nao saiu, reemita.',
+            message_type: 'comment', subtype_xmlid: 'mail.mt_note' }]); } catch (eCh3) {}
+          processed++;
+        }
+      }
+    }
+    return { processed: processed };
+  } catch (e) {
+    console.error('[SIEG-EMIT] [TRANSF-FLN] verificarTransferenciasSieg: ' + e.message);
+    return { processed: 0, erro: e.message };
+  } finally {
+    _verifTransfBusy = false;
+  }
+}
+
 module.exports = {
   processPendingEmissions, processPendingCancellations, buildPagamentoInfo, brNowStr,
   solicitarEmissaoComBoletos, marcarAutoBoleto, consumirAutoBoleto, detectarArmazenagem,
+  verificarTransferenciasSieg,
 };

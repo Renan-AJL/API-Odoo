@@ -356,8 +356,13 @@ function gerarXmlNFe(data) {
   const _indIEDestCalc = calcIndIEDest(partner);
   const indFinal = (partner.is_consumer || partner.indFinal || _indIEDestCalc === '9') ? '1' : '0';
   const indPres = cfg.indPres || process.env.NFE_IND_PRES || '9'; // 9=operacao nao presencial, outros
-  // indIntermed obrigatorio quando indPres = 2, 3, 4 ou 9 (NT2015.003 / cStat 434 SEFAZ PR)
-  const indIntermed = ['2','3','4','9'].includes(String(indPres)) ? (cfg.indIntermed || '0') : null;
+  // indIntermed obrigatorio quando indPres = 2, 3, 4 ou 9 (NT2015.003 / cStat 434 SEFAZ PR).
+  // AJL 04/11/2026: cfg.indIntermed EXPLICITO vence (transferencia sai com
+  // <indIntermed>0</indIntermed> mesmo com indPres 0 — igual ao XML modelo
+  // autorizado SEFAZ SC 422609...562740).
+  const indIntermed = (cfg.indIntermed !== undefined && cfg.indIntermed !== null && String(cfg.indIntermed) !== '')
+    ? String(cfg.indIntermed)
+    : (['2', '3', '4', '9'].includes(String(indPres)) ? '0' : null);
   const ibsCbsAtivo = String(cfg.ibsCbs != null ? cfg.ibsCbs : (process.env.NFE_IBSCBS || 'true')) !== 'false';
   const verProc = cfg.verProc || 'Odoo19-SIEG-1.0';
 
@@ -509,6 +514,32 @@ function gerarXmlNFe(data) {
   var cDV = accessKey[43];
   console.log('[NFE-XML] cDV calculado: ' + cDV + ' (chave sem DV: ' + accessKey.slice(0, 43) + ')');
 
+  // === NFref (AJL 04/11/2026 — Transferência entre lojas CFOP 6152) ===
+  // NFs referenciadas via <NFref><refNFe>...</refNFe></NFref> DENTRO do <ide>
+  // (depois de verProc — ordem do XSD). Fonte: cfg.nfrefChaves /
+  // data.nfrefChaves / cfg.nfs_referenciadas / data.nfs_referenciadas (array ou
+  // TEXTO LIVRE — extrai todas as sequencias de 44 digitos). Uso:
+  //  - IDA (Floripa -> Matriz): referencia as NFs de venda a ordem entregues na
+  //    Matriz (fornecedor, CFOP 5122/6122/6123);
+  //  - RETORNO: referencia a chave da NF de ida (6152).
+  var nfrefBloco = '';
+  var nfrefFonte = cfg.nfrefChaves || data.nfrefChaves || cfg.nfs_referenciadas || data.nfs_referenciadas || '';
+  var nfrefTexto = Array.isArray(nfrefFonte) ? nfrefFonte.join(',') : String(nfrefFonte || '');
+  var nfrefLista = [];
+  nfrefTexto.replace(/\d{44}/g, function (c) {
+    if (nfrefLista.indexOf(c) === -1 && c !== accessKey) nfrefLista.push(c);
+    return c;
+  });
+  if (nfrefLista.length) {
+    var nfrefParts = [];
+    for (var nr = 0; nr < nfrefLista.length && nr < 100; nr++) {
+      nfrefParts.push('\n      <NFref><refNFe>' + nfrefLista[nr] + '</refNFe></NFref>');
+    }
+    nfrefBloco = nfrefParts.join('');
+    console.log('[NFE-XML] NFref: ' + nfrefLista.length + ' NF-e(s) referenciada(s): ' +
+      nfrefLista.slice(0, 2).join(', ') + (nfrefLista.length > 2 ? ' ...' : ''));
+  }
+
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <NFe xmlns="${NFE_NS}">
   <infNFe versao="4.00" Id="NFe${accessKey}">
@@ -534,7 +565,7 @@ function gerarXmlNFe(data) {
       <indPres>${indPres}</indPres>${indIntermed ? `
       <indIntermed>${indIntermed}</indIntermed>` : ''}
       <procEmi>0</procEmi>
-      <verProc>${esc(verProc)}</verProc>
+      <verProc>${esc(verProc)}</verProc>${nfrefBloco}
     </ide>`;
 
   // === emit ===
