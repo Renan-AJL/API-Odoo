@@ -76,6 +76,86 @@ router.get('/status', apiKeyAuth, async (req, res) => {
   }
 });
 
+// === Consulta do cofre SIEG (baixar-xmls com filtros) ===
+// AJL 04/11/2026 — diagnostico da filial Florianopolis: confirmar a ULTIMA NF-e
+// autorizada pelo CNPJ do emitente antes de ajustar contadores no Odoo.
+// Query: cnpjEmitente?, cnpjDestinatario?, dataInicio? (AAAA-MM-DD), dataFim?,
+//        tipoXml? (1=NF-e), take? (default 200), skip? (default 0)
+// Retorna registros parseados: chave/cnpjEmitente/emitente/destinatario/nNF/serie/
+//                              dhEmi/vNF/cStat/nProt/xMotivo
+router.get('/cofre', apiKeyAuth, async (req, res) => {
+  try {
+    const axios = require('axios');
+    const AdmZip = require('adm-zip');
+    const { getAuthHeaders } = require('../services/sieg-auth');
+    const headers = await getAuthHeaders();
+
+    const hoje = new Date();
+    const ini = String(req.query.dataInicio || new Date(hoje.getTime() - 90 * 86400000).toISOString().slice(0, 10));
+    const fim = String(req.query.dataFim || hoje.toISOString().slice(0, 10));
+    const body = {
+      TipoXml: parseInt(req.query.tipoXml, 10) || 1,
+      Take: parseInt(req.query.take, 10) || 200,
+      Skip: parseInt(req.query.skip, 10) || 0,
+      DataEmissaoInicio: ini + 'T00:00:00Z',
+      DataEmissaoFim: fim + 'T23:59:59Z',
+    };
+    if (req.query.cnpjEmitente) body.CNPJemit = String(req.query.cnpjEmitente).replace(/\D/g, '');
+    if (req.query.cnpjDestinatario) body.CNPJdest = String(req.query.cnpjDestinatario).replace(/\D/g, '');
+
+    console.log('[SIEG-COFRE] body:', JSON.stringify(body));
+    const resp = await axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+      headers, timeout: 60000, responseType: 'arraybuffer',
+      validateStatus: s => s < 500,
+    });
+    if (resp.status !== 200) {
+      const txt = Buffer.isBuffer(resp.data) ? resp.data.toString('utf-8').slice(0, 300) : String(resp.data).slice(0, 300);
+      return res.json({ sucesso: false, httpStatus: resp.status, erro: 'SIEG HTTP ' + resp.status + ': ' + txt, registros: [] });
+    }
+
+    const zip = new AdmZip(resp.data);
+    const registros = [];
+    const vistos = {};
+    zip.getEntries().forEach(function (entry) {
+      if (entry.isDirectory) return;
+      let xmlStr = '';
+      try { xmlStr = zip.readAsText(entry); } catch (e) { return; }
+      const chaveM = xmlStr.match(/Id="(?:NFe|CTe|MDFe)?(\d{44})"/i) || xmlStr.match(/<chNFe>(\d{44})</);
+      const chave = chaveM ? chaveM[1] : '';
+      if (!chave || vistos[chave]) return;
+      vistos[chave] = true;
+      function tag(nome, de) {
+        const s = de || xmlStr;
+        const m = s.match(new RegExp('<' + nome + '>([^<]*)</' + nome + '>'));
+        return m ? m[1].trim() : '';
+      }
+      function doPai(pai, nome) {
+        const mp = xmlStr.match(new RegExp('<' + pai + '>([\\s\\S]*?)</' + pai + '>'));
+        return mp ? tag(nome, mp[1]) : '';
+      }
+      registros.push({
+        chave,
+        cnpjEmitente: doPai('emit', 'CNPJ'),
+        emitente: doPai('emit', 'xFant') || doPai('emit', 'xNome'),
+        cnpjDestinatario: doPai('dest', 'CNPJ'),
+        destinatario: doPai('dest', 'xNome'),
+        nNF: tag('nNF'),
+        serie: tag('serie'),
+        dhEmi: tag('dhEmi'),
+        vNF: tag('vNF'),
+        cStat: tag('cStat'),
+        nProt: tag('nProt'),
+        xMotivo: tag('xMotivo'),
+      });
+    });
+    console.log('[SIEG-COFRE] ' + registros.length + ' documento(s)');
+    return res.json({ sucesso: true, total: registros.length, filtros: body, registros });
+  } catch (err) {
+    console.error('[SIEG-COFRE] erro:', err.message);
+    return res.status(500).json({ sucesso: false, erro: err.message, registros: [] });
+  }
+});
+
 // === Gerar URL de autorizacao OAuth ===
 // Retorna a URL que o usuario deve visitar para autorizar o acesso
 router.get('/oauth-url', apiKeyAuth, async (req, res) => {
