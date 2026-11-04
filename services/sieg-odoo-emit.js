@@ -535,6 +535,19 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     console.log('[SIEG-EMIT] REMESSA ARMAZENAGEM (' + opTypeName + '): indPres 3, tPag 90/vPag 0.00, sem cobr/boletos (modelo SIEG cStat 100)');
   }
 
+  // 1c-5. NF AVULSA (AJL 05/11/2026) — fatura de venda criada direto no financeiro
+  // (botao "NF Avulsa"), SEM pedido/cotacao: emitida como venda normal (CFOP/natOp
+  // do cadastro), mas SEM pagamento (tPag 90/vPag 0.00, sem cobr/dup/boletos/PIX/E+P)
+  // e SEM auto-boleto. Leitura defensiva: campo pode nao existir em outros DBs.
+  var isAvulsa = false;
+  try {
+    var avRec = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], ['x_studio_nf_avulsa']]);
+    isAvulsa = !!(avRec && avRec[0] && avRec[0].x_studio_nf_avulsa);
+  } catch (eAv) { isAvulsa = false; }
+  if (isAvulsa) {
+    console.log('[SIEG-EMIT] NF AVULSA: venda sem pedido — sem pagamento (tPag 90), sem cobr/boletos/auto-boleto');
+  }
+
   // 1a. GUARDA ANTI-DUPLICAÇÃO: se a NF-e já foi autorizada (ou já tem chave),
   // NUNCA reemitir. Evita emissão duplicada em corrida de pollers
   // (ex: sobreposição de instâncias durante deploy no Render).
@@ -1270,6 +1283,14 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     pagInfo = { pagamentos: [{ tPag: '90', vPag: '0.00' }], duplicatas: [], formaLabel: '', boletoDetalhes: [] };
   }
 
+  // AJL 05/11/2026 — NF AVULSA: NF sem cobranca (venda avulsa sem pedido nao
+  // registra pagamento no financeiro) -> detPag tPag 90 / vPag 0.00, SEM cobr/dup,
+  // SEM boletos/PIX/E+P. Nao prefixa infCpl (sem 'Pagamento a vista' via semPagamento).
+  if (isAvulsa) {
+    pagInfo = { pagamentos: [{ tPag: '90', vPag: '0.00' }], duplicatas: [], formaLabel: '', boletoDetalhes: [] };
+    console.log('[SIEG-EMIT] NF Avulsa: pagamento fixo tPag 90 (sem cobr/duplicatas/boletos)');
+  }
+
   // AJL 04/11/2026 — TRANSFERÊNCIA ENTRE LOJAS (igual ao XML modelo SIEG SC
   // 422609...562740, cStat 100): detPag tPag 90 / vPag 0.00, SEM bloco cobr/dup,
   // SEM boletos/PIX e SEM E+P.
@@ -1608,7 +1629,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   // boleto NAO afeta a NF; resultado/erro vira nota no chatter da fatura.
   // SO dispara quando a emissao veio do botao "Emitir NF e Boleto" (flag
   // consumida no inicio de processOne) — o fluxo comum de NF fica intacto.
-  if (info.sucesso && tipo === 'nfe' && autoBoletoArmado && !isTransferencia) {
+  if (info.sucesso && tipo === 'nfe' && autoBoletoArmado && !isTransferencia && !isAvulsa) {
     try {
       agendarBoletosAutomaticos({
         moveId: moveId,

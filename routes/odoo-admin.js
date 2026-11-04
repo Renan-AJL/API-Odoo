@@ -1107,7 +1107,7 @@ router.post('/recompute-draft-so', apiKeyAuth, async function(req, res) {
 //   - args: array de argumentos posicionais; kwargs: dicionario opcional
 // Ex: { model: 'account.move', method: 'read', args: [[147], ['amount_total']] }
 // ============================================================
-var RPC_ALLOWED_METHODS = ['search', 'search_read', 'read', 'search_count', 'fields_get', 'write', 'create', 'exists', 'name_get', 'read_group'];
+var RPC_ALLOWED_METHODS = ['search', 'search_read', 'read', 'search_count', 'fields_get', 'write', 'create', 'exists', 'name_get', 'read_group', 'unlink'];
 
 router.post('/odoo-rpc', apiKeyAuth, async function(req, res) {
   const odoo = config.odoo;
@@ -1125,9 +1125,9 @@ router.post('/odoo-rpc', apiKeyAuth, async function(req, res) {
   if (RPC_ALLOWED_METHODS.indexOf(method) < 0) {
     return res.status(400).json({ success: false, error: 'metodo nao permitido: ' + method });
   }
-  // write/create exigem flag explicita
-  if ((method === 'write' || method === 'create') && !req.body.allowWrite) {
-    return res.status(400).json({ success: false, error: 'write/create exige allowWrite=true no body' });
+  // write/create/unlink exigem flag explicita (unlink destrutivo — AJL 05/11/2026)
+  if ((method === 'write' || method === 'create' || method === 'unlink') && !req.body.allowWrite) {
+    return res.status(400).json({ success: false, error: 'write/create/unlink exige allowWrite=true no body' });
   }
 
   try {
