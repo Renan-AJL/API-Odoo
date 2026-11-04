@@ -1397,6 +1397,34 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       (transfForma ? ' ' + transfForma : '') +
       (transfRefExtra ? ' ' + transfRefExtra : '');
     console.log('[SIEG-EMIT] infCpl transferencia (padrao modelo): ' + emitData.order.infCpl);
+    // AJL 05/11/2026 — PADRAO DE REFERENCIAS no infCpl (toda emissao FLN->Matriz):
+    //   LOCAL DE ENTREGA: {CNPJ Matriz} - {lgr}, {nro} - {bairro} - {mun} - {uf}
+    //   NFe Ref.: série: {s} número: {nNF} emit: {CNPJ emit} em MM/AAAA [chave 44d em grupos de 4]
+    // (infCpl SEFAZ e texto unico — o DANFE quebra as linhas no box DADOS ADICIONAIS;
+    //  derive tudo da PROPIA chave de 44 digitos: serie=ch[22..24], nNF=ch[25..33],
+    //  CNPJ emit=ch[6..19], MM/AAAA=ch[2..5])
+    function transfCnpjFmt(v) {
+      var d = String(v || '').replace(/\D/g, '');
+      return d.length === 14 ? d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') : d;
+    }
+    var transfLgr = [String(partner.street || '').trim(), String(partner.number || '').trim()]
+      .filter(Boolean).join(', ');
+    var transfLocalEntrega = 'LOCAL DE ENTREGA: ' + transfCnpjFmt(partner.cnpj_cpf) +
+      (transfLgr ? ' - ' + transfLgr : '') +
+      (partner.district ? ' - ' + String(partner.district).trim() : '') +
+      (partner.city ? ' - ' + String(partner.city).trim() : '') +
+      (partner.state ? ' - ' + String(partner.state).trim() : '');
+    var transfRefs = (String(nfrefChavesFatura || '').match(/\d{44}/g) || []).map(function (ck) {
+      var serie = ck.substring(22, 25).replace(/^0+(?=\d)/, '');
+      var nnum = ck.substring(25, 34).replace(/^0+(?=\d)/, '');
+      var aamm = ck.substring(2, 6);
+      var mesAno = aamm.substring(2, 4) + '/20' + aamm.substring(0, 2);
+      var grp = (ck.match(/.{1,4}/g) || []).join(' ');
+      return 'NFe Ref.: série: ' + serie + ' número: ' + nnum +
+        ' emit: ' + transfCnpjFmt(ck.substring(6, 20)) + ' em ' + mesAno + ' [' + grp + ']';
+    }).join(' | ');
+    emitData.order.infCpl += '. ' + transfLocalEntrega + (transfRefs ? '. ' + transfRefs : '');
+    console.log('[SIEG-EMIT] Referencias FLN->Matriz: ' + transfLocalEntrega + (transfRefs ? ' | ' + transfRefs : '(sem NFref)'));
     // Emitente FLN (22603750000514): XML vai para a SIEG (EnviarXml) — a SIEG
     // assina com o certificado A1 da filial que esta no cofre e autoriza.
     // Matriz segue SEFAZ-direta como sempre (intocada).
