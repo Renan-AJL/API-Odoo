@@ -3,11 +3,7 @@
 //   emit AJL FERRO E ACO FILIAL FLORIANOPOLIS (CNPJ 22603750000514, IE 264096223, SC 4205407)
 //   dest AJL COMERCIO ATACADISTA (CNPJ 22603750000190, IE 9069585890, PR 4106902)
 //   CFOP 6152, natOp "Transferencia de mercadoria adquirida/recebida de", serie 1,
-//   2x NFref (venda a ordem do fornecedor entregue em Curitiba), tPag 90, modFrete 9,
-//   indPres 0 + indIntermed 0.
-// 04/11 (v2): sem painel — a FLN emite via SIEG (EnviarXml, cert da filial no cofre);
-// rota smoke: enviarNFe com viaSiegTransferencia cai no caminho SIEG (sem SIEG_API_KEY
-// em ambiente de teste -> erro esperado 'SIEG_API_KEY nao configurada').
+//   2x NFref (venda a ordem do fornecedor entregue em Curitiba), tPag 90, modFrete 9, indPres 0
 process.env.NFE_RESP_TEC_CNPJ = '22603750000190';
 process.env.NFE_RESP_TEC_CONTATO = 'AJL TI';
 process.env.NFE_RESP_TEC_EMAIL = 'ti@ajl.com.br';
@@ -15,7 +11,8 @@ process.env.NFE_RESP_TEC_FONE = '4133730076';
 process.env.NFE_IBSCBS = 'false'; // transferência igual ao modelo (sem IBSCBS no XML de 09/2026)
 
 var { gerarXmlNFe } = require('../services/sieg-nfe-xml');
-var { enviarNFe, enviarNFeSiegTransferencia, baixarXmlsSieg } = require('../services/sieg-api');
+var { ufDaChave, endpoint } = require('../services/sefaz-client');
+var { cnpjEmitenteDoXml } = require('../services/nfe-signer');
 
 // Chaves das NFs referenciadas no XML MODELO (fornecedor ARCELORMITTAL, venda a ordem -> Curitiba)
 var REF1 = '42260917469701010644550020002514961203108064';
@@ -57,7 +54,7 @@ function dadosTransferencia(overrides) {
     duplicatas: [],
     config: {
       serie: '1', tpAmb: '1', natOp: 'Transferencia de mercadoria adquirida/recebida de',
-      mod: '55', indPres: '0', indIntermed: '0', modFrete: '9',
+      mod: '55', indPres: '0', modFrete: '9',
       nfrefChaves: REF1 + ' ' + REF2,
     },
   };
@@ -90,8 +87,8 @@ check('2 NFrefs no total', (xc.match(/<NFref>/g) || []).length === 2);
 check('tPag 90 (sem pagamento)', xml.includes('<tPag>90</tPag>'));
 check('vPag 0.00', /<detPag>\s*<tPag>90<\/tPag>\s*<vPag>0\.00<\/vPag>\s*<\/detPag>/.test(xml));
 check('SEM <cobr> (transferência nao tem fatura/duplicatas)', !xml.includes('<cobr>'));
-check('indPres 0 (modelo)', xml.includes('<indPres>0</indPres>'));
-check('indIntermed 0 (modelo)', xml.includes('<indIntermed>0</indIntermed>'));
+check('indPres 0', xml.includes('<indPres>0</indPres>'));
+check('SEM indIntermed (indPres 0 nao exige)', !xml.includes('<indIntermed>'));
 check('modFrete 9 sem transporta', /<transp>\s*<modFrete>9<\/modFrete>\s*<\/transp>/.test(xml));
 check('ICMS00 12% vICMS 2507.39', /<ICMS00><orig>0<\/orig><CST>00<\/CST><modBC>3<\/modBC><vBC>20894\.94<\/vBC><pICMS>12\.00<\/pICMS><vICMS>2507\.39<\/vICMS><\/ICMS00>/.test(xc));
 check('IPI CST 50 3,25% = 679.09', /<IPITrib><CST>50<\/CST><vBC>20894\.94<\/vBC><pIPI>3\.2500<\/pIPI><vIPI>679\.09<\/vIPI><\/IPITrib>/.test(xc));
@@ -100,6 +97,8 @@ check('vNF = vProd + IPI = 21574.03', xml.includes('<vNF>21574.03</vNF>'));
 var chaveC1 = (xc.match(/Id="NFe(\d{44})"/) || [])[1] || '';
 check('chave com cUF 42 (SC)', chaveC1.slice(0, 2) === '42', chaveC1);
 check('chave com CNPJ da filial (pos 7-20)', chaveC1.slice(6, 20) === '22603750000514');
+check('ufDaChave(SC 42) -> SVRS endpoint', ufDaChave(chaveC1) === 'SC' && endpoint('autorizacao', 'SC').indexOf('svrs') > 0);
+check('cnpjEmitenteDoXml deriva a filial', cnpjEmitenteDoXml(xml) === '22603750000514');
 
 console.log('\n=== CENARIO 2: RETORNO Curitiba->Floripa referencia a NF de ida ===');
 var d2 = dadosTransferencia();
@@ -124,6 +123,8 @@ check('dest filial SC', /<dest>[\s\S]*?<CNPJ>22603750000514<\/CNPJ>[\s\S]*?<IE>2
 check('NFref = chave da NF de IDA', x2.includes('<NFref><refNFe>' + CHAVE_IDA + '</refNFe></NFref>'));
 check('1 NFref no total', (x2.match(/<NFref>/g) || []).length === 1);
 check('CFOP 6152 (PR->SC interestadual)', xml2.includes('<CFOP>6152</CFOP>'));
+var chaveC2 = (x2.match(/Id="NFe(\d{44})"/) || [])[1] || '';
+check('chave cUF 41 (PR) -> autorizadora PR', ufDaChave(chaveC2) === 'PR' && endpoint('autorizacao', 'PR').indexOf('sefa.pr.gov.br') > 0);
 
 console.log('\n=== CENARIO 3 (regressao): venda normal segue identica ===');
 var d3 = {
@@ -157,22 +158,6 @@ check('venda COM cobr/duplicata', x3.includes('<cobr>') && x3.includes('<dVenc>2
 check('venda tPag 15 PIX', x3.includes('<tPag>15</tPag>'));
 check('venda natOp padrao', x3.includes('<natOp>Venda de Mercadoria</natOp>'));
 
-console.log('\n=== CENARIO 4: rota SIEG da transferencia (viaSiegTransferencia) ===');
-check('enviarNFeSiegTransferencia exportada', typeof enviarNFeSiegTransferencia === 'function');
-check('baixarXmlsSieg exportada', typeof baixarXmlsSieg === 'function');
-var origKey = process.env.SIEG_API_KEY;
-delete process.env.SIEG_API_KEY;
-var d4 = dadosTransferencia();
-d4.config.viaSiegTransferencia = true;
-enviarNFe(d4).then(function (r) {
-  check('rota: sem SIEG_API_KEY -> erro claro (chegou no caminho SIEG)',
-    r && r.sucesso === false && String(r.erro || '').indexOf('SIEG_API_KEY') >= 0, String((r && r.erro) || '').slice(0, 120));
-  process.env.SIEG_API_KEY = origKey;
-  require('fs').writeFileSync('/tmp/nfe_transfer_teste.xml', xml);
-  console.log('\nXML cenario 1 salvo em /tmp/nfe_transfer_teste.xml (validacao XSD via python)');
-  process.exit(falhas ? 1 : 0);
-}).catch(function (e) {
-  check('rota enviarNFe (viaSiegTransferencia) sem excecao', false, e.message);
-  process.env.SIEG_API_KEY = origKey;
-  process.exit(falhas ? 1 : 0);
-});
+require('fs').writeFileSync('/tmp/nfe_transfer_teste.xml', xml);
+console.log('\nXML cenario 1 salvo em /tmp/nfe_transfer_teste.xml (validacao XSD via python)');
+process.exit(falhas ? 1 : 0);

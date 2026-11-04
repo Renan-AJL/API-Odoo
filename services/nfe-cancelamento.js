@@ -13,8 +13,8 @@
  */
 'use strict';
 var { SignedXml } = require('xml-crypto');
-var { carregarCertificado } = require('./nfe-cert');
-var { soapPost, endpoint, uf, tpAmb, cUF } = require('./sefaz-client');
+var { certificadoParaEmitente } = require('./nfe-cert');
+var { soapPost, endpoint, uf, tpAmb, cUF, ufDaChave } = require('./sefaz-client');
 var { minify } = require('./nfe-signer');
 
 var C14N      = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
@@ -42,6 +42,9 @@ function tag(xml, name) {
 
 /**
  * Cancela uma NF-e autorizada na SEFAZ.
+ * AJL 04/11/2026 (multi-emitente): certificado do cofre do CNPJ informado e
+ * endpoint pela UF da PROPIA CHAVE (cUF pos. 1-2) — NF da Filial Florianópolis
+ * (SC) cancela pelo SVRS com o certificado da Filial; cOrgao = cUF da chave.
  * @param {object} opts
  * @param {string} opts.chave     - Chave de acesso de 44 dígitos
  * @param {string} opts.protocolo - Número do protocolo de autorização (nProt)
@@ -61,9 +64,12 @@ async function cancelarNFe(opts) {
   if (justificativa.length < 15)  throw new Error('Justificativa mínima: 15 caracteres');
   if (justificativa.length > 255) justificativa = justificativa.slice(0, 255);
 
-  var cert = carregarCertificado();
-  if (!cert) throw new Error('Certificado digital A1 não configurado');
+  var cert = certificadoParaEmitente(cnpj);
+  if (!cert) throw new Error('Certificado digital A1 não configurado (emitente ' + cnpj + ') — envie no painel /api/v1/nfe/painel');
   if (cert.info && cert.info.expirado) throw new Error('Certificado expirado em ' + cert.info.validoAte);
+
+  var ufCh = ufDaChave(chave);
+  var cOrgao = chave.slice(0, 2) || cUF();
 
   var nSeqEvento = '1';
   var dhEv       = dhEvento();
@@ -73,7 +79,7 @@ async function cancelarNFe(opts) {
   var xmlEvento = minify(
     '<evento versao="1.00" xmlns="http://www.portalfiscal.inf.br/nfe">' +
     '<infEvento Id="' + idEvento + '">' +
-      '<cOrgao>' + cUF() + '</cOrgao>' +
+      '<cOrgao>' + cOrgao + '</cOrgao>' +
       '<tpAmb>' + tpAmb() + '</tpAmb>' +
       '<CNPJ>' + cnpj + '</CNPJ>' +
       '<chNFe>' + chave + '</chNFe>' +
@@ -118,11 +124,12 @@ async function cancelarNFe(opts) {
   );
 
   // -------- URL do endpoint --------
-  var baseUrl = endpoint('cancelamento');
-  console.log('[NFE-CANCEL] Enviando cancelamento chave=' + chave + ' prot=' + protocolo + ' -> ' + baseUrl);
+  // UF da autorizadora vem da CHAVE (cUF) — Filial SC -> SVRS
+  var baseUrl = endpoint('cancelamento', ufCh);
+  console.log('[NFE-CANCEL] Enviando cancelamento chave=' + chave + ' prot=' + protocolo + ' UF=' + (ufCh || uf()) + ' -> ' + baseUrl);
 
-  // -------- Enviar via SOAP --------
-  var respRaw = await soapPost(baseUrl, 'NFeRecepcaoEvento4', xmlLote, 30000);
+  // -------- Enviar via SOAP (certificado do emitente da NF) --------
+  var respRaw = await soapPost(baseUrl, 'NFeRecepcaoEvento4', xmlLote, 30000, cert);
   var respXml = typeof respRaw === 'string' ? respRaw : (respRaw && respRaw.xml ? String(respRaw.xml) : '');
   console.log('[NFE-CANCEL] HTTP status=' + (respRaw && respRaw.status) + ' xml_len=' + respXml.length);
 

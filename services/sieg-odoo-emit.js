@@ -30,6 +30,7 @@ var config = require('../config');
 var { IeService } = require('./ie.service');
 var ibgeMunicipios = require('./ibge-municipios');
 var { agendarBoletosAutomaticos } = require('./boleto-auto');
+var { carregarCertificadoPorCnpj } = require('./nfe-cert');
 var _ieService = new IeService();
 
 // ============================================================
@@ -1399,9 +1400,20 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     // Emitente FLN (22603750000514): XML vai para a SIEG (EnviarXml) — a SIEG
     // assina com o certificado A1 da filial que esta no cofre e autoriza.
     // Matriz segue SEFAZ-direta como sempre (intocada).
+    // AJL 04/11 (noite, v1.2.15) — PRIORIDADE: SEFAZ-direta com o certificado A1
+    // da FILIAL quando ele estiver no cofre local (nfe-cert-22603750000514.pfx)
+    // — MESMO fluxo da Matriz (assinatura local, envio ao SVRS pela cUF 42,
+    // autorizacao sincrona, write-back/contador iguais). Sem cert local,
+    // cai no caminho SIEG (import/assinatura no cofre SIEG).
     if (String(company.cnpj_cpf || '').replace(/\D/g, '') === '22603750000514') {
-      emitData.config.viaSiegTransferencia = true;
-      console.log('[SIEG-EMIT] Transferência FLN: XML sera assinado/autorizado pela SIEG (cert da filial no cofre)');
+      var certFln = null;
+      try { certFln = carregarCertificadoPorCnpj('22603750000514'); } catch (eCertFln) { certFln = null; }
+      if (certFln && certFln.pfx) {
+        console.log('[SIEG-EMIT] Transferência FLN: certificado A1 da filial no cofre local — SEFAZ-direta SVRS (igual Matriz)');
+      } else {
+        emitData.config.viaSiegTransferencia = true;
+        console.log('[SIEG-EMIT] Transferência FLN: sem cert local — XML vai para a SIEG (assinatura no cofre SIEG)');
+      }
     }
   }
   console.log('[SIEG-EMIT] Pagamento NF: ' + pagInfo.formaLabel + ' | tPag=' +
