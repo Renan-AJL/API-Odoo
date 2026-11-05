@@ -351,6 +351,7 @@ router.post('/odoo-webhook', async function(req, res) {
         id: partnerId,
         cep: cepRaw,
         fontes_consultadas: resultado.fontes_consultadas,
+        fontes_detalhes: resultado.fontes_detalhes || null,
       });
     }
 
