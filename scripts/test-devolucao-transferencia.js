@@ -125,6 +125,29 @@ check('natOp fixa da transferência preservada', xml2.includes('<natOp>Transfere
 check('CFOP 6152', xml2.includes('<CFOP>6152</CFOP>'));
 check('2 NFrefs aceitas na transferência normal', (x2.match(/<NFref>/g) || []).length === 2);
 
+console.log('\n=== TRANSFERÊNCIA PR→PR SEM ICMS (regra contador v1.2.23, saída do fluxo) ===');
+// O fluxo (sieg-odoo-emit.js v1.2.23) converte CST 00 -> 41 nas transferências
+// PR→PR (5152 e 5902). Aqui validamos o XML com a linha JÁ convertida:
+var d3 = JSON.parse(JSON.stringify(dados));
+d3.company = JSON.parse(JSON.stringify(dados.company));
+d3.order = { name: 'NFe 00073154', number: '73154', date_order: '2026-11-05T12:00:00Z', amount_total: 17449.46, infCpl: '' };
+d3.lines[0].cfop = '5152';
+d3.lines[0].cst_icms = '41';           // convertido pelo fluxo (regra contador)
+d3.lines[0].vbc_icms = '0.00';
+d3.lines[0].vicms = '0.00';
+d3.lines[0].picms = '0.00';
+d3.config.natOp = 'Transferencia de mercadoria adquirida/recebida de';
+d3.config.nfrefChaves = '';
+var xml3 = gerarXmlNFe(d3);
+var x3 = xml3.replace(/\n/g, '');
+check('ICMS40 CST 41 (não tributada)', x3.includes('<ICMS40><orig>0</orig><CST>41</CST></ICMS40>'));
+check('SEM ICMS00 / sem pICMS no item', !x3.includes('<CST>00</CST>') && !x3.includes('<pICMS>'));
+check('ICMSTot vBC 0.00 e vICMS 0.00', x3.includes('<vBC>0.00</vBC>') && x3.includes('<vICMS>0.00</vICMS>'));
+check('IPI mantido (CST 50 suspensão 3,25%)', /<IPITrib><CST>50<\/CST><vBC>16900\.20<\/vBC><pIPI>3\.2500<\/pIPI><vIPI>549\.26<\/vIPI><\/IPITrib>/.test(x3));
+check('PIS/COFINS mantidos (01 — 278.85/1284.42)', x3.includes('<vPIS>278.85</vPIS>') && x3.includes('<vCOFINS>1284.42</vCOFINS>'));
+check('vNF = vProd + vIPI = 17449.46', xml3.includes('<vNF>17449.46</vNF>'));
+
 require('fs').writeFileSync('/tmp/nfe_devolucao_5902.xml', xml);
+require('fs').writeFileSync('/tmp/nfe_transfer_semicms.xml', xml3);
 console.log('\nXML devolução salvo em /tmp/nfe_devolucao_5902.xml (validação XSD via python)');
 process.exit(falhas ? 1 : 0);

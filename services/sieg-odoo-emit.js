@@ -1087,7 +1087,19 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       ld.cfop = cfopTransf;
     }
     // Ajustar ICMS baseado na regra PR
-    if (!isInterstate) {
+    // AJL 05/11 (v1.2.23) — REGRA DO CONTADOR: transferência entre lojas NO
+    // PARANÁ (PR→PR, mesmo CNPJ raiz) NÃO tem ICMS na NF — sai ICMS40 CST 41
+    // (não tributada), vBC/vICMS 0. Vale p/ 5152 (transferência) e 5902
+    // (devolução da remessa) emitidas nos diários de transferência das lojas
+    // do PR (Matriz, Ivaiporã, Ponta Grossa). Interestadual (Floripa SC↔PR)
+    // mantém ICMS 12% do modelo autorizado 422609...562740.
+    if (isTransferencia && !isInterstate && ld.cst_icms === '00') {
+      ld.cst_icms = '41';
+      ld.vbc_icms = '0.00';
+      ld.vicms = '0.00';
+      ld.picms = '0.00';
+      console.log('[SIEG-EMIT] Transferência PR→PR SEM ICMS (regra contador): CST 00→41, vICMS 0 (linha ' + ld.cProd + ')');
+    } else if (!isInterstate) {
       // INTERNO PR: IE→12%, sem IE/CPF→19.5% (sobrescrever o default 18%)
       if (ld.cst_icms === '00' && parseFloat(ld.picms) !== icmsInternoPR) {
         var picmsOrigInt = ld.picms;
@@ -1491,16 +1503,16 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     if (FILIAIS_TRANSFER.indexOf(cnpjEmitTransf) >= 0) {
       var certFilial = null;
       try { certFilial = carregarCertificadoPorCnpj(cnpjEmitTransf); } catch (eCertFln) { certFilial = null; }
-      // AJL 05/11 (v1.2.21) — IVAIPORA: contador da AJL informou que o certificado
-      // e-CNPJ da Matriz (22603750000190) cobre a emissao da filial. Sem cert
-      // proprio da filial, tentar o certificado global/legado (env vars) e emitir
-      // por SEFAZ-direta — a SEFAZ-PR decide de verdade (autoriza ou rejeita
-      // 213/203/298). So cai para a SIEG quando NAO houver certificado nenhum.
-      // FLN e Ponta Grossa seguem intocadas (rota SIEG como antes).
-      if (!certFilial && cnpjEmitTransf === '22603750000271') {
+      // AJL 05/11 (v1.2.21/v1.2.23) — contador da AJL informou que o certificado
+      // e-CNPJ da Matriz (22603750000190) cobre a emissão de TODAS as filiais
+      // (Ivaiporã, Ponta Grossa e Florianópolis). Sem cert proprio da filial no
+      // cofre local, tentar o certificado global/legado (env vars) e emitir por
+      // SEFAZ-direta — a SEFAZ decide de verdade (autoriza ou rejeita 213/203/298).
+      // So cai para a SIEG quando NAO houver certificado nenhum.
+      if (!certFilial) {
         try { certFilial = certificadoParaEmitente(cnpjEmitTransf); } catch (eCertLg) { certFilial = null; }
         if (certFilial && certFilial.pfx) {
-          console.log('[SIEG-EMIT] Transferência Ivaiporã: sem cofre proprio — usando certificado ' +
+          console.log('[SIEG-EMIT] Transferência filial ' + cnpjEmitTransf + ': sem cofre próprio — usando certificado ' +
             ((certFilial.info && certFilial.info.cnpj) || 'legado') + ' — SEFAZ-direta (SEFAZ decide)');
         }
       }
