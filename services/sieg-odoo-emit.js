@@ -523,6 +523,17 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     console.log('[SIEG-EMIT] Tipo de operacao nao lido (segue padrao): ' + eOT.message);
   }
 
+  // 1c-6. DEVOLUÇÃO DE REMESSA DE TRANSFERÊNCIA (CFOP 5902/6902) — AJL 05/11/2026 (v1.2.22)
+  // l10n_br.operation.type 'Devolução de remessa de transferência' (id 159,
+  // returnOfTransferShipmentAJL, l10n_br_cfop_code 5902): devolução Ivaiporã ->
+  // Matriz da mercadoria recebida em transferência (NF original referenciada via
+  // x_studio_nfs_referenciadas -> <NFref><refNFe> no <ide>). natOp pelo NOME do
+  // tipo (NÃO a natOp fixa da transferência) e infCpl só com a referência.
+  var isDevolucaoTransf = opTypeCfop === '5902' || opTypeCfop === '6902';
+  if (isDevolucaoTransf) {
+    console.log('[SIEG-EMIT] DEVOLUÇÃO DE REMESSA DE TRANSFERÊNCIA (' + opTypeName + ', CFOP ' + opTypeCfop + '): natOp pelo tipo, NFref obrigatoria');
+  }
+
   // 1c-4. REMESSA DESTINADA A ARMAZENAGEM (CFOP 5905/6905) — AJL 04/11/2026
   // Modelo autorizado na SEFAZ (chave 41260922603750000190550010000719281022473776,
   // cStat 100): natOp 'Remessa Destinado a Armazenagem', indPres 3 + indIntermed 0,
@@ -1375,7 +1386,10 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       // SIEG SC 422609...562740 ('Transferencia de mercadoria adquirida/recebida
       // de') — o nome do tipo de operacao ('Transferência de produtos') NAO vai
       // mais na natOp (padrao do modelo).
-      natOp: isTransferencia ? 'Transferencia de mercadoria adquirida/recebida de' : (opTypeName || 'Venda de Mercadoria'),
+      // AJL 05/11 (v1.2.22): devolução de transferência (5902/6902) usa o nome
+      // do TIPO como natOp ('Devolução de remessa de transferência') — a natOp
+      // fixa 'Transferencia de mercadoria...' só vale para a transferência normal.
+      natOp: (isTransferencia && !isDevolucaoTransf) ? 'Transferencia de mercadoria adquirida/recebida de' : (opTypeName || 'Venda de Mercadoria'),
       mod: tipo === 'nfe' ? '55' : '01',
       // AJL 27/10/2026: transporte da NF — modFrete/transporta/veicTransp/volumes
       // lidos da fatura (3d). Fatura sem frete/transportadora = 9/sem transporta
@@ -1399,6 +1413,28 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     emitData.config.indIntermed = '0';
     // NFs referenciadas da fatura (1c-4) -> <NFref><refNFe> no <ide>
     emitData.config.nfrefChaves = nfrefChavesFatura;
+    function transfCnpjFmt(v) {
+      var d = String(v || '').replace(/\D/g, '');
+      return d.length === 14 ? d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') : d;
+    }
+    // AJL 05/11/2026 (v1.2.22) — DEVOLUÇÃO DE REMESSA DE TRANSFERÊNCIA (5902/6902):
+    // infCpl enxuto — só a referência da NF-e de transferência original (a chave
+    // de 44d fica em x_studio_nfs_referenciadas e vira <NFref><refNFe> no <ide>);
+    // NÃO usa o template 'Rep:/LOCAL DE ENTREGA' (que é da remessa FLN->Matriz).
+    if (isDevolucaoTransf) {
+      var devRefs = (String(nfrefChavesFatura || '').match(/\d{44}/g) || []).map(function (ck) {
+        var serieD = ck.substring(22, 25).replace(/^0+(?=\d)/, '');
+        var nnumD = ck.substring(25, 34).replace(/^0+(?=\d)/, '');
+        var aammD = ck.substring(2, 6);
+        var mesAnoD = aammD.substring(2, 4) + '/20' + aammD.substring(0, 2);
+        var grpD = (ck.match(/.{1,4}/g) || []).join(' ');
+        return 'NFe Ref.: série: ' + serieD + ' número: ' + nnumD +
+          ' emit: ' + transfCnpjFmt(ck.substring(6, 20)) + ' em ' + mesAnoD + ' [' + grpD + ']';
+      }).join(' | ');
+      emitData.order.infCpl = 'Devolução de remessa de transferência' + (devRefs ? '. ' + devRefs : '');
+      console.log('[SIEG-EMIT] infCpl devolucao de transferencia: ' + emitData.order.infCpl);
+    }
+    if (!isDevolucaoTransf) {
     // AJL 04/11 (noite) — infCpl PADRAO da transferencia (igual ao modelo autorizado
     // SIEG SC 422609...562740):
     //   Rep: {REP}- ({cliente} Pedido:{pedido} F.PGTO: {FORMA} {forma}
@@ -1424,10 +1460,6 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     // (infCpl SEFAZ e texto unico — o DANFE quebra as linhas no box DADOS ADICIONAIS;
     //  derive tudo da PROPIA chave de 44 digitos: serie=ch[22..24], nNF=ch[25..33],
     //  CNPJ emit=ch[6..19], MM/AAAA=ch[2..5])
-    function transfCnpjFmt(v) {
-      var d = String(v || '').replace(/\D/g, '');
-      return d.length === 14 ? d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') : d;
-    }
     var transfLgr = [String(partner.street || '').trim(), String(partner.number || '').trim()]
       .filter(Boolean).join(', ');
     var transfLocalEntrega = 'LOCAL DE ENTREGA: ' + transfCnpjFmt(partner.cnpj_cpf) +
@@ -1446,6 +1478,7 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     }).join(' | ');
     emitData.order.infCpl += '. ' + transfLocalEntrega + (transfRefs ? '. ' + transfRefs : '');
     console.log('[SIEG-EMIT] Referencias FLN->Matriz: ' + transfLocalEntrega + (transfRefs ? ' | ' + transfRefs : '(sem NFref)'));
+    } // fim if (!isDevolucaoTransf)
     // AJL 05/11/2026 (v1.2.18) — GENERALIZADO P/ TODAS AS FILIAIS: Ivaipora
     // (22603750000271), Ponta Grossa (22603750000352) e Florianopolis
     // (22603750000514). NF de transferencia emitida pela FILIAL usa SEFAZ-direta
