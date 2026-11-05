@@ -31,6 +31,7 @@ var { IeService } = require('./ie.service');
 var ibgeMunicipios = require('./ibge-municipios');
 var { agendarBoletosAutomaticos } = require('./boleto-auto');
 var { carregarCertificadoPorCnpj, certificadoParaEmitente } = require('./nfe-cert');
+var { aplicarCstIcmsManualLinhas, CSTS_SEM_DESTAQUE } = require('./cst-icms-manual');
 var _ieService = new IeService();
 
 // ============================================================
@@ -1273,6 +1274,28 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       console.log('[SIEG-EMIT] ICMS MANUAL linha ' + mi + ': vBC=' + mBc + ' pICMS=' + mPicms + '% vICMS=' + mVicms);
     }
     console.log('[SIEG-EMIT] ICMS MANUAL ATIVO — alíquota=' + icmsManual.aliquota + '% BC=' + vBcManualTotal.toFixed(2) + ' vICMS=' + vIcmsManualTotal.toFixed(2));
+  }
+
+  // 6c. CST ICMS MANUAL — x_studio_cst_icms (AJL 06/11/2026, v1.2.26)
+  // Campo editável na fatura (grupo "ICMS Manual (NF-e)"): 40/41/50 = NF-e sai SEM
+  // destaque de ICMS (vBC/vICMS 0) em TODAS as linhas — Remessa p/ Industrialização
+  // (CFOP 5901) usa 41. Vazio/'00' = fluxo automático atual (intocado).
+  // Leitura SEPARADA do bloco 6b: se o campo não existir, o ICMS manual segue funcionando.
+  try {
+    var mvCst = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], ['x_studio_cst_icms']]);
+    var cstManualVal = (mvCst && mvCst[0] && mvCst[0].x_studio_cst_icms) || '';
+    var cstNorm = String(cstManualVal || '').replace(/\D/g, '');
+    if (CSTS_SEM_DESTAQUE.indexOf(cstNorm) >= 0) {
+      var nLinhaCst = aplicarCstIcmsManualLinhas(linesData, cstManualVal, (company && company.state) || 'PR');
+      if (nLinhaCst) {
+        console.log('[SIEG-EMIT] CST ICMS MANUAL ' + cstNorm + ' aplicado em ' + nLinhaCst + ' linha(s): vBC/vICMS 0'
+          + (String((company && company.state) || 'PR').toUpperCase() === 'PR' ? ' + cBenef (rejeição 930)' : ''));
+      }
+    } else if (cstNorm) {
+      console.log('[SIEG-EMIT] CST ICMS manual "' + cstManualVal + '" fora de ' + JSON.stringify(CSTS_SEM_DESTAQUE) + ' — ignorado (fluxo automático)');
+    }
+  } catch (eCstMan) {
+    console.log('[SIEG-EMIT] Campo CST ICMS manual não lido (segue automático): ' + eCstMan.message);
   }
 
   // 7. Build emission payload
