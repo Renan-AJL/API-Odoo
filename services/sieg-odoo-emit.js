@@ -1748,36 +1748,66 @@ async function postChatterResult(client, db, uid, pwd, moveId, moveName, tipo, i
   var xmlContent = xmlRetornoText || resultado.xmlEnviado || '';
   var pdfBase64 = resultado.pdfBase64 || '';
 
-  // Attach XML
+  // Attach XML (com 1 retry — Odoo pode responder 429 sob rajadas)
+  var xmlAnexado = false;
   if (xmlContent) {
-    try {
-      var xmlB64 = Buffer.from(xmlContent, 'utf-8').toString('base64');
-      var xmlAttach = await executeKw(client, db, uid, pwd, 'ir.attachment', 'create', [{
-        name: nfLabel + '_' + safeName + '.xml',
-        raw: xmlB64,
-        res_model: 'account.move',
-        res_id: moveId,
-        mimetype: 'application/xml',
-      }]);
-      attachIds.push(xmlAttach);
-      console.log('[SIEG-EMIT] XML anexado (ID: ' + xmlAttach + ')');
-    } catch (e) { console.error('[SIEG-EMIT] Erro anexar XML:', e.message); }
+    var xmlB64 = Buffer.from(xmlContent, 'utf-8').toString('base64');
+    for (var tentXml = 1; tentXml <= 2; tentXml++) {
+      try {
+        var xmlAttach = await executeKw(client, db, uid, pwd, 'ir.attachment', 'create', [{
+          name: nfLabel + '_' + safeName + '.xml',
+          raw: xmlB64,
+          res_model: 'account.move',
+          res_id: moveId,
+          mimetype: 'application/xml',
+        }]);
+        attachIds.push(xmlAttach);
+        xmlAnexado = true;
+        console.log('[SIEG-EMIT] XML anexado (ID: ' + xmlAttach + ')');
+        break;
+      } catch (e) {
+        console.error('[SIEG-EMIT] Erro anexar XML (tentativa ' + tentXml + '):', e.message);
+        if (tentXml < 2) await new Promise(function (r) { setTimeout(r, 3000); });
+      }
+    }
   }
 
   // Attach PDF (DANFE / DANFSE)
-  if (pdfBase64) {
+  // Fallback (bug 05/11/2026): quando o SIEG nao devolve o PDF no retorno da
+  // emissão (GetPdf 404 / resposta sem pdfBase64), a fatura ficava só com o XML.
+  // Para NF-e autorizada geramos o DANFE localmente (pdfkit + bwip-js) a partir
+  // do procNFe — mesmo caminho usado nos downloads do painel admin.
+  if (!pdfBase64 && tipo === 'nfe' && xmlContent && xmlContent.indexOf('<protNFe') >= 0) {
     try {
-      var pdfLabel = tipo === 'nfe' ? 'DANFE' : 'DANFSE';
-      var pdfAttach = await executeKw(client, db, uid, pwd, 'ir.attachment', 'create', [{
-        name: pdfLabel + '_' + safeName + '.pdf',
-        raw: pdfBase64,
-        res_model: 'account.move',
-        res_id: moveId,
-        mimetype: 'application/pdf',
-      }]);
-      attachIds.push(pdfAttach);
-      console.log('[SIEG-EMIT] PDF anexado (ID: ' + pdfAttach + ')');
-    } catch (e) { console.error('[SIEG-EMIT] Erro anexar PDF:', e.message); }
+      var { gerarDanfePdf } = require('../services/danfe-pdf');
+      var pdfBuf = await gerarDanfePdf(xmlContent);
+      pdfBase64 = Buffer.from(pdfBuf).toString('base64');
+      console.log('[SIEG-EMIT] PDF ausente no retorno SIEG — DANFE gerada localmente (' + pdfBuf.length + ' bytes)');
+    } catch (e) {
+      console.error('[SIEG-EMIT] Fallback DANFE local falhou:', e.message);
+    }
+  }
+  var pdfAnexado = false;
+  if (pdfBase64) {
+    var pdfLabel = tipo === 'nfe' ? 'DANFE' : 'DANFSE';
+    for (var tentPdf = 1; tentPdf <= 2; tentPdf++) {
+      try {
+        var pdfAttach = await executeKw(client, db, uid, pwd, 'ir.attachment', 'create', [{
+          name: pdfLabel + '_' + safeName + '.pdf',
+          raw: pdfBase64,
+          res_model: 'account.move',
+          res_id: moveId,
+          mimetype: 'application/pdf',
+        }]);
+        attachIds.push(pdfAttach);
+        pdfAnexado = true;
+        console.log('[SIEG-EMIT] PDF anexado (ID: ' + pdfAttach + ')');
+        break;
+      } catch (e) {
+        console.error('[SIEG-EMIT] Erro anexar PDF (tentativa ' + tentPdf + '):', e.message);
+        if (tentPdf < 2) await new Promise(function (r) { setTimeout(r, 3000); });
+      }
+    }
   }
 
   // Post chatter message
@@ -1792,7 +1822,11 @@ async function postChatterResult(client, db, uid, pwd, moveId, moveName, tipo, i
     }
     body += 'Status: ' + info.cStat + ' - ' + info.motivo;
     body += '<br/>Emissao: ' + brNowStr();
-    body += '<br/><br/><i>Arquivos anexados: XML e ' + (tipo === 'nfe' ? 'DANFE' : 'DANFSE') + ' (PDF)</i>';
+    // Lista só o que realmente foi anexado (antes dizia "XML e DANFE" mesmo quando o PDF falhava)
+    var anexadosTxt = [];
+    if (xmlAnexado) anexadosTxt.push('XML');
+    if (pdfAnexado) anexadosTxt.push(tipo === 'nfe' ? 'DANFE (PDF)' : 'DANFSE (PDF)');
+    body += '<br/><br/><i>Arquivos anexados: ' + (anexadosTxt.join(' e ') || 'nenhum') + '</i>';
   } else {
     body = '<b>Erro na Emissao de ' + nfLabel + '</b><br/>';
     body += 'Status: ' + info.cStat + ' - ' + info.motivo;
