@@ -13,7 +13,10 @@
 const axios = require('axios');
 
 const USER_AGENT = 'API-CEP-Odoo-AJL/3.0';
-const TIMEOUT_MS = 10000;
+// v1.2.26: 10s -> 5s. Com 4 fontes em sequência, o pior caso teórico de uma
+// consulta fresca era 4 x timeout; 5s mantém folga 10x sobre a latência típica
+// (fontes respondem em 0.2-1s) e derruba o teto de espera p/ ~20s.
+const TIMEOUT_MS = 5000;
 
 // ============================================================
 // CACHE EM MEMÓRIA (resiliência contra rate-limit das fontes)
@@ -25,6 +28,12 @@ const TIMEOUT_MS = 10000;
 // Cache TTL 24h + dedup de consultas simultâneas resolve o padrão real.
 const CACHE_TTL_MS = 24 * 3600 * 1000;
 const CACHE_MAX = 2000;
+// v1.2.26: cache NEGATIVO — falha total (as 4 fontes derrubadas) também é
+// memorizada, por pouco tempo: CEP inexistente ou fontes fora do ar não podem
+// re-consultar as 4 fontes a CADA write do partner (rajada = martelo).
+// 5 min depois nova tentativa real; até lá a falha volta na hora c/ detalhes.
+const NEG_CACHE_TTL_MS = 5 * 60 * 1000;
+// Teto de memória: 2000 entradas x ~0.5-1KB (objeto de resultado curto) ≈ 1-2MB.
 const _cache = new Map();      // cep(8d) -> { expires: ts, resultado }
 const _inFlight = new Map();   // cep(8d) -> Promise<resultado>
 
@@ -35,13 +44,13 @@ function cacheGet(cep) {
   return hit.resultado;
 }
 
-function cacheSet(cep, resultado) {
+function cacheSet(cep, resultado, ttl) {
   if (_cache.size >= CACHE_MAX) {
     // evict mais antigo (primeira chave inserida ainda válida)
     const first = _cache.keys().next().value;
     if (first !== undefined) _cache.delete(first);
   }
-  _cache.set(cep, { expires: Date.now() + CACHE_TTL_MS, resultado: resultado });
+  _cache.set(cep, { expires: Date.now() + (ttl || CACHE_TTL_MS), resultado: resultado });
 }
 
 const FONTES = [
@@ -107,13 +116,19 @@ async function consultarCEP(cepRaw) {
     }
 
     // --- Nenhuma fonte respondeu ---
-    return {
+    // v1.2.26: falha total vai para o cache negativo (5 min) — chamadas
+    // seguintes do mesmo CEP na janela retornam instantâneo, sem re-atacar
+    // as fontes (era isso que derrubava tudo em rajada de writes).
+    var falha = {
       sucesso: false,
       erro: 'Nao foi possivel consultar o CEP nas fontes disponiveis.',
       cep: cep,
       fontes_consultadas: FONTES.map(f => f.nome),
       fontes_detalhes: detalhes,
+      cache_negativa_min: 5,
     };
+    cacheSet(cep, falha, NEG_CACHE_TTL_MS);
+    return falha;
   })();
 
   _inFlight.set(cep, consulta);
