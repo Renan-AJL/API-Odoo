@@ -30,7 +30,7 @@ var config = require('../config');
 var { IeService } = require('./ie.service');
 var ibgeMunicipios = require('./ibge-municipios');
 var { agendarBoletosAutomaticos } = require('./boleto-auto');
-var { carregarCertificadoPorCnpj } = require('./nfe-cert');
+var { carregarCertificadoPorCnpj, certificadoParaEmitente } = require('./nfe-cert');
 var _ieService = new IeService();
 
 // ============================================================
@@ -1458,6 +1458,19 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     if (FILIAIS_TRANSFER.indexOf(cnpjEmitTransf) >= 0) {
       var certFilial = null;
       try { certFilial = carregarCertificadoPorCnpj(cnpjEmitTransf); } catch (eCertFln) { certFilial = null; }
+      // AJL 05/11 (v1.2.21) — IVAIPORA: contador da AJL informou que o certificado
+      // e-CNPJ da Matriz (22603750000190) cobre a emissao da filial. Sem cert
+      // proprio da filial, tentar o certificado global/legado (env vars) e emitir
+      // por SEFAZ-direta — a SEFAZ-PR decide de verdade (autoriza ou rejeita
+      // 213/203/298). So cai para a SIEG quando NAO houver certificado nenhum.
+      // FLN e Ponta Grossa seguem intocadas (rota SIEG como antes).
+      if (!certFilial && cnpjEmitTransf === '22603750000271') {
+        try { certFilial = certificadoParaEmitente(cnpjEmitTransf); } catch (eCertLg) { certFilial = null; }
+        if (certFilial && certFilial.pfx) {
+          console.log('[SIEG-EMIT] Transferência Ivaiporã: sem cofre proprio — usando certificado ' +
+            ((certFilial.info && certFilial.info.cnpj) || 'legado') + ' — SEFAZ-direta (SEFAZ decide)');
+        }
+      }
       if (certFilial && certFilial.pfx) {
         console.log('[SIEG-EMIT] Transferência filial ' + cnpjEmitTransf + ': certificado A1 no cofre local — SEFAZ-direta (igual Matriz)');
       } else {
