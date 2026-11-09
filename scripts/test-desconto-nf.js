@@ -5,7 +5,8 @@
  *  C) vNF = total da fatura com desconto (payload desconto_valor)
  *  D) infCpl 'Desconto: R$ ...' no XML
  *  E) xProd = produto + observação (teto 120 chars)
- *  F) DANFE: coluna DESCRICAO 0.30 + quebra em 2 linhas
+ *  F) DANFE: coluna DESCRICAO (v2.2 = 0.283, rebalanceada p/ NCM/UN/BC sem
+ *     quebrar linha e cabecalho 'IPI %' sem typo PIPI) + quebra em 2 linhas
  * Execução: node scripts/test-desconto-nf.js
  */
 var path = require('path');
@@ -104,7 +105,9 @@ for (var li = 0; li < linhas73124.length; li++) {
 ok('todas as linhas da 73124 dentro do padrão SEFAZ', todasOk);
 
 console.log('== F. DANFE descrição maior + wrap ==');
-ok("coluna DESCRICAO 0.30", danfeSrc.indexOf("{ t: 'DESCRICAO', w: 0.30 }") >= 0);
+ok("coluna DESCRICAO 0.283 (v2.2, alinhamento itens)", danfeSrc.indexOf("{ t: 'DESCRICAO', w: 0.283 }") >= 0);
+ok("cabecalho da coluna IPI sem typo (v2.2)", danfeSrc.indexOf("{ t: 'IPI %', w: 0.045 }") >= 0 && danfeSrc.indexOf("{ t: 'PIPI") < 0);
+ok("truncamento por largura real (v2.2)", danfeSrc.indexOf("widthOfString") >= 0);
 ok('célula com quebra de 2 linhas (height)', danfeSrc.indexOf("height: h - 4") >= 0);
 ok('linha alta p/ descrição longa (h=22)', danfeSrc.indexOf("descTxt.length > 52 ? 22 : 14") >= 0);
 

@@ -10,6 +10,16 @@
  * v2.1 — VALOR TOTAL DA NOTA junto ao canhoto (demanda 29/10): aparece em
  *        DESTAQUE no canhoto (caixa esquerda, ao lado da assinatura) e na
  *        caixa do numero da NF — quem assina/recebe ve o valor ali em cima.
+ * v2.2 — FIX URGENTE (demanda 06/11, NF 73630): cabecalho da coluna IPI estava
+ *        com typo 'PIPI%' e os rotulos longos ('CST IPI', 'ALQ ICMS') nao
+ *        cabiam nas colunas — o pdfkit quebrava o rotulo em 2 linhas e a
+ *        2a linha ('IPI', '%') vazava para DENTRO da linha do produto (o
+ *        usuario via 'PIPI' e um 'IPI' solto na linha do item). Correcoes:
+ *        1) typo corrigido ('IPI %'); 2) larguras recalculadas p/ NCM, UN,
+ *        BC ICMS e outros valores NAO quebrarem linha; 3) truncamento MANUAL
+ *        de rotulo/valor (pdfkit ignora lineBreak:false com width); 4) valor
+ *        das celulas verticalmente centrado na linha (ficava 'grudado' no
+ *        topo quando a descricao quebrava em 2-3 linhas).
  */
 var PDFDocument = require('pdfkit');
 var bwipjs = require('bwip-js');
@@ -316,19 +326,36 @@ async function gerarDanfePdf(nfeProcXml, opts) {
   doc.fontSize(6).font('Helvetica-Bold').text('DADOS DOS PRODUTOS / SERVICOS', L, y); y += 8;
   // AJL 23/10/2026 (demanda): coluna DESCRICAO maior — cabe produto + observação
   // completa (desconto dado a COD/NCM/CST/QTD/BC/ALQ/IPI, que sobram legíveis).
+  // AJL 06/11/2026 (v2.2, NF 73630): larguras recalculadas — NCM (8 digitos),
+  // UN (MT/PC), BC ICMS e V.IPI NAO quebram linha; cabecalho 'PIPI%' -> 'IPI %'
+  // (typo) e rotulos curtos que cabem em 1 linha (sem vazamento p/ o item).
   var cols = [
-    { t: 'COD', w: 0.055 }, { t: 'DESCRICAO', w: 0.30 }, { t: 'NCM', w: 0.05 },
-    { t: 'CST', w: 0.03 }, { t: 'CFOP', w: 0.035 }, { t: 'UN', w: 0.025 },
+    { t: 'COD', w: 0.045 }, { t: 'DESCRICAO', w: 0.283 }, { t: 'NCM', w: 0.065 },
+    { t: 'CST', w: 0.036 }, { t: 'CFOP', w: 0.042 }, { t: 'UN', w: 0.032 },
     { t: 'QTD', w: 0.055 }, { t: 'V.UNIT', w: 0.07 }, { t: 'V.TOTAL', w: 0.07 },
-    { t: 'BC ICMS', w: 0.055 }, { t: 'V.ICMS', w: 0.045 }, { t: 'ALQ ICMS', w: 0.05 },
-    { t: 'CST IPI', w: 0.03 }, { t: 'V.IPI', w: 0.05 }, { t: 'PIPI%', w: 0.035 },
+    { t: 'BC ICMS', w: 0.064 }, { t: 'V.ICMS', w: 0.053 }, { t: 'ALQ %', w: 0.052 },
+    { t: 'CST', w: 0.036 }, { t: 'V.IPI', w: 0.052 }, { t: 'IPI %', w: 0.045 },
   ];
+  // Truncamento MANUAL com largura REAL da fonte (pdfkit quebra p/ a linha de
+  // baixo mesmo com lineBreak:false — foi o que jogou 'IPI'/'%' dentro da
+  // linha do item). Mede com widthOfString e corta com reticencias se precisar.
+  var truncFit = function (s, maxPt, pt, bold) {
+    s = String(s == null ? '' : s);
+    if (!s) return '';
+    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(pt);
+    if (doc.widthOfString(s) <= maxPt) return s;
+    var cut = s;
+    while (cut.length > 1 && doc.widthOfString(cut + '\u2026') > maxPt) cut = cut.slice(0, -1);
+    return cut + '\u2026';
+  };
   var x = L;
   // FIX (demanda usuario): linha do produto "grudada em cima e a esquerda" —
   // celula mais alta e texto com respiro vertical/horizontal.
   box(L, y, W, 14);
   cols.forEach(function (c) {
-    doc.fontSize(5.5).font('Helvetica-Bold').text(c.t, x + 4, y + 5, { width: W * c.w - 6, lineBreak: false });
+    var hTxt = truncFit(c.t, W * c.w - 8, 5, true);
+    doc.fontSize(5).font('Helvetica-Bold')
+      .text(hTxt, x + 3, y + 4, { width: W * c.w - 8, lineBreak: false });
     x += W * c.w;
   });
   y += 14;
@@ -365,8 +392,13 @@ async function gerarDanfePdf(nfeProcXml, opts) {
         doc.fontSize(5.8).font('Helvetica')
           .text(String(vals[i] || ''), xx + 4, y + 4, { width: W * c.w - 6, ellipsis: true, align: 'left', height: h - 4, lineGap: 0.2 });
       } else {
+        // v2.2: truncamento por largura REAL (nao deixa o valor quebrar p/ a
+        // linha de baixo) + centralizacao VERTICAL da celula (ficava colado
+        // no topo quando a descricao quebrava em varias linhas).
+        var cellVal = truncFit(vals[i], W * c.w - 8, 5.8, false);
+        var cellY = y + Math.max(4, (h - 7) / 2);
         doc.fontSize(5.8).font('Helvetica')
-          .text(String(vals[i] || ''), xx + 4, y + 5, { width: W * c.w - 6, lineBreak: false, ellipsis: true, align: align });
+          .text(cellVal, xx + 4, cellY, { width: W * c.w - 8, lineBreak: false, ellipsis: true, align: align });
       }
       xx += W * c.w;
     });
