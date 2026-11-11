@@ -530,9 +530,16 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   // Matriz da mercadoria recebida em transferência (NF original referenciada via
   // x_studio_nfs_referenciadas -> <NFref><refNFe> no <ide>). natOp pelo NOME do
   // tipo (NÃO a natOp fixa da transferência) e infCpl só com a referência.
-  var isDevolucaoTransf = opTypeCfop === '5902' || opTypeCfop === '6902';
+  // AJL 12/11/2026 (v1.2.29): inclui a DEVOLUÇÃO DE MERCADORIA RECEBIDA EM
+  // TRANSFERÊNCIA (CFOP 5209/6209 — op type 5.209, demanda fatura PRV-FAT3365).
+  // Mesma família: natOp pelo nome do tipo, NFref via x_studio_nfs_referenciadas,
+  // tPag 90/sem cobr (isTransferencia) e finNFe=4 (ver bloco do emitData.config).
+  var isDevolucaoTransf = opTypeCfop === '5902' || opTypeCfop === '6902' ||
+                          opTypeCfop === '5209' || opTypeCfop === '6209';
+  // natOp NÃO pode levar o prefixo numérico do cadastro ('5.209 - ...') — strip.
+  var opTypeNameNatOp = String(opTypeName || '').replace(/^\d\.\d{3}\s*-\s*/, '').trim() || opTypeName;
   if (isDevolucaoTransf) {
-    console.log('[SIEG-EMIT] DEVOLUÇÃO DE REMESSA DE TRANSFERÊNCIA (' + opTypeName + ', CFOP ' + opTypeCfop + '): natOp pelo tipo, NFref obrigatoria');
+    console.log('[SIEG-EMIT] DEVOLUÇÃO DE TRANSFERÊNCIA (' + opTypeName + ', CFOP ' + opTypeCfop + '): natOp pelo tipo, NFref via fatura, finNFe=4 quando CFOP x.2xx');
   }
 
   // 1c-4. REMESSA DESTINADA A ARMAZENAGEM (CFOP 5905/6905) — AJL 04/11/2026
@@ -1424,7 +1431,9 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       // AJL 05/11 (v1.2.22): devolução de transferência (5902/6902) usa o nome
       // do TIPO como natOp ('Devolução de remessa de transferência') — a natOp
       // fixa 'Transferencia de mercadoria...' só vale para a transferência normal.
-      natOp: (isTransferencia && !isDevolucaoTransf) ? 'Transferencia de mercadoria adquirida/recebida de' : (opTypeName || 'Venda de Mercadoria'),
+      // AJL 12/11 (v1.2.29): devolução usa o nome do tipo SEM prefixo numérico
+      // (opTypeNameNatOp); os demais ramos ficam exatamente como antes.
+      natOp: (isTransferencia && !isDevolucaoTransf) ? 'Transferencia de mercadoria adquirida/recebida de' : ((isDevolucaoTransf && opTypeNameNatOp) ? opTypeNameNatOp : (opTypeName || 'Venda de Mercadoria')),
       mod: tipo === 'nfe' ? '55' : '01',
       // AJL 27/10/2026: transporte da NF — modFrete/transporta/veicTransp/volumes
       // lidos da fatura (3d). Fatura sem frete/transportadora = 9/sem transporta
@@ -1466,8 +1475,24 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
         return 'NFe Ref.: série: ' + serieD + ' número: ' + nnumD +
           ' emit: ' + transfCnpjFmt(ck.substring(6, 20)) + ' em ' + mesAnoD + ' [' + grpD + ']';
       }).join(' | ');
-      emitData.order.infCpl = 'Devolução de remessa de transferência' + (devRefs ? '. ' + devRefs : '');
+      // AJL 12/11 (v1.2.29): texto do infCpl segue o CFOP — 5209/6209 = devolução
+      // de mercadoria recebida em transferência; 5902/6902 mantém o texto original.
+      var devTexto = (opTypeCfop === '5209' || opTypeCfop === '6209')
+        ? 'Devolução de mercadoria recebida em transferência'
+        : 'Devolução de remessa de transferência';
+      emitData.order.infCpl = devTexto + (devRefs ? '. ' + devRefs : '');
       console.log('[SIEG-EMIT] infCpl devolucao de transferencia: ' + emitData.order.infCpl);
+      // AJL 12/11/2026 (v1.2.29) — CFOP do grupo DEVOLUÇÃO DE COMPRA (x.2xx:
+      // 5201..5210 / 6201..6210, ex: 5209/6209 devolução de mercadoria recebida
+      // em transferência) EXIGE finNFe=4 (devolução de mercadoria) — regra SEFAZ
+      // N_328: com finNFe=1 a SEFAZ rejeita com "328 - CFOP de devolução de
+      // mercadoria para NF-e que não é de devolução ou de retorno" (caso real
+      // PRV-FAT3365/NFe 00073164, 11/11/2026). A 5902/6902 NÃO entra (fluxo
+      // anterior permanece finNFe=1, já autorizado na SEFAZ).
+      if (/^[56](20|21)\d$/.test(opTypeCfop)) {
+        emitData.config.finNFe = '4';
+        console.log('[SIEG-EMIT] CFOP ' + opTypeCfop + ' é DEVOLUÇÃO DE MERCADORIA -> finNFe=4 (regra SEFAZ 328)');
+      }
     }
     if (!isDevolucaoTransf) {
     // AJL 04/11 (noite) — infCpl PADRAO da transferencia (igual ao modelo autorizado
