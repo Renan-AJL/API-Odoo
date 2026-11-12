@@ -185,14 +185,16 @@ async function pushBoletosToOdoo(pushData) {
           htmlBody += 'PIX Copia e Cola: ' + pix;
         }
 
-        await executeKw(client, odooConfig.db, uid, odooConfig.password, 'mail.message', 'create', [{
-          model: 'account.move',
-          res_id: recordId,
+        // Odoo 19: mail.message.create com attachment_ids=[[6,0,[id]]] NAO vincula o
+        // anexo à mensagem (PDF fica orfão no registro, some do chatter). Usar
+        // message_post da mixin mail.thread com attachment_ids=[id] (lista de IDs)
+        // — mesmo fix aplicado na automação 1737 (DANFE). Retorna a linking correto.
+        await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'message_post', [[recordId]], {
           body: htmlBody,
           message_type: 'comment',
           subtype_xmlid: 'mail.mt_note',
-          attachment_ids: [[6, 0, [attachId]]],
-        }]);
+          attachment_ids: [attachId],
+        });
         console.log('[ODOO-PUSH]   Nota interna OK - boleto', (i + 1));
         totalAttachments++;
 
@@ -559,14 +561,13 @@ async function pushBoletosToSaleOrder(params) {
         htmlBody += 'Valor: R$ ' + vd + '<br/>';
         htmlBody += 'Vencimento: ' + vc + '<br/>';
 
-        await executeKw(client, db, uid, password, 'mail.message', 'create', [{
-          model: 'sale.order',
-          res_id: soId,
+        // Odoo 19: message_post (não mail.message.create) para vincular o PDF ao chatter
+        await executeKw(client, db, uid, password, 'sale.order', 'message_post', [[soId]], {
           body: htmlBody,
           message_type: 'comment',
           subtype_xmlid: 'mail.mt_note',
-          attachment_ids: [[6, 0, [attachId]]],
-        }]);
+          attachment_ids: [attachId],
+        });
         console.log('[ODOO-PUSH-SO]   Nota interna OK - boleto', (i + 1));
         soAttachments++;
 
@@ -657,15 +658,13 @@ async function copyInvoiceAttachmentsToSaleOrder(params) {
           mimetype: att.mimetype || 'application/pdf',
         }]);
 
-        // Postar chatter note
-        await executeKw(client, db, uid, password, 'mail.message', 'create', [{
-          model: 'sale.order',
-          res_id: soId,
+        // Postar chatter note (message_post para vincular o PDF corretamente no Odoo 19)
+        await executeKw(client, db, uid, password, 'sale.order', 'message_post', [[soId]], {
           body: '<b>Boleto</b> (cópia da fatura ID ' + invoiceId + ')<br/>Arquivo: ' + att.name,
           message_type: 'comment',
           subtype_xmlid: 'mail.mt_note',
-          attachment_ids: [[6, 0, [newAttId]]],
-        }]);
+          attachment_ids: [newAttId],
+        });
         copied++;
         console.log('[ODOO-COPY-SO]   Copiado:', att.name, '→ SO', soId);
       } catch (copyErr) {
