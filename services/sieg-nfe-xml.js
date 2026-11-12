@@ -52,9 +52,12 @@ function xmlEndereco(end, tagPrefix) {
   parts.push(`    <${tagPrefix}>`);
   parts.push(`      <xLgr>${esc(parsed.street)}</xLgr>`);
   parts.push(`      <nro>${esc(parsed.number)}</nro>`);
-  if (end.street2 || end.xBairro) {
-    parts.push(`      <xBairro>${esc(end.street2 || end.xBairro || '')}</xBairro>`);
-  }
+  // xBairro é OBRIGATÓRIO no schema NF-e 4.00 (enderDest/enderEmit) — não tem
+  // minOccurs=0. Se o bairro (street2) estiver vazio no cadastro do cliente,
+  // omitir o elemento faz o cMun aparecer fora de ordem → rejeição 225
+  // (cvc-complex-type.2.4.a). Fallback "." (TString aceita 1 char; prática
+  // padrão SEFAZ para campo desconhecido). Caso NFe 00073857 (S04545).
+  parts.push(`      <xBairro>${esc(end.street2 || end.xBairro || '.')}</xBairro>`);
   parts.push(`      <cMun>${esc(String(end.city_ibge_code || end.cMun || ''))}</cMun>`);
   parts.push(`      <xMun>${esc(end.city || end.xMun || '')}</xMun>`);
   parts.push(`      <UF>${esc(end.state || end.UF || '')}</UF>`);
