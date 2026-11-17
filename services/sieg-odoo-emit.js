@@ -1057,7 +1057,11 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     console.log('[SIEG-EMIT] Operacao INTERNA: ' + ufEmit + ' → ' + ufDest + ' — CFOP 5xxx, pICMS=' + icmsInternoPR + '%');
   }
   for (var i = 0; i < invoiceLines.length; i++) {
-    var ld = await buildLineData(client, db, uid, pwd, invoiceLines[i], icmsInternoPR);
+    // ctx (AJL 17/11/2026): buildLineData precisa saber se a fatura é transferência
+    // entre filiais p/ IPI CST 50 (modelo NF 14 da FLN) — ver bloco de IPI.
+    var ld = await buildLineData(client, db, uid, pwd, invoiceLines[i], icmsInternoPR, {
+      isTransferencia: isTransferencia, isInterstate: isInterstate,
+    });
     // Ajustar CFOP: se interestadual, 5xxx → 6xxx
     if (isInterstate && ld.cfop && /^5\d{3}$/.test(ld.cfop)) {
       var cfopOrig = ld.cfop;
@@ -1328,6 +1332,36 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     valorEntrada: epValorEntrada,
     qtdParcelas: epQtdParcelas,
   });
+
+  // 6d. TRANSFERÊNCIA INTERESTADUAL — BC do PIS/COFINS exclui o ICMS destacado
+  // (AJL 17/11/2026): o XML modelo autorizado da NF de transferência da FLN
+  // (chave 42260922603750000514550010000000141081562740, CST 01) traz
+  // vBC PIS/COFINS = vProd - vICMS (Lei 12.973/2014, art. 19, §2º) — ex.:
+  // 20894.94 - 2507.39 = 18387.55. O default do emissor usa BC cheia (vProd);
+  // nas transferências 6152 com ICMS 00 destacado, subtrai o ICMS da linha e
+  // recalcula vPIS/vCOFINS (não mexe no vNF — PIS/COFINS não somam no total).
+  if (isTransferencia && isInterstate) {
+    var nPisCofBase = 0;
+    for (var pbi = 0; pbi < linesData.length; pbi++) {
+      var pldB = linesData[pbi];
+      var pCfopB = String(pldB.cfop || '').replace(/\D/g, '');
+      var pVbcB = parseFloat(pldB.vbc_icms) || 0;
+      var pVicmsB = parseFloat(pldB.vicms) || 0;
+      var pPpisB = parseFloat(pldB.ppis) || 0;
+      var pPcofB = parseFloat(pldB.pcofins) || 0;
+      if (pCfopB === '6152' && String(pldB.cst_icms) === '00' && pVbcB > 0 && pVicmsB > 0) {
+        var pBcPisB = round2(pVbcB - pVicmsB);
+        pldB.vbc_pis = String(pBcPisB);
+        pldB.vpis = String(round2(pBcPisB * pPpisB / 100));
+        pldB.vbc_cofins = String(pBcPisB);
+        pldB.vcofins = String(round2(pBcPisB * pPcofB / 100));
+        nPisCofBase++;
+      }
+    }
+    if (nPisCofBase) {
+      console.log('[SIEG-EMIT] TRANSFERENCIA 6152: BC PIS/COFINS = vBC - vICMS em ' + nPisCofBase + ' linha(s) (modelo NF 14, Lei 12.973 art. 19 §2º)');
+    }
+  }
 
   // AJL 04/11/2026 — REMESSA ARMAZENAGEM: NF sem cobranca (igual ao modelo SIEG
   // autorizado: detPag tPag 90 / vPag 0.00, SEM bloco cobr/dup e SEM boletos).
@@ -2297,7 +2331,8 @@ function buildXProdCompleto(productName, lineName) {
   return out || 'Item';
 }
 
-async function buildLineData(client, db, uid, pwd, line, icmsInternoPR) {
+async function buildLineData(client, db, uid, pwd, line, icmsInternoPR, ctx) {
+  ctx = ctx || {};
   // icmsInternoPR: aliquota ICMS interna do emitente (PR: IE=12%, sem IE/CPF=19.5%)
   // Fallback defensivo caso chamador nao passe (evita ReferenceError)
   if (typeof icmsInternoPR === 'undefined' || icmsInternoPR === null || isNaN(parseFloat(icmsInternoPR))) {
@@ -2474,7 +2509,11 @@ async function buildLineData(client, db, uid, pwd, line, icmsInternoPR) {
       if ((txName.indexOf('IPI') >= 0) && txAmt > 0) {
         // Encontrou IPI nos tax_ids da invoice line!
         pipi = String(txAmt);
-        cstIpi = '00'; // CST 00 = tributado
+        // AJL 17/11/2026: transferência entre filiais sai com IPI CST 50 (suspensão),
+        // igual ao XML modelo autorizado da NF 14 da FLN (4226092260375000051455001…)
+        // que trouxe <IPITrib><CST>50</CST><vBC=vProd><pIPI 3.25><vIPI soma no vNF>.
+        // Demais notas (venda normal) continuam CST 00 (tributado).
+        cstIpi = ctx.isTransferencia ? '50' : '00';
         ipiFromTaxIds = true;
         console.log('[SIEG-EMIT-IPI] IPI encontrado nos tax_ids: aliquota=' + txAmt + '% tax=' + txName + ' price_include=' + !!tx.price_include);
         break;
@@ -2517,11 +2556,11 @@ async function buildLineData(client, db, uid, pwd, line, icmsInternoPR) {
     vipi = String(round2(grossSubtotal * parseFloat(pipi) / 100));
     console.log('[SIEG-EMIT-IPI] IPI calculado: vBC=' + vbcIpi + ' pIPI=' + pipi + '% vIPI=' + vipi);
   } else if (!cstIpi && parseFloat(pipi) > 0) {
-    // Tem alíquota mas sem CST - usar CST 00 como default
-    cstIpi = '00';
+    // Tem alíquota mas sem CST - usar CST 00 como default (50 na transferência)
+    cstIpi = ctx.isTransferencia ? '50' : '00';
     vbcIpi = String(grossSubtotal);
     vipi = String(round2(grossSubtotal * parseFloat(pipi) / 100));
-    console.log('[SIEG-EMIT-IPI] IPI sem CST, usando CST 00: vBC=' + vbcIpi + ' pIPI=' + pipi + '% vIPI=' + vipi);
+    console.log('[SIEG-EMIT-IPI] IPI sem CST, usando CST ' + cstIpi + ': vBC=' + vbcIpi + ' pIPI=' + pipi + '% vIPI=' + vipi);
   }
 
   // 4c. DESCONTO (AJL 23/10/2026 — demanda desconto na NF): o discount da

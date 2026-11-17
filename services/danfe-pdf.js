@@ -305,6 +305,12 @@ async function gerarDanfePdf(nfeProcXml, opts) {
   campo(L + 3 * c6, y, c6, 20, 'OUTRAS DESPESAS', moeda(tag(total, 'vOutro')), 7);
   campo(L + 4 * c6, y, c6, 20, 'IPI DEVOLVIDO', moeda(tag(total, 'vIPIDevol')), 7);
   campo(L + 5 * c6, y, c6, 20, 'VALOR TOTAL DA NOTA', moeda(tag(total, 'vNF')), 8, true);
+  y += 20;
+  // AJL 17/11/2026: VALOR DO PIS / VALOR DA COFINS de volta no DANFE (transferência
+  // FLN->Matriz saia sem nenhuma referencia a PIS/COFINS na impressao — usuario via
+  // só IPI 0,00 e achou que faltavam os 3 impostos; o XML ja tinha PIS/COFINS).
+  campo(L, y, c6 * 3, 20, 'VALOR DO PIS', moeda(tag(total, 'vPIS')), 7);
+  campo(L + c6 * 3, y, c6 * 3, 20, 'VALOR DA COFINS', moeda(tag(total, 'vCOFINS')), 7);
   y += 24;
 
   // --- Transportador ---
