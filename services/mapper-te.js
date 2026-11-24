@@ -425,35 +425,98 @@ function teCreateToOdoo(teResponse) {
  */
 var TE_SITUATION_CODES = ['0', '1', '3', '5', '6', '8', '9', '10', '11', '12'];
 
+/**
+ * AJL 24/11/2026 (v1.2.39) — catálogo do campo STATUS do TE descoberto ao vivo
+ * na entrega 2917/S02983 (o app deles marcava Entregue e nós gravávamos '5'
+ * "Não Entregue"). O Status do TE tem VOCABULÁRIO PRÓPRIO, NÃO é a nossa
+ * selection x_studio_te_situation:
+ *   1 Recepcionada no Active TudoEntregue
+ *   2 Enviada ao Motorista e Aguardando Aceite
+ *   3 Enviada ao Motorista e Aceita
+ *   5 Finalizada pelo Motorista
+ * Antes o número cru ia direto p/ nossa selection — colisão: TE 3 virava
+ * "Entregue" (era só aceite do motorista), TE 5 virava "Não Entregue" (era
+ * finalização — com ocorrência 01 é Entregue) e TE 1 virava "Em Rota"
+ * (era só recebimento). Tradução conservadora abaixo; o que não está no mapa
+ * NÃO grava código (fica no chatter).
+ */
+var TE_STATUS_TO_SITUATION = {
+  '1': '0',  // Recepcionada no Active -> Aguardando
+  '2': '1',  // Enviada ao Motorista (aguardando aceite) -> Em Rota
+  '3': '1',  // Enviada ao Motorista e Aceita -> Em Rota (NÃO "Entregue"!)
+  // '5' Finalizada pelo Motorista: NÃO traduz sozinho — ambíguo sem a
+  // ocorrência (finalização com 01 = Entregue; sem 01 pode ser finalização
+  // sem sucesso). Quem resolve é a ocorrência, que é a fonte autoritativa.
+};
+
+/**
+ * Última ocorrência de um registro/payload TE, normalizada.
+ * A ocorrência é a FONTE AUTORITATIVA do desfecho (descrição inequívoca),
+ * diferente do Status numérico (vocabulário interno do TE).
+ */
+function ultimaOcorrencia(d) {
+  var occs = (d && d.Occurrences) || [];
+  if (!occs.length) return null;
+  var last = occs[occs.length - 1];
+  return {
+    code: String((last && last.OccurrenceCode) || ''),
+    finisher: !!(last && last.Finisher === true),
+    name: (last && last.OccurrenceName) || '',
+    observation: (last && last.Observation) || '',
+  };
+}
+
+/**
+ * Decide x_studio_te_situation pela ÚLTIMA OCORRÊNCIA (autoritativa):
+ *   '01' + Finisher  -> '3' Entregue
+ *   '102'            -> '8' Entrega Cancelada
+ *   '03' + Finisher  -> '5' Não Entregue (recusa que encerrou a entrega)
+ *   '03'/'09' sem Finisher -> null (pode continuar — só texto no chatter)
+ * Catálogo real extraído dos dados 24/11 (v1.2.35): 01=ENTREGUE,
+ * 03=CLIENTE RECUSOU, 09=MERCADORIA EM DESACORDO, 102=ENTREGA CANCELADA.
+ */
+function situationPorOcorrencia(occ) {
+  if (!occ) return null;
+  if (occ.code === '01' && occ.finisher) return '3';
+  if (occ.code === '102') return '8';
+  if (occ.code === '03' && occ.finisher) return '5';
+  return null;
+}
+
 function teWebhookToOdoo(webhookData) {
   if (!webhookData) return {};
   var data = {};
   if (webhookData.OrderID) data.x_studio_te_order_id = String(webhookData.OrderID);
 
-  if (webhookData.Status && webhookData.Status.length) {
+  // 1) OCORRÊNCIA primeiro (autoritativa) — v1.2.39
+  var occ = ultimaOcorrencia(webhookData);
+  var porOcc = situationPorOcorrencia(occ);
+  if (porOcc) {
+    data.x_studio_te_situation = porOcc;
+  }
+
+  // 2) STATUS só como fallback TRADUZIDO (catálogo do TE != nossa selection)
+  if (!data.x_studio_te_situation && webhookData.Status && webhookData.Status.length) {
     var lastStatus = webhookData.Status[webhookData.Status.length - 1];
-    if (lastStatus.Status !== undefined && lastStatus.Status !== null) {
-      var sitCode = String(lastStatus.Status);
-      if (TE_SITUATION_CODES.indexOf(sitCode) !== -1) {
-        data.x_studio_te_situation = sitCode;
-      } else {
-        logger.warn('[MAPPER] Situacao TE fora do catalogo (' + sitCode + ') — x_studio_te_situation nao gravado; descricao segue no chatter.');
-      }
+    var st = (lastStatus && lastStatus.Status !== undefined && lastStatus.Status !== null)
+      ? String(lastStatus.Status) : '';
+    var trad = TE_STATUS_TO_SITUATION[st];
+    if (trad) {
+      data.x_studio_te_situation = trad;
+    } else if (st) {
+      logger.warn('[MAPPER] Status TE ' + st + ' sem traducao (fora do mapa ou '
+        + 'ambiguo, ex. 5 Finalizada sem ocorrência) — x_studio_te_situation nao gravado; '
+        + 'descricao segue no chatter.');
     }
   }
 
-  if (webhookData.Occurrences && webhookData.Occurrences.length) {
-    var lastOcc = webhookData.Occurrences[webhookData.Occurrences.length - 1];
-    // x_studio_te_observacao nao existe no Odoo; o campo real de ocorrencias
-    // é x_studio_te_ocorrencias (text, stock.picking) — no sale.order nao ha
-    // campo de ocorrencias e o safeWriteCustom descarta esse trecho sem quebrar o resto.
-    var occTxt = lastOcc.Observation || '';
-    if (lastOcc.OccurrenceName) {
-      occTxt = (occTxt ? occTxt + ' - ' : '') + lastOcc.OccurrenceName;
+  // 3) texto da ocorrência -> x_studio_te_ocorrencias
+  if (occ && (occ.observation || occ.name)) {
+    var occTxt = occ.observation;
+    if (occ.name) {
+      occTxt = (occTxt ? occTxt + ' - ' : '') + occ.name;
     }
-    if (occTxt) {
-      data.x_studio_te_ocorrencias = occTxt;
-    }
+    data.x_studio_te_ocorrencias = occTxt;
   }
 
   return data;
@@ -463,26 +526,17 @@ function teWebhookToOdoo(webhookData) {
  * TE -> Odoo a partir de um REGISTRO de entrega (listagem /api/Entregas ou
  * /v1/orders/finish) — usado pelo pull e pelas rotas de consulta.
  * Igual ao webhook, mas NAO sobrescreve o x_studio_te_order_id gravado no envio.
- * Fallback de situacao (AJL 24/11/2026): entregas do painel vem com Status []
- * (verificado em 100 registros reais), so com Occurrences — deriva o codigo da
- * ULTIMA ocorrencia quando for inequivoca (catalogo real extraido dos dados):
- *   '01' com Finisher=true -> '3' (Entregue);  '102' -> '8' (Entrega Cancelada).
- * Recusa (03) e desacordo (09) ficam so no texto: Finisher=false sugere
- * continuidade — o polling de /orders/situation cobre as entregas em vôo.
+ * Fonte de situação (v1.2.39): ÚLTIMA OCORRÊNCIA primeiro (01+Finisher->3,
+ * 102->8, 03+Finisher->5); Status do TE entra só como fallback TRADUZIDO
+ * (1->0, 2/3->1) — antes o número cru ia p/ nossa selection e entregas
+ * finalizadas viravam "Não Entregue" (bug real na entrega 2917/S02983).
+ * Entregas do painel com Status [] continuam funcionando (caem na ocorrência).
  */
-var TE_OCC_TO_SITUATION = { '01': '3', '102': '8' };
+var TE_OCC_TO_SITUATION = { '01': '3', '102': '8', '03': '5' };
 
 function teToOdooPicking(delivery) {
   var data = teWebhookToOdoo(delivery);
   delete data.x_studio_te_order_id;
-  if (!data.x_studio_te_situation && delivery && delivery.Occurrences && delivery.Occurrences.length) {
-    var last = delivery.Occurrences[delivery.Occurrences.length - 1];
-    var occCode = String(last.OccurrenceCode || '');
-    var mappedCode = TE_OCC_TO_SITUATION[occCode];
-    if (mappedCode && (occCode === '102' || last.Finisher === true)) {
-      data.x_studio_te_situation = mappedCode;
-    }
-  }
   return data;
 }
 

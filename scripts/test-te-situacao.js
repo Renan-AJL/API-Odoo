@@ -27,19 +27,27 @@ function check(name, fn) {
 }
 
 console.log('== mapper.teWebhookToOdoo ==');
-check('Status 1 -> x_studio_te_situation "1" + te_order_id', function() {
+check('Status 1 (Recepcionada no Active, catalogo TE) -> "0" Aguardando + te_order_id', function() {
   const d = mapper.teWebhookToOdoo({
     OrderID: '4321',
-    Status: [{ Status: 1, StatusDescription: 'Saiu para entrega' }],
+    Status: [{ Status: 1, StatusDescription: 'Recepcionada no Active TudoEntregue' }],
   });
-  assert.strictEqual(d.x_studio_te_situation, '1');
+  assert.strictEqual(d.x_studio_te_situation, '0', 'TE Status 1 = Recepcionada, NAO "Em Rota"');
   assert.strictEqual(d.x_studio_te_order_id, '4321');
   assert.strictEqual('x_studio_te_situacao' in d, false, 'campo inexistente nao pode mais ser gravado');
   assert.strictEqual('x_studio_te_situacao_desc' in d, false);
 });
-check('Status 10 (Em Separacao) e 12 (Baixada) mapeiam', function() {
-  assert.strictEqual(mapper.teWebhookToOdoo({ Status: [{ Status: 10 }] }).x_studio_te_situation, '10');
-  assert.strictEqual(mapper.teWebhookToOdoo({ Status: [{ Status: 12 }] }).x_studio_te_situation, '12');
+check('Status 2/3 (com motorista, catalogo TE) -> "1" Em Rota — NUNCA 3 Entregue', function() {
+  assert.strictEqual(mapper.teWebhookToOdoo({ Status: [{ Status: 2, StatusDescription: 'Enviada ao Motorista e Aguardando Aceite' }] }).x_studio_te_situation, '1');
+  assert.strictEqual(mapper.teWebhookToOdoo({ Status: [{ Status: 3, StatusDescription: 'Enviada ao Motorista e Aceita' }] }).x_studio_te_situation, '1');
+});
+check('Status 5 (Finalizada pelo Motorista) sem ocorrência 01 -> NAO grava (ambiguo)', function() {
+  const d = mapper.teWebhookToOdoo({ Status: [{ Status: 5, StatusDescription: 'Finalizada pelo Motorista' }] });
+  assert.strictEqual('x_studio_te_situation' in d, false, 'finalização sem ocorrência não pode virar 5 Não Entregue nem 3 Entregue');
+});
+check('Status 10/12 do TE nao tem traducao provada -> nao grava codigo', function() {
+  assert.strictEqual('x_studio_te_situation' in mapper.teWebhookToOdoo({ Status: [{ Status: 10 }] }), false);
+  assert.strictEqual('x_studio_te_situation' in mapper.teWebhookToOdoo({ Status: [{ Status: 12 }] }), false);
 });
 check('Status fora do catalogo (7) -> nao grava selection, nao quebra', function() {
   const d = mapper.teWebhookToOdoo({ Status: [{ Status: 7, StatusDescription: 'Operacao finalizada' }] });
@@ -157,12 +165,34 @@ check('nenhum campo morto nas listas de leitura custom', function() {
 });
 
 console.log('== mapper.teToOdooPicking / teToOdooSaleOrder (pull, AJL 24/11) ==');
-check('Status preenchido mapeia e NAO sobrescreve te_order_id', function() {
+check('OCORRENCIA vence Status: fixture REAL 2917/S02983 (app Entregue) -> "3", nunca "5"', function() {
+  // fixture capturada 24/11/2026 no poll-debug: o Status do TE termina em 5
+  // (Finalizada pelo Motorista) e a ocorrência é 01 ENTREGUE Finisher=true —
+  // o mapper antigo copiava o 5 cru e gravava "Não Entregue" (bug relatado)
+  const rec = {
+    OrderID: '2917',
+    OrderNumber: 'S02983',
+    Status: [
+      { ID: 94075242, Status: 1, StatusDescription: 'Recepcionada no Active TudoEntregue', Date: '2026-11-16T08:12:59' },
+      { ID: 94078134, Status: 2, StatusDescription: 'Enviada ao Motorista e Aguardando Aceite', Date: '2026-11-16T08:41:48' },
+      { ID: 94078142, Status: 3, StatusDescription: 'Enviada ao Motorista e Aceita', Date: '2026-11-16T08:41:49' },
+      { ID: 94078396, Status: 5, StatusDescription: 'Finalizada pelo Motorista', Date: '2026-11-16T08:46:26' },
+    ],
+    Occurrences: [
+      { OccurrenceCode: '01', OccurrenceDescription: 'ENTREGUE', OccurrenceName: 'ENTREGUE',
+        Finisher: true, OccurrenceDate: '2026-11-16T08:46:19' },
+    ],
+  };
+  const d = mapper.teToOdooPicking(rec);
+  assert.strictEqual(d.x_studio_te_situation, '3', 'ocorrência 01 ENTREGUE Finisher vence o Status 5 do TE');
+  assert.strictEqual('x_studio_te_order_id' in d, false, 'pull nao pode sobrescrever o id gravado no envio');
+});
+check('Status 3 sem ocorrência -> "1" Em Rota (era "3" Entregue errado)', function() {
   const d = mapper.teToOdooPicking({
     OrderID: '5802',
-    Status: [{ Status: 3, StatusDescription: 'Entregue' }],
+    Status: [{ Status: 3, StatusDescription: 'Enviada ao Motorista e Aceita' }],
   });
-  assert.strictEqual(d.x_studio_te_situation, '3');
+  assert.strictEqual(d.x_studio_te_situation, '1', 'aceite do motorista NAO é entrega');
   assert.strictEqual('x_studio_te_order_id' in d, false, 'pull nao pode sobrescrever o id gravado no envio');
 });
 check('Status [] + ocorrencia 01 Finisher=true -> situacao 3', function() {
@@ -187,6 +217,20 @@ check('ocorrencia 102 -> situacao 8 (cancelada, terminal mesmo sem Finisher)', f
     Occurrences: [{ OccurrenceCode: '102', OccurrenceDescription: 'ENTREGA CANCELADA', Finisher: false }],
   });
   assert.strictEqual(d.x_studio_te_situation, '8');
+});
+check('ocorrencia 03 (recusa) COM Finisher -> "5" Nao Entregue', function() {
+  const d = mapper.teToOdooPicking({
+    Status: [{ Status: 5, StatusDescription: 'Finalizada pelo Motorista' }],
+    Occurrences: [{ OccurrenceCode: '03', OccurrenceDescription: 'CLIENTE RECUSOU', Finisher: true }],
+  });
+  assert.strictEqual(d.x_studio_te_situation, '5');
+});
+check('ocorrencia 03/09 SEM Finisher -> nao grava codigo (pode continuar)', function() {
+  const d = mapper.teToOdooPicking({
+    Status: [],
+    Occurrences: [{ OccurrenceCode: '09', OccurrenceDescription: 'MERCADORIA EM DESACORDO', Finisher: false }],
+  });
+  assert.strictEqual('x_studio_te_situation' in d, false);
 });
 check('teToOdooSaleOrder nao leva x_studio_te_ocorrencias', function() {
   const d = mapper.teToOdooSaleOrder({
