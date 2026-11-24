@@ -357,3 +357,9 @@ Stage Summary:
 - Pull (/api/v1/te/deliveries/pull) reescrito: casamento PRIMEIRO por d.OrderID (é o que gravamos no envio) e fallback por findPickingByOrderNumber (origin); antes comparava d.OrderNumber com te_order_id e nunca casava; parâmetros novos ?dryRun=1 (grava nada, devolve preview de até 50 matches com campos que seriam gravados) e ?maxPages=N (teto de paginação — fetchAllPages ganhou 3º argumento; janelas largas paginavam 5s/página)
 - NOTA: plano free da Render suspende o processo sem tráfego HTTP de entrada (setInterval não conta como tráfego) — o polling de 5 min só roda enquanto o serviço está acordado; lastPoll gaps (07:46→07:56→08:01→nada) confirmam. Para o status fluir 24/7 precisa de keep-alive (ping externo a cada ≤15 min) ou plano pago
 - Testes: scripts/test-te-situacao.js agora 27 checks OK (6 novos: teToOdooPicking/teToOdooSaleOrder — Status preenchido, ocorrência 01 com/sem Finisher, 102, sale.order sem ocorrências, payload vazio) + node --check nos 5 fontes; server v1.2.35-te-pull-dryrun
+
+## 24/11/2026 v1.2.36 — Domínio do polling em notação polonesa ACHATADA (Odoo Online rejeita ['&', folha, folha])
+- A captura de erro do v1.2.35 revelou o motivo das rodadas zeradas desde o deploy do v1.2.34: TODA rodada crashava no searchRead — Odoo Online (saas-19.3) lança "TypeError: unhashable type: 'list'" em Domain() quando o domínio traz ['&', folha, folha] como ITEM aninhado; o item[1] vira lista e o parser quebra
+- Provado na prod (somente leitura): forma aninhada crasha com o MESMO traceback do middleware; forma achatada base + '|' folha + '&' folha folha retorna 59 — exatamente a fila esperada (521 sincronizados, piso de 7 dias)
+- Fix: buildPollDomain em notação polonesa achatada (operadores como strings de topo); teste novo garante folhas estritas (item[0] e item[1] strings) no domínio inteiro
+- Testes: scripts/test-te-situacao.js 28 checks OK; server v1.2.36-te-poll-flat-domain

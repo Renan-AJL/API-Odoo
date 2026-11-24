@@ -107,10 +107,20 @@ check('dominio mantem sincronizados + | em andamento OU recentes', function() {
   const flat = JSON.stringify(d);
   assert.ok(flat.indexOf('x_studio_te_order_id') !== -1, 'sem te_order_id');
   assert.ok(flat.indexOf('x_studio_te_sync') !== -1, 'sem te_sync');
-  assert.ok(flat.indexOf('"|")') === -1, 'operador OU não pode virar string');
   assert.ok(flat.indexOf('"|",') !== -1, 'falta o OU em-andamento/ recentes');
+  assert.ok(flat.indexOf('"&",') !== -1, 'falta o E (sem-situacao E agendada>=corte)');
   assert.ok(flat.indexOf('x_studio_te_situation') !== -1, 'sem filtro de situacao');
   assert.ok(flat.indexOf('scheduled_date') !== -1, 'sem piso de scheduled_date');
+});
+check('dominio ACHATADO (Odoo Online rejeita item aninhado [& folha folha])', function() {
+  // Prod comprovou 24/11: ['&', folha, folha] como ITEM -> TypeError unhashable
+  const d = tePoll.buildPollDomain();
+  d.forEach(function(item) {
+    if (Array.isArray(item)) {
+      assert.ok(typeof item[0] === 'string' && typeof item[1] === 'string',
+        'folha invalida (item[1] nao pode ser lista): ' + JSON.stringify(item).slice(0, 80));
+    }
+  });
 });
 check('ACTIVE_SITUATIONS = codigos nao-terminais do catalogo', function() {
   assert.deepStrictEqual(tePoll.ACTIVE_SITUATIONS, ['0', '1', '9', '10', '11']);

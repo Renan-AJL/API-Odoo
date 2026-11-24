@@ -63,8 +63,10 @@ function floorCutoff() {
 
 /**
  * Domínio da rodada: sincronizados + (em andamento | sem situação e recentes).
- * O "|  " mantém em vôo as que já têm código de acompanhamento, e o piso só
- * poda a fila de entregas antigas que o TE nunca pôde informar.
+ * NOTA (AJL 24/11/2026): Odoo Online (saas-19.3) REJEITA item aninhado
+ * ['&', folha, folha] com "TypeError: unhashable type: 'list'" em Domain()
+ * (provado na prod: a forma aninhada crasha, a achatada retorna 59) —
+ * notação polonesa ACHATADA, operadores como strings de topo.
  */
 function buildPollDomain() {
   const cutoff = floorCutoff();
@@ -75,14 +77,13 @@ function buildPollDomain() {
   if (!cutoff) {
     return base.concat([['x_studio_te_situation', 'not in', TERMINAL_SITUATIONS]]);
   }
+  // base AND (em andamento OR (sem situação AND agendada >= corte))
   return base.concat([
-    ['|',
-      ['x_studio_te_situation', 'in', ACTIVE_SITUATIONS],
-      ['&',
-        ['x_studio_te_situation', '=', false],
-        ['scheduled_date', '>=', cutoff],
-      ],
-    ],
+    '|',
+    ['x_studio_te_situation', 'in', ACTIVE_SITUATIONS],
+    '&',
+    ['x_studio_te_situation', '=', false],
+    ['scheduled_date', '>=', cutoff],
   ]);
 }
 
