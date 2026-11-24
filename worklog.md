@@ -370,3 +370,8 @@ Stage Summary:
 - /api/Entregas (pull antigo) dá 404 na base real do TE — rota pull fica para uso futuro com o dry-run já pronto
 - Diagnóstico poll-debug: variantes capitalizadas do finish + resumo compacto dos registros (não estoura payload)
 - Testes: 29 checks OK; server v1.2.37-te-poll-finish
+
+## 24/11/2026 v1.2.38 — finish devolve ARRAY NU: poll corrigido + validação DEFINITIVA do filtro capitalizado
+- Validado na prod com a entrega real 261307 (GUID a852ab66, ENTREGUE 13/01/2026, motorista da operação normal — nada atribuído para teste): finish?OrderType+OrderID devolve EXATAMENTE 1 registro (o dela); finish?OrderID sem OrderType devolve 100 (filtro ignorado); partial=true devolve 0 (entrega finalizada — coerente); situation devolve 0
+- /v1/orders/finish responde ARRAY NU (não {Result:[...]}) — poll corrigido p/ aceitar ambos
+- Teste novo com o registro REAL como fixture: mapper.teToOdooPicking -> x_studio_te_situation '3' + ocorrência no texto; 30 checks OK; server v1.2.38-te-finish-array

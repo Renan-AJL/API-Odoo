@@ -200,6 +200,23 @@ check('entrega sem situacao nem ocorrencia -> payload vazio (pull pula)', functi
   const d = mapper.teToOdooPicking({ OrderID: '5802', Status: [], Occurrences: [] });
   assert.strictEqual(Object.keys(d).length, 0);
 });
+check('REGISTRO REAL da prod (finish?OrderType+OrderID, GUID a852ab66) -> situacao 3', function() {
+  // fixture capturada 24/11/2026: entrega real 261307, 2 ocorrências, motorista
+  // atribuído pela operação normal (NADA foi atribuído para teste)
+  const rec = {
+    OrderID: 'a852ab66-44df-4c64-b71e-55549068912d',
+    OrderNumber: '261307',
+    Status: [],
+    TrackingUrl: 'https://app.tudoentregue.com.br/Tracking?Code=xxx',
+    Occurrences: [
+      { OccurrenceCode: '01', OccurrenceDescription: 'ENTREGUE', Finisher: true,
+        OccurrenceDate: '2026-01-13T10:11:00', OccurrenceName: 'Wilson' },
+    ],
+  };
+  const d = mapper.teToOdooPicking(rec);
+  assert.strictEqual(d.x_studio_te_situation, '3', 'ENTREGUE com Finisher deve virar codigo 3');
+  assert.ok(String(d.x_studio_te_ocorrencias).indexOf('Wilson') !== -1, 'texto da ocorrencia vai junto');
+});
 
 console.log('== consistencia do fonte ==');
 check('poll usa /v1/orders/finish?OrderType+OrderID (nao situation), v1.2.37', function() {

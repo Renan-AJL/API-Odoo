@@ -154,7 +154,10 @@ async function runTeSituationPoll() {
       // (provado no debug); o finish devolve a entrega COMPLETA — Occurrences,
       // TrackingUrl, Driver — assim que há ocorrência lançada pelo app.
       const resp = await teApi.client.getDeliveries({ OrderType: 1, OrderID: teOrderId, page: 1 });
-      const rec = (resp && resp.Result && resp.Result[0]) || null;
+      // /v1/orders/finish devolve ARRAY NU (verificado na prod) — aceita também
+      // {Result:[...]} defensivamente.
+      const list = Array.isArray(resp) ? resp : ((resp && resp.Result) || []);
+      const rec = list[0] || null;
       if (rec) {
         const mapped = Mapper.teToOdooPicking(rec);
         situ = mapped.x_studio_te_situation
@@ -257,10 +260,11 @@ async function debugOrderSituation(orderId) {
         : teApi.client.getOrderSituation(params);
       const r = await call;
       // resume registros completos p/ não estourar o payload do debug
-      if (r && r.Result && Array.isArray(r.Result) && r.Result.length && r.Result[0].OrderID) {
+      const lista = Array.isArray(r) ? r : ((r && r.Result) || []);
+      if (lista.length && lista[0].OrderID) {
         variants[nome] = {
-          total: r.Result.length,
-          registros: r.Result.slice(0, 3).map(function(rec) {
+          total: lista.length,
+          registros: lista.slice(0, 3).map(function(rec) {
             return {
               OrderID: rec.OrderID,
               OrderNumber: rec.OrderNumber,
