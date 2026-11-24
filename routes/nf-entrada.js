@@ -137,49 +137,78 @@ function ultimoDia(mesYYYYMM) {
 // ── Chamada SIEG com retry (429 rate-limit e timeout de rede) ───────────
 // AJL 24/11 (v1.2.41): o cofre SIEG vem devolvendo 429/timeout em rajadas
 // (o painel usa a mesma conta) — 2 retries com backoff e erro explicativo.
+// AJL 24/11 (v1.2.42): baixar-xmls as vezes responde 404 — a rota /sieg/cofre
+// ja trata isso como variante de "sem resultado" (v1.2.20); aqui vira valor
+// sentinela (__empty404) em vez de excecao. Demais HTTP != 200/404/429 ->
+// erro com o corpo (antes so dizia "status code X" sem contexto).
 async function siegBaixarXmls(body, headers) {
   var delays = [0, 5000, 10000];
   var lastErr = null;
   for (var i = 0; i < delays.length; i++) {
     if (delays[i]) await new Promise(function (r) { setTimeout(r, delays[i]); });
+    var resp;
     try {
-      return await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+      resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
         headers: headers, timeout: 15000, responseType: 'arraybuffer',
+        validateStatus: function () { return true; },
       }), 20000);
     } catch (e) {
       lastErr = e;
-      var status = e && e.response && e.response.status;
       var msg = String((e && e.message) || '');
-      var retriable = status === 429 || msg.indexOf('timeout') >= 0 || msg.indexOf('Timeout') >= 0;
-      if (!retriable) throw e;
-      console.log('[NF-ENTRADA] SIEG instavel (' + (status || msg.slice(0, 40)) + ') — retry ' + (i + 1));
+      if (msg.indexOf('timeout') < 0 && msg.indexOf('Timeout') < 0) throw e;
+      console.log('[NF-ENTRADA] SIEG timeout — retry ' + (i + 1));
+      continue;
     }
+    var status = resp.status;
+    if (status === 200) return resp;
+    if (status === 404) {
+      console.log('[NF-ENTRADA] SIEG 404 para', JSON.stringify(body).slice(0, 140), '— tratado como sem resultado');
+      return { __empty404: true };
+    }
+    if (status === 429) {
+      lastErr = new Error('SIEG HTTP 429 (rate limit)');
+      console.log('[NF-ENTRADA] SIEG 429 — retry ' + (i + 1));
+      continue;
+    }
+    var txt = '';
+    try {
+      txt = Buffer.isBuffer(resp.data) ? resp.data.toString('utf-8').slice(0, 200) : String(resp.data).slice(0, 200);
+    } catch (eTxt) { /* corpo ilegivel */ }
+    throw new Error('SIEG HTTP ' + status + ': ' + txt);
   }
   throw new Error('SIEG instavel (limite de uso/tempo esgotado apos retries) — aguarde ~1 minuto e clique Trazer .pdf de novo');
 }
 
 // ── Busca no cofre SIEG: paginada (Take<=50 — limite SIEG v1.2.20) ───────
-// Estrategia: mes da data da fatura primeiro; com CNPJdest da empresa, depois
-// sem filtro; so entao mes anterior. Max 3 paginas por tentativa (150 docs).
-async function buscarNfNoSieg(numero, meses, cnpjDest) {
-  var filtros = cnpjDest ? [true, false] : [false];
+// AJL 24/11 (v1.2.42): a NF 181163 do ACSO nao era achada — com filtro
+// CNPJdest ou sem filtro a 1a pagina de out/2026 ja traz 50 docs (AJL recebe
+// centenas de NFs/mes) e a nota fica fora das 150 primeiras. Estrategia nova:
+// 1o filtro CNPJemit do FORNECEDOR (vat do partner — ACSO=35 docs em out/26,
+// achou na 1a pagina), depois CNPJdest da empresa, depois sem filtro; mes da
+// fatura antes do anterior; ate 6 paginas (300 docs) por tentativa.
+async function buscarNfNoSieg(numero, meses, cnpjDest, cnpjEmit) {
+  var tentativasCfg = [];
+  if (cnpjEmit) tentativasCfg.push({ label: 'emit', campo: 'CNPJemit', cnpj: cnpjEmit });
+  if (cnpjDest) tentativasCfg.push({ label: 'dest', campo: 'CNPJdest', cnpj: cnpjDest });
+  tentativasCfg.push({ label: 'semfiltro', campo: '', cnpj: '' });
   var candidatos = [];
   var tentativas = [];
   for (var mi = 0; mi < meses.length && !candidatos.length; mi++) {
     var mes = meses[mi];
-    for (var fi = 0; fi < filtros.length && !candidatos.length; fi++) {
-      var usarCnpj = filtros[fi];
-      for (var pg = 0; pg < 3 && !candidatos.length; pg++) {
+    for (var ti = 0; ti < tentativasCfg.length && !candidatos.length; ti++) {
+      var tc = tentativasCfg[ti];
+      for (var pg = 0; pg < 6 && !candidatos.length; pg++) {
         var body = {
           TipoXml: 1, Take: 50, Skip: pg * 50,
           DataEmissaoInicio: mes + '-01T00:00:00Z',
           DataEmissaoFim: ultimoDia(mes) + 'T23:59:59Z',
         };
-        if (usarCnpj) body.CNPJdest = cnpjDest;
-        tentativas.push(mes + (usarCnpj ? '/cnpj' : '') + '/p' + (pg + 1));
+        if (tc.campo) body[tc.campo] = tc.cnpj;
+        tentativas.push(mes + '/' + tc.label + '/p' + (pg + 1));
         console.log('[NF-ENTRADA] SIEG busca:', JSON.stringify(body));
         var headers = await withTimeout(getAuthHeaders(), 15000);
         var resp = await siegBaixarXmls(body, headers);
+        if (!resp || resp.__empty404) break; // sem resultado nessa tentativa
         var zip = new AdmZip(resp.data);
         var entries = zip.getEntries();
         console.log('[NF-ENTRADA] SIEG zip entries:', entries.length);
@@ -193,6 +222,7 @@ async function buscarNfNoSieg(numero, meses, cnpjDest) {
           if (parseInt(cand.nNF, 10) !== parseInt(numero, 10)) continue;
           if (!candidatos.some(function (c) { return c.chave === cand.chave; })) candidatos.push(cand);
         }
+        if (entries.length < 50) break; // paginacao esgotou
       }
     }
   }
@@ -255,7 +285,15 @@ async function trazerPdfParaMove(moveId) {
     cnpjDest = (comps[0].vat || '').replace(/\D/g, '');
   }
 
-  var busca = await buscarNfNoSieg(numero, meses, cnpjDest);
+  // AJL 24/11 (v1.2.42): CNPJ do FORNECEDOR (vat do partner) — filtro mais
+  // seletivo; sem ele a NF some entre as centenas de entradas do mes.
+  var cnpjEmit = '';
+  if (move.partner_id && move.partner_id[0]) {
+    var parts = await ekw('res.partner', 'read', [[move.partner_id[0]], ['vat']]);
+    cnpjEmit = (parts[0].vat || '').replace(/\D/g, '');
+  }
+
+  var busca = await buscarNfNoSieg(numero, meses, cnpjDest, cnpjEmit);
   var candidatos = busca.candidatos;
 
   if (!candidatos.length) {
