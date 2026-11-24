@@ -294,11 +294,52 @@ function extrairMoveId(body) {
   return 0;
 }
 
+// fallback: payload sem id -> resolve a fatura pelo numero do documento
+function extrairNumero(body) {
+  if (!body) return '';
+  var cand = body.l10n_latam_document_number || body.ref || body.name || '';
+  if (Array.isArray(body) && body[0]) {
+    cand = body[0].l10n_latam_document_number || body[0].ref || body[0].name || cand;
+  }
+  if (body.records && body.records[0]) {
+    cand = body.records[0].l10n_latam_document_number || body.records[0].ref || body.records[0].name || cand;
+  }
+  return String(cand || '').trim();
+}
+
+async function resolverMovePorNumero(numeroRaw) {
+  var cfg = config.odoo;
+  if (!numeroRaw) return 0;
+  var c = createClient(cfg.url);
+  var uid = await authenticate(c, cfg.db, cfg.user, cfg.password);
+  var dom = ['&',
+    ['move_type', 'in', ['in_invoice', 'in_refund', 'in_receipt']],
+    '|', '|',
+    ['ref', '=', numeroRaw],
+    ['name', '=', numeroRaw],
+    ['l10n_latam_document_number', '=', numeroRaw],
+  ];
+  var ids = await executeKw(c, cfg.db, uid, cfg.password, 'account.move', 'search', [dom],
+    { limit: 5, order: 'create_date desc' });
+  return (ids && ids.length === 1) ? ids[0] : 0;
+}
+
 // ═════════════════════════════════════════════════════════════════════════
 // POST /trazer-pdf — webhook do Odoo (responde <2s, trabalho em background)
 // ═════════════════════════════════════════════════════════════════════════
 router.post('/trazer-pdf', async function (req, res) {
   var moveId = extrairMoveId(req.body);
+  if (!moveId) {
+    var numeroBody = extrairNumero(req.body);
+    if (numeroBody) {
+      try {
+        moveId = await withTimeout(resolverMovePorNumero(numeroBody), 20000);
+        console.log('[NF-ENTRADA] resolveu por numero', numeroBody, '-> move', moveId);
+      } catch (eRes) {
+        console.error('[NF-ENTRADA] resolucao por numero falhou:', eRes.message);
+      }
+    }
+  }
   if (!moveId) {
     return res.status(400).json({ success: false, error: 'id da fatura ausente no payload do webhook' });
   }
