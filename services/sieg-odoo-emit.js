@@ -32,6 +32,7 @@ var ibgeMunicipios = require('./ibge-municipios');
 var { agendarBoletosAutomaticos, executarBoletosAutomaticos } = require('./boleto-auto');
 var { carregarCertificadoPorCnpj, certificadoParaEmitente } = require('./nfe-cert');
 var { aplicarCstIcmsManualLinhas, CSTS_SEM_DESTAQUE } = require('./cst-icms-manual');
+var { aplicarStManualLinhas } = require('./st-icms-manual');
 var _ieService = new IeService();
 
 // ============================================================
@@ -1309,17 +1310,48 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
     console.log('[SIEG-EMIT] Campo CST ICMS manual não lido (segue automático): ' + eCstMan.message);
   }
 
+  // 6e. ST ICMS MANUAL — x_studio_st_icms + MVA ST + Alíq. ST (AJL 24/11/2026, v1.2.44)
+  // Demanda: NF com Substituição Tributária que SOMA no valor da NF (fatura
+  // OURO PRETO #5975, 30x43.22 = 1296.60 no preço de tabela): vProd intocado,
+  // BCST/MVA/vICMSST destacados e vNF = vProd + vICMSST (seção 7 soma vSTSum).
+  // Campo ST vazio -> nada aqui roda (emissão idêntica à de hoje). CST manual
+  // sem-destaque (40/41/50) junto com ST = contradição -> erro claro, sem emitir.
+  try {
+    var mvSt = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], [
+      'x_studio_st_icms', 'x_studio_mva_st', 'x_studio_aliquota_st',
+    ]]);
+    var stVal = String((mvSt && mvSt[0] && mvSt[0].x_studio_st_icms) || '').replace(/\D/g, '');
+    if (stVal === '10') {
+      var cstSemDest = CSTS_SEM_DESTAQUE.indexOf(String(cstManualVal || '').replace(/\D/g, '')) >= 0;
+      if (cstSemDest) {
+        throw new Error('Fatura com CST manual ' + cstManualVal + ' (sem destaque) E campo ST ativado — são excludentes. Escolha um dos dois.');
+      }
+      var stRes = aplicarStManualLinhas(linesData, {
+        mva: parseFloat((mvSt && mvSt[0] && mvSt[0].x_studio_mva_st) || 0),
+        aliquotaSt: parseFloat((mvSt && mvSt[0] && mvSt[0].x_studio_aliquota_st) || 0),
+      });
+      console.log('[SIEG-EMIT] ST ICMS MANUAL aplicada em ' + linesData.length + ' linha(s): CST 10, DIFAL zerado, vNF = vProd + vICMSST (ST soma no valor da NF)');
+    } else if (stVal) {
+      console.log('[SIEG-EMIT] Campo ST "' + stVal + '" não é "10" — ignorado (fluxo automático)');
+    }
+  } catch (eStMan) {
+    // ST pedida mas dados errados => NÃO emite NF errada (mesmo padrão do pre-check NCM)
+    throw new Error('ST ICMS manual: ' + eStMan.message);
+  }
+
   // 7. Build emission payload
-  // vNF = vProd + vIPI (unico imposto que soma no valor da NF)
+  // vNF = vProd + vIPI + vICMSST (AJL 24/11/2026: ST soma no valor da NF)
   // vProd = soma dos price_subtotal (sem IPI incluso)
   var vProdSum = 0;
   var vIPISum = 0;
+  var vSTSum = 0;
   for (var li = 0; li < linesData.length; li++) {
     vProdSum += parseFloat(linesData[li].price_subtotal) || 0;
     vIPISum += parseFloat(linesData[li].vipi || 0);
+    vSTSum += parseFloat(linesData[li].vicmsst || 0);
   }
-  var vNFValue = round2(vProdSum + vIPISum);
-  console.log('[SIEG-EMIT] vNF = vProd(' + vProdSum.toFixed(2) + ') + vIPI(' + vIPISum.toFixed(2) + ') = ' + vNFValue.toFixed(2));
+  var vNFValue = round2(vProdSum + vIPISum + vSTSum);
+  console.log('[SIEG-EMIT] vNF = vProd(' + vProdSum.toFixed(2) + ') + vIPI(' + vIPISum.toFixed(2) + ') + vICMSST(' + vSTSum.toFixed(2) + ') = ' + vNFValue.toFixed(2));
 
   // Pagamentos + duplicatas a partir da FORMA DE PAGAMENTO do campo correto
   // da fatura (x_studio_forma_de_pagamento). Somente IPI soma no vNF.

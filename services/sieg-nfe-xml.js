@@ -203,7 +203,16 @@ function xmlImpostoItem(line, crt, ibsInfo, difal) {
     //     modBC/vBC/pICMS/vICMS sao PROIBIDOS (cvc-complex-type.2.4.a).
     //   ICMS51 (diferimento): orig + CST e tudo o mais OPCIONAL — bloco minimo valido.
     //   CSTs tributados (00/10/90...): bloco completo obrigatorio/valido.
-    if (['40','41','50','51'].includes(cstNum)) {
+    if (cstNum === '10' && (parseFloat(line.vbcst) || 0) > 0) {
+      // AJL 24/11/2026 (v1.2.44): ST ICMS manual (CST 10, services/st-icms-manual.js).
+      // Ordem do XSD oficial ICMS10: orig, CST, modBC, vBC, pICMS, vICMS,
+      // (vBCFCP/pFCP/vFCP), modBCST, pMVAST, (pRedBCST), vBCST, pICMSST, vICMSST.
+      icmsBlock = `<ICMS><ICMS10><orig>${orig}</orig><CST>10</CST><modBC>${modBC || '3'}</modBC><vBC>${vBC}</vBC><pICMS>${pICMS}</pICMS><vICMS>${vICMS}</vICMS><modBCST>${line.modbcst || '4'}</modBCST><pMVAST>${num(line.pmvast || '0')}</pMVAST><vBCST>${num(line.vbcst)}</vBCST><pICMSST>${num(line.picmsst || '0')}</pICMSST><vICMSST>${num(line.vicmsst || '0')}</vICMSST></ICMS10></ICMS>`;
+    } else if (cstNum === '10') {
+      // CST 10 SEM dados de ST = XML invalido (XSD exige vBCST/vICMSST) — aborta
+      // com mensagem de negocio em vez de mandar rejeicao 225 para a SEFAZ.
+      throw new Error('Item com CST 10 (ST) sem dados de ST (vBCST/vICMSST). Ative o campo ST da fatura com MVA ST (%) e Alíq. ICMS ST (%) preenchidos, ou use CST 00.');
+    } else if (['40','41','50','51'].includes(cstNum)) {
       icmsBlock = `<ICMS><${tag}><orig>${orig}</orig><CST>${cstIcms}</CST></${tag}></ICMS>`;
     } else {
       icmsBlock = `<ICMS><${tag}><orig>${orig}</orig><CST>${cstIcms}</CST><modBC>${modBC || '0'}</modBC><vBC>${vBC}</vBC><pICMS>${pICMS}</pICMS><vICMS>${vICMS}</vICMS></${tag}></ICMS>`;
@@ -651,9 +660,13 @@ ${xmlEndereco(partner, 'enderDest')}
   // O total deve ser a soma exata dos valores que aparecem no XML por item.
   // Se somarmos valores brutos e arredondarmos só o total, diverge (cStat 603/602).
   let vBC_total = 0, vICMS_total = 0, vPIS_total = 0, vCOFINS_total = 0, vIPI_total = 0;
+  // AJL 24/11/2026 (v1.2.44): acumuladores de ST (vBCST/vICMSST por item)
+  let vBCST_total = 0, vICMSST_total = 0;
   lines.forEach(line => {
     vBC_total += round2(parseFloat(line.vbc_icms || line.vbc || 0));
     vICMS_total += round2(parseFloat(line.vicms || 0));
+    vBCST_total += round2(parseFloat(line.vbcst || 0));
+    vICMSST_total += round2(parseFloat(line.vicmsst || 0));
     vPIS_total += round2(parseFloat(line.vpis || 0));
     vCOFINS_total += round2(parseFloat(line.vcofins || 0));
     vIPI_total += round2(parseFloat(line.vipi || 0));
@@ -664,11 +677,12 @@ ${xmlEndereco(partner, 'enderDest')}
   var vTotTrib = 0;
   // (loop removido: vTrib por item nao e permitido no schema com IBSCBS)
 
-  // REGRA: vNF = vProd + vIPI (unico imposto que soma no valor da NF)
+  // REGRA: vNF = vProd + vIPI + vICMSST (AJL 24/11/2026, v1.2.44: ST soma no
+  // valor da NF junto com o IPI — sem ST o acumulador vale 0 e nada muda)
   // IRPJ, CSLL, PIS, COFINS NAO somam no valor da NF.
   // Se usarmos amount_total do Odoo, ele inclui IRPJ/CSLL e infla o valor.
-  const vNF = num(round2(vProdTotal + vIPI_total));
-  console.log('[NFE-XML] vNF calculado: vProd=' + num(vProdTotal) + ' + vIPI=' + num(vIPI_total) + ' = ' + vNF + ' (amount_total original: ' + (order.amount_total || 'N/A') + ')');
+  const vNF = num(round2(vProdTotal + vIPI_total + vICMSST_total));
+  console.log('[NFE-XML] vNF calculado: vProd=' + num(vProdTotal) + ' + vIPI=' + num(vIPI_total) + ' + vICMSST=' + num(vICMSST_total) + ' = ' + vNF + ' (amount_total original: ' + (order.amount_total || 'N/A') + ')');
   xml += `
     <total>
       <ICMSTot>
@@ -679,8 +693,8 @@ ${xmlEndereco(partner, 'enderDest')}
         <vICMSUFDest>${num(round2(vICMSUFDest_total))}</vICMSUFDest>
         <vICMSUFRemet>${num(round2(vICMSUFRemet_total))}</vICMSUFRemet>
         <vFCP>0.00</vFCP>
-        <vBCST>0.00</vBCST>
-        <vST>0.00</vST>
+        <vBCST>${num(round2(vBCST_total))}</vBCST>
+        <vST>${num(round2(vICMSST_total))}</vST>
         <vFCPST>0.00</vFCPST>
         <vFCPSTRet>0.00</vFCPSTRet>
         <vProd>${num(vProdTotal)}</vProd>
