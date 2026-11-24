@@ -130,7 +130,10 @@ async function runTeSituationPoll() {
     0,
     'id desc'
   );
-  if (!pickings || !pickings.length) return res;
+  if (!pickings || !pickings.length) {
+    LAST_RUN = { ts: new Date().toISOString(), result: res, error: null };
+    return res;
+  }
 
   logger.info('[TE-POLL] ' + pickings.length + ' entrega(s) em acompanhamento' +
     (FLOOR_DAYS > 0 ? ' (janela ' + FLOOR_DAYS + 'd ou em andamento)' : ''));
@@ -189,9 +192,17 @@ async function runTeSituationPoll() {
     await new Promise(r => setTimeout(r, GAP_BETWEEN_CALLS_MS));
   }
 
+  // AJL 24/11/2026: registra o resultado E a exceção (antes o finally gravava
+  // error:null sempre e rodadas quebradas ficavam indistinguíveis de vazias).
+  LAST_RUN = { ts: new Date().toISOString(), result: res, error: null };
   return res;
-  } finally {
-    LAST_RUN = { ts: new Date().toISOString(), result: res, error: null };
+  } catch (err) {
+    LAST_RUN = {
+      ts: new Date().toISOString(),
+      result: res,
+      error: (err && err.message) ? err.message : String(err),
+    };
+    throw err;
   }
 }
 

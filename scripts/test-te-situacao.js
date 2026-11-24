@@ -146,6 +146,51 @@ check('nenhum campo morto nas listas de leitura custom', function() {
   });
 });
 
+console.log('== mapper.teToOdooPicking / teToOdooSaleOrder (pull, AJL 24/11) ==');
+check('Status preenchido mapeia e NAO sobrescreve te_order_id', function() {
+  const d = mapper.teToOdooPicking({
+    OrderID: '5802',
+    Status: [{ Status: 3, StatusDescription: 'Entregue' }],
+  });
+  assert.strictEqual(d.x_studio_te_situation, '3');
+  assert.strictEqual('x_studio_te_order_id' in d, false, 'pull nao pode sobrescrever o id gravado no envio');
+});
+check('Status [] + ocorrencia 01 Finisher=true -> situacao 3', function() {
+  const d = mapper.teToOdooPicking({
+    OrderID: '5802',
+    Status: [],
+    Occurrences: [{ OccurrenceCode: '01', OccurrenceDescription: 'ENTREGUE', Finisher: true }],
+  });
+  assert.strictEqual(d.x_studio_te_situation, '3');
+});
+check('Status [] + ocorrencia 01 SEM Finisher -> nao grava situacao', function() {
+  const d = mapper.teToOdooPicking({
+    OrderID: '5802',
+    Status: [],
+    Occurrences: [{ OccurrenceCode: '01', OccurrenceDescription: 'ENTREGUE', Finisher: false }],
+  });
+  assert.strictEqual('x_studio_te_situation' in d, false, 'recusa/desacordo/nao-finalizado nao pode virar codigo terminal');
+});
+check('ocorrencia 102 -> situacao 8 (cancelada, terminal mesmo sem Finisher)', function() {
+  const d = mapper.teToOdooPicking({
+    Status: [],
+    Occurrences: [{ OccurrenceCode: '102', OccurrenceDescription: 'ENTREGA CANCELADA', Finisher: false }],
+  });
+  assert.strictEqual(d.x_studio_te_situation, '8');
+});
+check('teToOdooSaleOrder nao leva x_studio_te_ocorrencias', function() {
+  const d = mapper.teToOdooSaleOrder({
+    Status: [],
+    Occurrences: [{ OccurrenceCode: '01', OccurrenceDescription: 'ENTREGUE', Finisher: true, Observation: 'ok' }],
+  });
+  assert.strictEqual(d.x_studio_te_situation, '3');
+  assert.strictEqual('x_studio_te_ocorrencias' in d, false);
+});
+check('entrega sem situacao nem ocorrencia -> payload vazio (pull pula)', function() {
+  const d = mapper.teToOdooPicking({ OrderID: '5802', Status: [], Occurrences: [] });
+  assert.strictEqual(Object.keys(d).length, 0);
+});
+
 console.log('== consistencia do fonte ==');
 const webhookSrc = fs.readFileSync(path.join(ROOT, 'routes/webhook-te.js'), 'utf8');
 check('webhook marca x_studio_te_webhook_received no sale.order', function() {

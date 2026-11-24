@@ -359,7 +359,7 @@ class TudoEntregueClient {
   // -------------------------------------------------------
   // Paginacao automatica
   // -------------------------------------------------------
-  async fetchAllPages(endpoint, params = {}) {
+  async fetchAllPages(endpoint, params = {}, maxPages = 0) {
     const allResults = [];
     let page = 1;
     let emptyCount = 0;
@@ -378,6 +378,13 @@ class TudoEntregueClient {
 
       if (!response.data?.HasNextPage) break;
       page++;
+
+      // AJL 24/11/2026: teto de paginas (maxPages>0) — janelas de datas largas
+      // no /api/Entregas podiam paginar por minutos com 5s entre paginas.
+      if (maxPages && page > maxPages) {
+        console.log(`[TE] Paginacao interrompida no teto de ${maxPages} paginas (${allResults.length} itens)`);
+        break;
+      }
 
       if (page > 1) {
         console.log(`[TE] Paginacao: esperando ${this.pageIntervalMs}ms antes da pagina ${page}`);

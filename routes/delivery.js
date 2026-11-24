@@ -300,30 +300,68 @@ router.get('/deliveries/situations', async (req, res) => {
 // -------------------------------------------------------
 router.get('/deliveries/pull', async (req, res) => {
   try {
-    const { dateFrom, dateTo, situation } = req.query;
+    const { dateFrom, dateTo, situation, dryRun, maxPages } = req.query;
 
     const params = { page: 1 };
     if (dateFrom) params.dateFrom = dateFrom;
     if (dateTo) params.dateTo = dateTo;
     if (situation) params.situation = parseInt(situation, 10);
 
-    const allDeliveries = await teClient.fetchAllPages('/api/Entregas', params);
+    const tetoPaginas = parseInt(maxPages, 10) || 0;
+    const isDryRun = dryRun === '1' || dryRun === 'true';
+
+    const allDeliveries = await teClient.fetchAllPages('/api/Entregas', params, tetoPaginas);
 
     let updated = 0;
     let notFound = 0;
+    let semMudanca = 0;
+    const preview = [];
 
     for (const d of allDeliveries) {
-      const orderNum = d.OrderNumber || d.orderNumber;
-      const picking = await odooTe.findPickingByTeId(orderNum);
+      // AJL 24/11/2026: casa PRIMEIRO pelo OrderID (o que gravamos no envio —
+      // x_studio_te_order_id = OrderID numérico ecoado pelo TE), e só depois
+      // pelo OrderNumber (nome do pedido de venda = picking.origin). Antes o
+      // pull comparava OrderNumber com te_order_id e nunca casava nada.
+      const teId = String(d.OrderID || '').trim();
+      const orderNum = String(d.OrderNumber || d.orderNumber || '').trim();
+
+      let picking = teId ? await odooTe.findPickingByTeId(teId) : null;
+      if (!picking && orderNum) picking = await odooTe.findPickingByOrderNumber(orderNum);
 
       if (picking) {
         const mapped = Mapper.teToOdooPicking(d);
+        const campos = Object.keys(mapped);
+        if (isDryRun) {
+          preview.push({
+            picking: picking.name || picking.id,
+            teOrderId: teId,
+            teOrderNumber: orderNum,
+            situacaoMapeada: mapped.x_studio_te_situation || null,
+            ocorrencia: mapped.x_studio_te_ocorrencias || null,
+            camposQueSeriamGravados: campos,
+          });
+          continue;
+        }
+        if (campos.length === 0) { semMudanca++; continue; }
         await odooTe.updatePickingTeData(picking.id, mapped);
         updated++;
       } else {
-        const so = await odooTe.findSaleOrderByTeId(orderNum);
+        const so = teId ? await odooTe.findSaleOrderByTeId(teId) : null;
         if (so) {
-          await odooTe.updateSaleOrderTeData(so.id, Mapper.teToOdooSaleOrder(d));
+          const mapped = Mapper.teToOdooSaleOrder(d);
+          const campos = Object.keys(mapped);
+          if (isDryRun) {
+            preview.push({
+              saleOrder: so.name || so.id,
+              teOrderId: teId,
+              teOrderNumber: orderNum,
+              situacaoMapeada: mapped.x_studio_te_situation || null,
+              camposQueSeriamGravados: campos,
+            });
+            continue;
+          }
+          if (campos.length === 0) { semMudanca++; continue; }
+          await odooTe.updateSaleOrderTeData(so.id, mapped);
           updated++;
         } else {
           notFound++;
@@ -333,9 +371,13 @@ router.get('/deliveries/pull', async (req, res) => {
 
     res.json({
       success: true,
+      dryRun: isDryRun,
       totalFetched: allDeliveries.length,
+      tetoPaginas: tetoPaginas,
       updatedInOdoo: updated,
       notFoundInOdoo: notFound,
+      semMudanca: semMudanca,
+      ...(isDryRun ? { preview: preview.slice(0, 50), previewCount: preview.length } : {}),
     });
   } catch (err) {
     console.error('[TE-DELIVERY] Erro pull:', err.message);

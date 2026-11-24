@@ -460,6 +460,41 @@ function teWebhookToOdoo(webhookData) {
 }
 
 /**
+ * TE -> Odoo a partir de um REGISTRO de entrega (listagem /api/Entregas ou
+ * /v1/orders/finish) — usado pelo pull e pelas rotas de consulta.
+ * Igual ao webhook, mas NAO sobrescreve o x_studio_te_order_id gravado no envio.
+ * Fallback de situacao (AJL 24/11/2026): entregas do painel vem com Status []
+ * (verificado em 100 registros reais), so com Occurrences — deriva o codigo da
+ * ULTIMA ocorrencia quando for inequivoca (catalogo real extraido dos dados):
+ *   '01' com Finisher=true -> '3' (Entregue);  '102' -> '8' (Entrega Cancelada).
+ * Recusa (03) e desacordo (09) ficam so no texto: Finisher=false sugere
+ * continuidade — o polling de /orders/situation cobre as entregas em vôo.
+ */
+var TE_OCC_TO_SITUATION = { '01': '3', '102': '8' };
+
+function teToOdooPicking(delivery) {
+  var data = teWebhookToOdoo(delivery);
+  delete data.x_studio_te_order_id;
+  if (!data.x_studio_te_situation && delivery && delivery.Occurrences && delivery.Occurrences.length) {
+    var last = delivery.Occurrences[delivery.Occurrences.length - 1];
+    var occCode = String(last.OccurrenceCode || '');
+    var mappedCode = TE_OCC_TO_SITUATION[occCode];
+    if (mappedCode && (occCode === '102' || last.Finisher === true)) {
+      data.x_studio_te_situation = mappedCode;
+    }
+  }
+  return data;
+}
+
+function teToOdooSaleOrder(delivery) {
+  var data = teToOdooPicking(delivery);
+  // sale.order nao tem campo de ocorrencias; safeWriteCustom descartaria, mas
+  // aqui a exclusao é explicita para o payload já sair limpo.
+  delete data.x_studio_te_ocorrencias;
+  return data;
+}
+
+/**
  * Normaliza payload do webhook TE (pode ser array ou objeto)
  */
 function normalizeWebhookPayload(payload) {
@@ -527,6 +562,8 @@ module.exports = {
   odooToTeDelivery: odooToTeDelivery,
   teCreateToOdoo: teCreateToOdoo,
   teWebhookToOdoo: teWebhookToOdoo,
+  teToOdooPicking: teToOdooPicking,
+  teToOdooSaleOrder: teToOdooSaleOrder,
   normalizeWebhookPayload: normalizeWebhookPayload,
   chatterCreateMessage: chatterCreateMessage,
   chatterWebhookMessage: chatterWebhookMessage,
