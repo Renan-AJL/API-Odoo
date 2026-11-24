@@ -154,12 +154,33 @@ async function runTeSituationPoll() {
 }
 
 /**
- * Diagnóstico: chama /v1/orders/situation p/ UM OrderID e devolve a resposta
- * crua + o resultado do parse + a última rodada do polling.
+ * Diagnóstico: testa várias formas de consultar a situação do TE para UM
+ * OrderID (situation com orderID/OrderID/orderNumber + finish) e devolve
+ * tudo cru, além do resultado da última rodada do polling.
  */
 async function debugOrderSituation(orderId) {
-  const raw = await teApi.client.getOrderSituation({ orderType: 1, orderID: String(orderId) });
-  return { orderID: String(orderId), parsed: parseSituation(raw), raw: raw, lastPoll: LAST_RUN };
+  const id = String(orderId);
+  const variants = {};
+  const tentativas = {
+    'situation?orderType+orderID': { orderType: 1, orderID: id },
+    'situation?orderID': { orderID: id },
+    'situation?OrderID': { orderType: 1, OrderID: id },
+    'situation?orderID+page': { orderID: id, page: 1 },
+    'situation?orderNumber': { orderNumber: id, page: 1 },
+    'finish?orderNumber': { orderNumber: id, page: 1 },
+  };
+  for (const [nome, params] of Object.entries(tentativas)) {
+    try {
+      const call = nome.startsWith('finish?')
+        ? teApi.client.getDeliveries(params)
+        : teApi.client.getOrderSituation(params);
+      variants[nome] = await call;
+    } catch (e) {
+      variants[nome] = 'ERRO: ' + e.message;
+    }
+    await new Promise(r => setTimeout(r, 400));
+  }
+  return { orderID: id, variants: variants, lastPoll: LAST_RUN };
 }
 
 module.exports = {
