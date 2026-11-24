@@ -871,7 +871,43 @@ ${xmlEndereco(partner, 'enderDest')}
   // AJL 04/11 (noite): quando a fatura traz infCpl proprio (transferencia — padrao
   // do modelo SIEG SC 422609...562740), NAO prefixar com 'ICMS x%' (o modelo nao tem).
   if (order.icms_aliquota && !order.infCpl && infCplText.indexOf('ICMS') === -1) {
-    infCplText = 'ICMS ' + order.icms_aliquota + '%. ' + infCplText;
+    // FIX (24/11/2026, NF 74330): icms_aliquota do emit pode vir como
+    // 'ICMS informado manualmente: 12%' (ja com ICMS e %) — a montagem antiga
+    // ('ICMS ' + val + '%') produzia 'ICMS ICMS informado manualmente: 12%%'.
+    var iaTxt = String(order.icms_aliquota).trim();
+    if (iaTxt.indexOf('ICMS') !== 0) iaTxt = 'ICMS ' + iaTxt;
+    if (iaTxt.indexOf('%') === -1) iaTxt += '%';
+    infCplText = iaTxt + '. ' + infCplText;
+  }
+  // AJL 24/11/2026 (demanda usuario — NF OURO PRETO 74330): quando a NF tem ICMS
+  // ST (CST 10), o cabecalho do DANFE mostra so BC ST e ST a pagar — MVA, aliquota
+  // ST e o ST bruto (BCST x aliq) ficavam invisiveis e o cliente nao via o calculo
+  // ("tem que aparecer TUDO"). Escreve a memoria de calculo completa no infCpl,
+  // igual a tabela do fornecedor (aparece no DANFE, no XML e no portal SEFAZ).
+  var stTem = false;
+  var stBCST = 0, stVicmsST = 0, stVicmsProprio = 0, stVProd = 0;
+  var stMva = 0, stAliqST = 0, stAliqProprio = 0;
+  (Array.isArray(lines) ? lines : []).forEach(function (l) {
+    if (l && String(l.cst_icms) === '10' && (parseFloat(l.vbcst) || 0) > 0) {
+      stTem = true;
+      stBCST += parseFloat(l.vbcst) || 0;
+      stVicmsST += parseFloat(l.vicmsst) || 0;
+      stVicmsProprio += parseFloat(l.vicms) || 0;
+      stVProd += round2(l.price_subtotal || (l.qty * l.price_unit) || 0);
+      stMva = parseFloat(l.pmvast) || 0;
+      stAliqST = parseFloat(l.picmsst) || 0;
+      stAliqProprio = parseFloat(l.picms) || 0;
+    }
+  });
+  if (stTem) {
+    var pctBr = function (n) { return (n || 0).toFixed(2).replace('.', ',') + '%'; };
+    var stBruto = round2(stBCST * stAliqST / 100);
+    infCplText = 'Memoria de calculo ICMS ST: valor do produto R$ ' + num(stVProd.toFixed(2)) +
+      ' | Aliq. ICMS proprio ' + pctBr(stAliqProprio) + ' = ICMS proprio R$ ' + num(stVicmsProprio.toFixed(2)) +
+      ' | BC ST (MVA ' + pctBr(stMva) + ') R$ ' + num(stBCST.toFixed(2)) +
+      ' x Aliq. ICMS ST ' + pctBr(stAliqST) + ' = ICMS ST R$ ' + num(stBruto.toFixed(2)) +
+      ' menos proprio = ICMS ST a pagar R$ ' + num(stVicmsST.toFixed(2)) +
+      ' | Valor total da NF R$ ' + num((stVProd + stVicmsST).toFixed(2)) + '. ' + infCplText;
   }
   // Incluir numero do pedido de venda (sale order origin)
   if (order.sale_order_number && infCplText.indexOf('Pedido') === -1) {

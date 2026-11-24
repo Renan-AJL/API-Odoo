@@ -412,6 +412,52 @@ async function gerarDanfePdf(nfeProcXml, opts) {
   });
   y += 6;
 
+  // --- Memoria de calculo do ICMS ST (AJL 24/11/2026 — demanda OURO PRETO 74330) ---
+  // O cabecalho do DANFE so mostra BC ST e ST a pagar; MVA, aliquota ST e o ST
+  // bruto (BCST x aliq) ficavam invisiveis e o cliente nao via o calculo ("tem que
+  // aparecer TUDO"). Bloco dedicado com a mesma tabela do fornecedor: produto
+  // total, aliq proprio, ICMS proprio, BC ST, MVA, aliq ST, ST bruto, ST a pagar
+  // e total da NF. So aparece quando ha item com ICMS10 e ST calculada.
+  var stDets = [];
+  dets.forEach(function (d) {
+    var c10 = bloco(bloco(d, 'ICMS'), 'ICMS10');
+    if (c10 && (parseFloat(tag(c10, 'vBCST')) || 0) > 0) {
+      stDets.push({ icms: c10 });
+    }
+  });
+  if (stDets.length > 0) {
+    if (y > doc.page.height - 160) { doc.addPage(); y = doc.page.margins.top; }
+    doc.fontSize(6).font('Helvetica-Bold').text('MEMORIA DE CALCULO DO ICMS - SUBSTITUICAO TRIBUTARIA', L, y); y += 8;
+    var mvaPct = 0, aliqST = 0, aliqProp = 0;
+    var bcstTot = 0, vicmsstTot = 0, vicmsPropTot = 0;
+    stDets.forEach(function (sd) {
+      bcstTot += parseFloat(tag(sd.icms, 'vBCST')) || 0;
+      vicmsstTot += parseFloat(tag(sd.icms, 'vICMSST')) || 0;
+      vicmsPropTot += parseFloat(tag(sd.icms, 'vICMS')) || 0;
+      mvaPct = parseFloat(tag(sd.icms, 'pMVAST')) || 0;
+      aliqST = parseFloat(tag(sd.icms, 'pICMSST')) || 0;
+      aliqProp = parseFloat(tag(sd.icms, 'pICMS')) || 0;
+    });
+    var stBruto = Math.round(bcstTot * aliqST / 100 * 100) / 100;
+    var pctBr = function (n) { return (n || 0).toFixed(2).replace('.', ',') + '%'; };
+    var stRow = function (lab1, v1, lab2, v2, lab3, v3, b3) {
+      campo(L, y, W / 3, 18, lab1, v1, 7, false);
+      campo(L + W / 3, y, W / 3, 18, lab2, v2, 7, false);
+      campo(L + 2 * W / 3, y, W / 3, 18, lab3, v3, 7, b3);
+      y += 18;
+    };
+    stRow('VALOR DO PRODUTO TOTAL', 'R$ ' + moeda(tag(total, 'vProd')),
+      'ALIQUOTA DO ICMS PROPRIO', pctBr(aliqProp),
+      'VALOR DO ICMS PROPRIO', 'R$ ' + moeda(vicmsPropTot));
+    stRow('BASE DE CALCULO DO ST', 'R$ ' + moeda(bcstTot),
+      'PERCENTUAL DE MVA', pctBr(mvaPct),
+      'ALIQUOTA DO ICMS ST', pctBr(aliqST));
+    stRow('VALOR DO ICMS ST (BRUTO)', 'R$ ' + moeda(stBruto),
+      'VALOR DO ICMS ST A PAGAR', 'R$ ' + moeda(vicmsstTot),
+      'VALOR TOTAL DA NOTA', 'R$ ' + moeda(tag(total, 'vNF')), true);
+    y += 4;
+  }
+
   // --- Dados adicionais ---
   if (y > doc.page.height - 90) { doc.addPage(); y = doc.page.margins.top; }
   doc.fontSize(6).font('Helvetica-Bold').text('DADOS ADICIONAIS', L, y); y += 8;
