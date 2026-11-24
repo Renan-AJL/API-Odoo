@@ -300,6 +300,44 @@ function runItauPayPoll() {
 }
 
 // ============================================================
+// TE SITUATION POLLING: sincroniza a situação da entrega TudoEntregue
+// (x_studio_te_situation) para o Odoo — independente do webhook do TE.
+// AJL 24/11/2026: o webhook do TE não está configurado no painel deles e o
+// mapper antigo gravava campos inexistentes; com este polling o "Status da
+// fabricação" acompanha a entrega real. Desativa com TE_SITUATION_POLL_MS=0.
+// ============================================================
+var TE_SITUATION_POLL_MS = parseInt(process.env.TE_SITUATION_POLL_MS, 10) || 300000; // default: 5 min
+var teSituationPollTimer = null;
+
+function startTeSituationPolling() {
+  if (TE_SITUATION_POLL_MS <= 0) {
+    console.log('  [TE-POLL] DESATIVADO (TE_SITUATION_POLL_MS=0)');
+    return;
+  }
+  if (!config.odoo.enabled || !config.odoo.url || !config.isTeConfigured) {
+    console.log('  [TE-POLL] DESATIVADO (Odoo ou TudoEntregue nao configurados)');
+    return;
+  }
+  console.log('  [TE-POLL] ATIVO - intervalo: ' + (TE_SITUATION_POLL_MS / 1000) + 's');
+  setTimeout(function() {
+    runTeSituationPoll();
+    teSituationPollTimer = setInterval(runTeSituationPoll, TE_SITUATION_POLL_MS);
+  }, 25000); // Start after 25s (offset dos outros pollings)
+}
+
+function runTeSituationPoll() {
+  var tePoll = require('./services/te-situation-poll');
+  tePoll.runTeSituationPoll().then(function(result) {
+    if (result.atualizados > 0 || result.erros > 0) {
+      console.log('  [TE-POLL] ' + result.processados + ' entrega(s) checada(s), ' +
+        result.atualizados + ' atualizada(s)' + (result.erros ? ', ' + result.erros + ' erro(s)' : ''));
+    }
+  }).catch(function(err) {
+    console.error('  [TE-POLL] Erro:', err.message);
+  });
+}
+
+// ============================================================
 // ITAU EXTRATO AUTO-IMPORT: importa extrato bancario 1x/dia
 // ============================================================
 var ITAU_EXTRATO_IMPORT_MS = parseInt(process.env.ITAU_EXTRATO_IMPORT_MS, 10) || 1800000; // default: 30 min
@@ -470,6 +508,9 @@ app.listen(PORT, () => {
 
   // Iniciar importação automática de extrato bancário
   startItauExtratoImport();
+
+  // Iniciar polling de situação TudoEntregue -> Odoo (Status da fabricação)
+  startTeSituationPolling();
 });
 
 module.exports = app;

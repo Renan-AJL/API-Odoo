@@ -53,6 +53,9 @@ services:
         sync: false
       - key: ODOO_API_KEY
         sync: false
+      # --- TudoEntregue: polling de situacao (TE -> Odoo, Status da fabricacao) ---
+      - key: TE_SITUATION_POLL_MS
+        value: "300000"
       # --- CNP Ja ---
       - key: CNPJA_API_TOKEN
         sync: false

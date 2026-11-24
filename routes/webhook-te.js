@@ -80,6 +80,8 @@ router.post('/tudoentregue', async function(req, res) {
 
       if (saleOrder) {
         var soData = Object.assign({}, odooData);
+        // AJL 24/11/2026: campo real (boolean) que sinaliza recepcao de webhook
+        soData.x_studio_te_webhook_received = true;
         await odooTe.updateSaleOrderTeData(saleOrder.id, soData);
         var soMsg = mapper.chatterWebhookMessage(d);
         await odooTe.postChatter('sale.order', saleOrder.id, soMsg);

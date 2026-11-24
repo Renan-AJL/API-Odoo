@@ -20,30 +20,34 @@ var FIELDS = {
     teOrderId:      'x_studio_te_order_id',
     teTrackingCode: 'x_studio_te_tracking_code',
     teTrackingUrl:  'x_studio_te_tracking_url',
-    teSituation:    'x_studio_te_situacao',
+    // AJL 24/11/2026: o campo real do Odoo é x_studio_te_situation (selection
+    // com os CODIGOS do TE: 0 Aguardando, 1 Em Rota, 3 Entregue, 5 Nao Entregue,
+    // 6 Entrega Parcial, 8 Cancelada, 9 Atrasada, 10 Em Separacao, 11 Transferida,
+    // 12 Baixada). x_studio_te_situacao NAO EXISTE — gravar nele fazia o write
+    // inteiro falhar em silencio e o "Status da fabricação" nunca atualizava.
+    teSituation:    'x_studio_te_situation',
     teLastSync:     'x_studio_te_last_sync',
     teError:        'x_studio_te_error',
     teWebhook:      'x_studio_te_webhook_received',
-    teDeliveryType: 'x_studio_te_tipo_pedido',
+    teDeliveryType: 'x_studio_te_delivery_type',
     teStatusHtml:   'x_studio_status_de_entrega_te',
     teMotorista:    'x_studio_motorista',
   },
   'stock.picking': {
     teSync:            'x_studio_te_sync',
     teOrderId:         'x_studio_te_order_id',
-    teTrackingCode:    'x_studio_te_rastreio',
-    teSituation:       'x_studio_te_situacao',
-    teDriverName:      'x_studio_te_nome_motorista',
+    teTrackingCode:    'x_studio_te_tracking_code',
+    teSituation:       'x_studio_te_situation',
+    teDriverName:      'x_studio_te_motorista',
     teDriverPhone:     'x_studio_te_fone_motorista',
     teOccurrences:     'x_studio_te_ocorrencias',
     teProofUrl:        'x_studio_te_url_comprovante',
-    teLastWebhook:     'x_studio_te_ultimo_webhook',
     teSituationTarget: 'x_studio_te_estado_destino',
   },
   'account.move': {
     teOrderId:      'x_studio_te_order_id',
-    teTrackingCode: 'x_studio_te_tracking_code',
-    teSituation:    'x_studio_te_situacao',
+    teTrackingCode: 'x_studio_te_tracking_cod',
+    teSituation:    'x_studio_te_situation',
     teMotorista:    'x_studio_motorista_te',
   },
 };
@@ -70,29 +74,27 @@ var PRODUCT_FIELDS = ['id', 'name', 'weight', 'volume', 'default_code', 'qty_ava
 var ORDER_LINE_FIELDS = ['id', 'name', 'product_id', 'product_uom_qty', 'price_unit', 'price_subtotal', 'price_total'];
 var SALE_ORDER_FIELDS = ['id', 'name', 'partner_id', 'state', 'amount_total', 'note'];
 var SALE_ORDER_CUSTOM_FIELDS = [
-  'x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_te_situacao',
-  'x_studio_te_situacao_desc', 'x_studio_te_tipo_pedido', 'x_studio_te_data_entrega',
-  'x_studio_te_valor_frete', 'x_studio_te_peso_total', 'x_studio_te_qtd_volumes',
-  'x_studio_te_observacao', 'x_studio_te_protocolo_coleta', 'x_studio_te_data_coleta',
-  'x_studio_te_nome_motorista', 'x_studio_te_placa_veiculo', 'x_studio_te_rastreio',
-  'x_studio_status_de_entrega_te', 'x_studio_motorista',
+  // AJL 24/11/2026: somente campos que EXISTEM no Odoo (verificados na base).
+  // Campos inexistentes na lista faziam o safeReadCustom cair no fallback
+  // nativo e descartar TODOS os dados customizados da leitura.
+  'x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_te_situation',
+  'x_studio_te_error', 'x_studio_te_last_sync', 'x_studio_te_tracking_code',
+  'x_studio_te_tracking_url', 'x_studio_te_webhook_received',
+  'x_studio_te_delivery_type',
 ];
 var PICKING_FIELDS = [
   'id', 'name', 'partner_id', 'sale_id', 'state', 'picking_type_code',
   'scheduled_date', 'origin', 'note', 'move_ids',
 ];
 var PICKING_CUSTOM_FIELDS = [
-  'x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_te_situacao',
-  'x_studio_te_situacao_desc', 'x_studio_te_tipo_pedido', 'x_studio_te_data_entrega',
-  'x_studio_te_valor_frete', 'x_studio_te_peso_total', 'x_studio_te_qtd_volumes',
-  'x_studio_te_observacao', 'x_studio_te_protocolo_coleta', 'x_studio_te_data_coleta',
-  'x_studio_te_nome_motorista', 'x_studio_te_placa_veiculo', 'x_studio_te_rastreio',
-  'x_studio_te_ocorrencias', 'x_studio_te_url_comprovante', 'x_studio_te_fone_motorista',
-  'x_studio_te_estado_destino', 'x_studio_te_ultimo_webhook',
-  'x_studio_motorista',
+  // AJL 24/11/2026: somente campos que EXISTEM no Odoo (verificados na base).
+  'x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_te_situation',
+  'x_studio_te_tracking_code', 'x_studio_te_estado_destino',
+  'x_studio_te_motorista', 'x_studio_te_fone_motorista',
+  'x_studio_te_ocorrencias', 'x_studio_te_url_comprovante',
 ];
 var INVOICE_FIELDS = ['id', 'name', 'state', 'move_type', 'partner_id', 'invoice_date', 'amount_total', 'payment_state'];
-var INVOICE_CUSTOM_FIELDS = ['x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_status_de_entrega_te', 'x_studio_motorista', 'x_studio_motorista_te'];
+var INVOICE_CUSTOM_FIELDS = ['x_studio_te_sync', 'x_studio_te_order_id', 'x_studio_te_situation', 'x_studio_te_tracking_cod', 'x_studio_status_de_entrega_te', 'x_studio_motorista', 'x_studio_motorista_te'];
 var INVOICE_LINE_FIELDS = ['id', 'name', 'product_id', 'quantity', 'price_unit', 'price_subtotal'];
 
 var OPTIONAL_FIELDS = {
@@ -224,16 +226,61 @@ async function safeWriteCustom(model, ids, vals) {
   });
   if (Object.keys(nativeVals).length > 0) await executeKw(model, 'write', [ids, nativeVals]);
   if (Object.keys(customVals).length > 0) {
-    try { await executeKw(model, 'write', [ids, customVals]); }
-    catch (err) {
-      if (err.message && (err.message.indexOf('Invalid field') !== -1 || err.message.indexOf('KeyError') !== -1)) {
-        if (!_customFieldsCache[model] || !_customFieldsCache[model].warned) {
-          logger.warn('[ODOO-TE] Campo x_studio_* nao existe em ' + model + '. Gravacao ignorada.');
+    // AJL 24/11/2026: antes, UM campo inexistente (ex: x_studio_te_situacao)
+    // derrubava o write INTEIRO em silencio (Invalid field engolido abaixo) e
+    // nenhum dado chegava ao Odoo — era o motivo de o webhook nunca atualizar
+    // a situacao da entrega. Agora: filtra pelos campos que existem de fato
+    // (cache por modelo) e grava so o que e valido; campo invalido vira warn.
+    var valid = await getValidFieldNames(model);
+    var writeVals = customVals;
+    if (valid) {
+      writeVals = {};
+      Object.keys(customVals).forEach(function(k) {
+        if (valid[k]) writeVals[k] = customVals[k];
+        else if (!_customFieldsCache[model] || !_customFieldsCache[model]['dropped_' + k]) {
+          logger.warn('[ODOO-TE] Campo ' + k + ' nao existe em ' + model + ' — gravacao descartada para este campo (restante mantido).');
           if (!_customFieldsCache[model]) _customFieldsCache[model] = {};
-          _customFieldsCache[model].warned = true;
+          _customFieldsCache[model]['dropped_' + k] = true;
         }
-      } else throw err;
+      });
     }
+    if (Object.keys(writeVals).length > 0) {
+      try { await executeKw(model, 'write', [ids, writeVals]); }
+      catch (err) {
+        if (err.message && (err.message.indexOf('Invalid field') !== -1 || err.message.indexOf('KeyError') !== -1)) {
+          // cache de campos pode estar desatualizado (campo criado/removido no Studio)
+          _validFieldsCache[model] = null;
+          if (!_customFieldsCache[model] || !_customFieldsCache[model].warned) {
+            logger.warn('[ODOO-TE] Campo x_studio_* invalido em ' + model + ' (cache renovado p/ proximo write). Gravacao ignorada.');
+            if (!_customFieldsCache[model]) _customFieldsCache[model] = {};
+            _customFieldsCache[model].warned = true;
+          }
+        } else throw err;
+      }
+    }
+  }
+}
+
+// Nomes de campos existentes por modelo (cache; via ir.model.fields)
+var _validFieldsCache = {};
+
+function invalidateValidFields(model) {
+  if (model) { _validFieldsCache[model] = null; }
+  else { _validFieldsCache = {}; }
+}
+
+async function getValidFieldNames(model) {
+  if (_validFieldsCache[model]) return _validFieldsCache[model];
+  try {
+    var fs = await executeKw('ir.model.fields', 'search_read', [[['model', '=', model]]], { fields: ['name'] });
+    var names = {};
+    (fs || []).forEach(function(f) { names[f.name] = true; });
+    _validFieldsCache[model] = names;
+    return names;
+  } catch (err) {
+    // sem filtro (comportamento antigo) — o try/catch do write segue como rede
+    logger.warn('[ODOO-TE] Nao consegui listar campos de ' + model + ' (' + err.message + '); write sem filtro.');
+    return null;
   }
 }
 
@@ -302,7 +349,8 @@ async function updateSaleOrderTeData(orderId, data) {
 async function markSaleOrdersSynced(orderIds, teOrderId, orderType) {
   var vals = { x_studio_te_sync: true };
   if (teOrderId) vals.x_studio_te_order_id = String(teOrderId);
-  if (orderType) vals.x_studio_te_tipo_pedido = orderType;
+  // AJL 24/11/2026: x_studio_te_tipo_pedido nao existe; o real é x_studio_te_delivery_type (char)
+  if (orderType) vals.x_studio_te_delivery_type = String(orderType);
   await safeWriteCustom('sale.order', orderIds, vals);
   logger.info('[ODOO-TE] ' + orderIds.length + ' sale.order(s) sync | te_order_id=' + teOrderId);
 }
@@ -310,7 +358,8 @@ async function markSaleOrdersSynced(orderIds, teOrderId, orderType) {
 async function markSaleOrderError(orderId, errorMessage) {
   await safeWriteCustom('sale.order', [orderId], {
     x_studio_te_sync: false,
-    x_studio_te_situacao_desc: errorMessage,
+    // AJL 24/11/2026: x_studio_te_situacao_desc nao existe; o campo de erro real é x_studio_te_error (text)
+    x_studio_te_error: errorMessage,
   });
 }
 
@@ -634,6 +683,8 @@ module.exports = {
   write: write,
   getStudioFields: getStudioFields,
   FIELDS: FIELDS,
+  getValidFieldNames: getValidFieldNames,
+  invalidateValidFields: invalidateValidFields,
   // Sale Order
   findSaleOrderById: findSaleOrderById,
   readSaleOrder: readSaleOrder,

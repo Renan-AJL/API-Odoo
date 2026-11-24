@@ -404,13 +404,27 @@ function teCreateToOdoo(teResponse) {
   if (!teResponse) return {};
   var data = {};
   if (teResponse.OrderID) data.x_studio_te_order_id = String(teResponse.OrderID);
-  if (teResponse.TrackingCode) data.x_studio_te_rastreio = teResponse.TrackingCode;
+  // AJL 24/11/2026: x_studio_te_rastreio nao existe no Odoo; o campo real de
+  // tracking é x_studio_te_tracking_code (sale.order e stock.picking)
+  if (teResponse.TrackingCode) data.x_studio_te_tracking_code = teResponse.TrackingCode;
   return data;
 }
 
 /**
  * Mapeia webhook TE para campos do picking Odoo
+ *
+ * AJL 24/11/2026 — CORRECAO: o campo real do Odoo é x_studio_te_situation
+ * (selection com os CODIGOS do TE: 0 Aguardando, 1 Em Rota, 3 Entregue,
+ * 5 Nao Entregue, 6 Entrega Parcial, 8 Cancelada, 9 Atrasada, 10 Em Separacao,
+ * 11 Transferida, 12 Baixada). Antes gravava x_studio_te_situacao e
+ * x_studio_te_situacao_desc — campos que NAO EXISTEM — e o write inteiro
+ * falhava em silencio (safeWriteCustom engolia Invalid field), de modo que
+ * nenhuma atualizacao de status chegava ao Odoo. O codigo gravado alimenta
+ * as automacoes AJL do "Status da fabricação" (260/261/263).
+ * A descricao legivel continua indo para o chatter (chatterWebhookMessage).
  */
+var TE_SITUATION_CODES = ['0', '1', '3', '5', '6', '8', '9', '10', '11', '12'];
+
 function teWebhookToOdoo(webhookData) {
   if (!webhookData) return {};
   var data = {};
@@ -419,20 +433,26 @@ function teWebhookToOdoo(webhookData) {
   if (webhookData.Status && webhookData.Status.length) {
     var lastStatus = webhookData.Status[webhookData.Status.length - 1];
     if (lastStatus.Status !== undefined && lastStatus.Status !== null) {
-      data.x_studio_te_situacao = lastStatus.Status;
-    }
-    if (lastStatus.StatusDescription) {
-      data.x_studio_te_situacao_desc = lastStatus.StatusDescription;
+      var sitCode = String(lastStatus.Status);
+      if (TE_SITUATION_CODES.indexOf(sitCode) !== -1) {
+        data.x_studio_te_situation = sitCode;
+      } else {
+        logger.warn('[MAPPER] Situacao TE fora do catalogo (' + sitCode + ') — x_studio_te_situation nao gravado; descricao segue no chatter.');
+      }
     }
   }
 
   if (webhookData.Occurrences && webhookData.Occurrences.length) {
     var lastOcc = webhookData.Occurrences[webhookData.Occurrences.length - 1];
-    if (lastOcc.Observation) {
-      data.x_studio_te_observacao = lastOcc.Observation;
-    }
+    // x_studio_te_observacao nao existe no Odoo; o campo real de ocorrencias
+    // é x_studio_te_ocorrencias (text, stock.picking) — no sale.order nao ha
+    // campo de ocorrencias e o safeWriteCustom descarta esse trecho sem quebrar o resto.
+    var occTxt = lastOcc.Observation || '';
     if (lastOcc.OccurrenceName) {
-      data.x_studio_te_observacao = (data.x_studio_te_observacao ? data.x_studio_te_observacao + ' - ' : '') + lastOcc.OccurrenceName;
+      occTxt = (occTxt ? occTxt + ' - ' : '') + lastOcc.OccurrenceName;
+    }
+    if (occTxt) {
+      data.x_studio_te_ocorrencias = occTxt;
     }
   }
 
@@ -487,7 +507,10 @@ function chatterWebhookMessage(webhookData) {
 
   if (webhookData.Status && webhookData.Status.length) {
     var last = webhookData.Status[webhookData.Status.length - 1];
-    msg += 'Situacao: ' + (last.StatusDescription || '') + '<br/>';
+    var sitCode = (last.Status !== undefined && last.Status !== null) ? String(last.Status) : '';
+    var sitLabel = (teApi.SITUATION_LABELS || {})[sitCode] || '';
+    var sitTxt = last.StatusDescription || sitLabel;
+    msg += 'Situacao: ' + sitTxt + (sitCode ? ' (codigo ' + sitCode + ')' : '') + '<br/>';
     if (last.Date) msg += 'Data: ' + last.Date;
   }
 
