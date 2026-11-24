@@ -202,6 +202,13 @@ check('entrega sem situacao nem ocorrencia -> payload vazio (pull pula)', functi
 });
 
 console.log('== consistencia do fonte ==');
+check('poll usa /v1/orders/finish?OrderType+OrderID (nao situation), v1.2.37', function() {
+  const src = fs.readFileSync(path.join(ROOT, 'services/te-situation-poll.js'), 'utf8');
+  assert.ok(src.indexOf('getDeliveries({ OrderType: 1, OrderID: teOrderId, page: 1 })') !== -1,
+    'poll deve consultar finish com OrderType+OrderID capitalizados');
+  assert.ok(src.indexOf('Mapper.teToOdooPicking') !== -1,
+    'poll deve mapear o registro completo pelo mapper');
+});
 const webhookSrc = fs.readFileSync(path.join(ROOT, 'routes/webhook-te.js'), 'utf8');
 check('webhook marca x_studio_te_webhook_received no sale.order', function() {
   assert.ok(webhookSrc.indexOf('x_studio_te_webhook_received = true') !== -1);

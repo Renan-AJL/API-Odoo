@@ -363,3 +363,10 @@ Stage Summary:
 - Provado na prod (somente leitura): forma aninhada crasha com o MESMO traceback do middleware; forma achatada base + '|' folha + '&' folha folha retorna 59 — exatamente a fila esperada (521 sincronizados, piso de 7 dias)
 - Fix: buildPollDomain em notação polonesa achatada (operadores como strings de topo); teste novo garante folhas estritas (item[0] e item[1] strings) no domínio inteiro
 - Testes: scripts/test-te-situacao.js 28 checks OK; server v1.2.36-te-poll-flat-domain
+
+## 24/11/2026 v1.2.37 — Fonte do polling trocada p/ /v1/orders/finish?OrderType+OrderID (a situation devolve [] sempre)
+- Spec oficial do /orders/finish (relida): aceita OrderType + OrderID (CAPITALIZADOS — por isso o orderNumber minúsculo era ignorado) e partial=true p/ entregas em aberto; retorna a entrega COMPLETA (Occurrences, TrackingUrl, Driver) das entregas com ocorrência lançada
+- Poll troca de fonte: cada picking da rodada agora consulta getDeliveries({OrderType:1, OrderID, page:1}) e mapeia pelo teToOdooPicking (Status[] OU última ocorrência inequívoca: 01+Finisher→'3', 102→'8'); grava também x_studio_te_ocorrencias e menciona no chatter
+- /api/Entregas (pull antigo) dá 404 na base real do TE — rota pull fica para uso futuro com o dry-run já pronto
+- Diagnóstico poll-debug: variantes capitalizadas do finish + resumo compacto dos registros (não estoura payload)
+- Testes: 29 checks OK; server v1.2.37-te-poll-finish

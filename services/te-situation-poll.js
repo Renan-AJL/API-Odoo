@@ -30,6 +30,7 @@ const config = require('../config');
 const logger = require('../utils/logger');
 const odooTe = require('./odoo-te');
 const teApi = require('./tudoentregue');
+const Mapper = require('./mapper-te');
 
 // Última rodada (p/ diagnóstico via /api/v1/te/poll-debug)
 var LAST_RUN = { ts: null, result: null, error: null };
@@ -145,18 +146,40 @@ async function runTeSituationPoll() {
     if (!teOrderId) continue;
 
     let situ = null;
+    let occTxt = null;
     try {
-      const resp = await teApi.client.getOrderSituation({ orderType: 1, orderID: teOrderId });
-      situ = parseSituation(resp);
+      // AJL 24/11/2026: fonte trocada de /v1/orders/situation para
+      // /v1/orders/finish?OrderType+OrderID (spec oficial, params capitalizados).
+      // O situation devolve [] mesmo para entrega real concluída com motorista
+      // (provado no debug); o finish devolve a entrega COMPLETA — Occurrences,
+      // TrackingUrl, Driver — assim que há ocorrência lançada pelo app.
+      const resp = await teApi.client.getDeliveries({ OrderType: 1, OrderID: teOrderId, page: 1 });
+      const rec = (resp && resp.Result && resp.Result[0]) || null;
+      if (rec) {
+        const mapped = Mapper.teToOdooPicking(rec);
+        situ = mapped.x_studio_te_situation
+          ? { code: mapped.x_studio_te_situation,
+              label: (teApi.SITUATION_LABELS || {})[mapped.x_studio_te_situation] || '',
+              description: '', date: '' }
+          : null;
+        occTxt = mapped.x_studio_te_ocorrencias || null;
+        // complementa com a data da última ocorrência p/ chatter
+        if (rec.Occurrences && rec.Occurrences.length) {
+          const lastOcc = rec.Occurrences[rec.Occurrences.length - 1];
+          if (situ && lastOcc.OccurrenceDate) situ.date = String(lastOcc.OccurrenceDate);
+          if (!occTxt && lastOcc.OccurrenceDescription) occTxt = String(lastOcc.OccurrenceDescription);
+        }
+      }
       if (!situ) {
         res.semSituacaoNoTe++;
         if (res.semSituacaoNoTe <= 3) {
-          logger.warn('[TE-POLL] TE sem situacao parseavel para OrderID ' + teOrderId + ' (shape: ' + JSON.stringify(Object.keys(resp || {})) + ')');
+          logger.warn('[TE-POLL] TE sem situacao para OrderID ' + teOrderId +
+            ' (temRegistro: ' + (rec ? 'sim' : 'nao') + ')');
         }
       }
     } catch (err) {
       res.erros++;
-      logger.warn('[TE-POLL] /orders/situation falhou para OrderID ' + teOrderId + ': ' + err.message);
+      logger.warn('[TE-POLL] /orders/finish falhou para OrderID ' + teOrderId + ': ' + err.message);
       continue;
     }
     res.processados++;
@@ -169,7 +192,9 @@ async function runTeSituationPoll() {
 
     // Grava no picking e espelha no pedido (mesma escrita do webhook)
     try {
-      await odooTe.safeWriteCustom('stock.picking', [picking.id], { x_studio_te_situation: situ.code });
+      const vals = { x_studio_te_situation: situ.code };
+      if (occTxt) vals.x_studio_te_ocorrencias = occTxt;
+      await odooTe.safeWriteCustom('stock.picking', [picking.id], vals);
       let soId = null;
       if (picking.sale_id) {
         soId = Array.isArray(picking.sale_id) ? picking.sale_id[0] : picking.sale_id;
@@ -177,7 +202,8 @@ async function runTeSituationPoll() {
       }
       const situacaoTxt = situ.description || situ.label || situ.code;
       const msg = '<b>AJL · TudoEntregue (polling)</b> — Situação da entrega: <b>' + situacaoTxt + '</b>' +
-        (situ.date ? ' (' + situ.date + ')' : '') + '<br/>' +
+        (situ.date ? ' (' + situ.date + ')' : '') +
+        (occTxt ? '<br/>Ocorrência: ' + occTxt : '') + '<br/>' +
         'Picking: ' + (picking.name || picking.id) + ' | OrderID TE: ' + teOrderId +
         ' | Código: ' + situ.code;
       await odooTe.postChatter('stock.picking', picking.id, msg);
@@ -216,19 +242,44 @@ async function debugOrderSituation(orderId) {
   const id = String(orderId);
   const variants = {};
   const tentativas = {
+    // finish com params capitalizados (spec oficial) — fonte do polling v1.2.37
+    'finish?OrderType+OrderID': { OrderType: 1, OrderID: id, page: 1 },
+    'finish?OrderID': { OrderID: id, page: 1 },
+    'finish?partial+OrderType+OrderID': { OrderType: 1, OrderID: id, partial: 'true', page: 1 },
+    // referência: situation (devolve [] comprovado) e as antigas minúsculas
     'situation?orderType+orderID': { orderType: 1, orderID: id },
-    'situation?orderID': { orderID: id },
-    'situation?OrderID': { orderType: 1, OrderID: id },
-    'situation?orderID+page': { orderID: id, page: 1 },
-    'situation?orderNumber': { orderNumber: id, page: 1 },
-    'finish?orderNumber': { orderNumber: id, page: 1 },
+    'finish?orderNumber (antigo, filtro ignorado)': { orderNumber: id, page: 1 },
   };
   for (const [nome, params] of Object.entries(tentativas)) {
     try {
       const call = nome.startsWith('finish?')
         ? teApi.client.getDeliveries(params)
         : teApi.client.getOrderSituation(params);
-      variants[nome] = await call;
+      const r = await call;
+      // resume registros completos p/ não estourar o payload do debug
+      if (r && r.Result && Array.isArray(r.Result) && r.Result.length && r.Result[0].OrderID) {
+        variants[nome] = {
+          total: r.Result.length,
+          registros: r.Result.slice(0, 3).map(function(rec) {
+            return {
+              OrderID: rec.OrderID,
+              OrderNumber: rec.OrderNumber,
+              TrackingUrl: rec.TrackingUrl || null,
+              Status: rec.Status || null,
+              ultimaOcorrencia: (rec.Occurrences && rec.Occurrences.length)
+                ? {
+                    code: rec.Occurrences[rec.Occurrences.length - 1].OccurrenceCode,
+                    descricao: rec.Occurrences[rec.Occurrences.length - 1].OccurrenceDescription,
+                    data: rec.Occurrences[rec.Occurrences.length - 1].OccurrenceDate,
+                    finisher: rec.Occurrences[rec.Occurrences.length - 1].Finisher,
+                  }
+                : null,
+            };
+          }),
+        };
+      } else {
+        variants[nome] = r;
+      }
     } catch (e) {
       variants[nome] = 'ERRO: ' + e.message;
     }
