@@ -69,7 +69,44 @@ function deveEmitirBoletoAuto(formaPagamento) {
 }
 
 /**
- * Agenda (fire-and-forget) a emicao de boletos da fatura recem-autorizada.
+ * Validacoes comuns do auto-boleto (agendado OU sincrono).
+ * Retorna {ok:bool, razao} — quando false, o motivo ja foi registrado
+ * (console e, quando aplicavel, nota no chatter da fatura).
+ */
+function validarAutoBoleto(ctx) {
+  if (String(process.env.AUTO_BOLETO_NF || '').toLowerCase() === 'off') {
+    console.log('[BOLETO-AUTO] desativado por AUTO_BOLETO_NF=off');
+    return { ok: false, razao: 'kill-switch' };
+  }
+  if (!ctx || !ctx.moveId) return { ok: false, razao: 'sem-contexto' };
+
+  var forma = String(ctx.formaPagamento || '').trim();
+  if (!deveEmitirBoletoAuto(forma)) {
+    console.log('[BOLETO-AUTO] fatura ' + ctx.moveId + ': forma "' + forma +
+      '" nao gera boleto — auto-boleto nao aplicado');
+    return { ok: false, razao: 'forma-sem-boleto' };
+  }
+  if (ctx.boletoJaExiste) {
+    console.log('[BOLETO-AUTO] fatura ' + ctx.moveId + ': JA tem boleto ativo — pulando (manual segue disponivel)');
+    return { ok: false, razao: 'boleto-ja-existe' };
+  }
+  if (!ctx.pagador || !String(ctx.pagador.cpf_cnpj || '').replace(/\D/g, '')) {
+    console.warn('[BOLETO-AUTO] fatura ' + ctx.moveId + ': pagador sem CPF/CNPJ — pulando (Itau exige)');
+    if (ctx.postChatter) {
+      ctx.postChatter(
+        '<b>Boletos (auto):</b> nao emitidos — cliente sem CPF/CNPJ no cadastro.<br/>' +
+        '<i>Corrija o cadastro e use o botao de boleto manual.</i>'
+      ).catch(function() {});
+    }
+    return { ok: false, razao: 'pagador-sem-cpf' };
+  }
+  return { ok: true, razao: '' };
+}
+
+/**
+ * Agenda (fire-and-forget, mantido p/ compatibilidade) a emicao de boletos
+ * da fatura recem-autorizada. O fluxo de NF hoje usa executarBoletosAutomaticos
+ * (sync antes da DANFE) para o e-mail sair com DANFE + boletos juntos.
  * @param {Object} ctx {
  *   moveId, faturaName (nome FINAL 'NFe NNNNNNNN'), formaPagamento,
  *   valorNF (vNF fiscal calculada no middleware),
@@ -80,41 +117,34 @@ function deveEmitirBoletoAuto(formaPagamento) {
  * }
  */
 function agendarBoletosAutomaticos(ctx) {
-  if (String(process.env.AUTO_BOLETO_NF || '').toLowerCase() === 'off') {
-    console.log('[BOLETO-AUTO] desativado por AUTO_BOLETO_NF=off');
-    return;
-  }
-  if (!ctx || !ctx.moveId) return;
-
-  var forma = String(ctx.formaPagamento || '').trim();
-  if (!deveEmitirBoletoAuto(forma)) {
-    console.log('[BOLETO-AUTO] fatura ' + ctx.moveId + ': forma "' + forma +
-      '" nao gera boleto — auto-boleto nao aplicado');
-    return;
-  }
-  if (ctx.boletoJaExiste) {
-    console.log('[BOLETO-AUTO] fatura ' + ctx.moveId + ': JA tem boleto ativo — pulando (manual segue disponivel)');
-    return;
-  }
-  if (!ctx.pagador || !String(ctx.pagador.cpf_cnpj || '').replace(/\D/g, '')) {
-    console.warn('[BOLETO-AUTO] fatura ' + ctx.moveId + ': pagador sem CPF/CNPJ — pulando (Itau exige)');
-    if (ctx.postChatter) {
-      ctx.postChatter(
-        '<b>Boletos (auto):</b> nao emitidos — cliente sem CPF/CNPJ no cadastro.<br/>' +
-        '<i>Corrija o cadastro e use o botao de boleto manual.</i>'
-      ).catch(function() {});
-    }
-    return;
-  }
+  var v = validarAutoBoleto(ctx);
+  if (!v.ok) return;
 
   console.log('[BOLETO-AUTO] NF autorizada -> agendando boletos em ' + AUTO_DELAY_MS + 'ms | fatura ' +
-    (ctx.faturaName || ctx.moveId) + ' | forma: ' + forma);
+    (ctx.faturaName || ctx.moveId) + ' | forma: ' + String(ctx.formaPagamento || '').trim());
 
   setTimeout(function() {
     emitirBoletosAuto(ctx).catch(function(e) {
       console.error('[BOLETO-AUTO] erro inesperado fora do fluxo:', e.message);
     });
   }, AUTO_DELAY_MS);
+}
+
+/**
+ * SINCRONO (await): emite os boletos AGORA, na mesma rotina da NF.
+ * AJL 25/11/2026 — "boletos no mesmo e-mail da DANFE": o processOne chama isto
+ * ANTES de anexar a DANFE, assim os PDFs 'Boleto_*' ja estao na fatura quando a
+ * automacao 177 monta o e-mail (DANFE + boletos num unico e-mail ao cliente).
+ * Falha de boleto NAO derruba a NF: o chamador faz try/catch e o e-mail sai so
+ * com a DANFE (mesmo comportamento do fluxo sem boleto).
+ */
+async function executarBoletosAutomaticos(ctx) {
+  var v = validarAutoBoleto(ctx);
+  if (!v.ok) return { skipped: v.razao };
+
+  console.log('[BOLETO-AUTO] NF autorizada -> emitindo boletos AGORA (antes da DANFE) | fatura ' +
+    (ctx.faturaName || ctx.moveId) + ' | forma: ' + String(ctx.formaPagamento || '').trim());
+  return emitirBoletosAuto(ctx);
 }
 
 async function emitirBoletosAuto(ctx) {
@@ -209,4 +239,4 @@ async function chatterFalha(ctx, faturaName, motivo) {
   );
 }
 
-module.exports = { agendarBoletosAutomaticos, deveEmitirBoletoAuto, publicBaseUrl };
+module.exports = { agendarBoletosAutomaticos, executarBoletosAutomaticos, deveEmitirBoletoAuto, publicBaseUrl };

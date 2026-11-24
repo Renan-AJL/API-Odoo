@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
     res.json({
       success: true,
       service: 'odoo-middleware-unified',
-      version: '1.2.39-te-status-map',
+      version: '1.2.43-email-danfe-boletos',
       status: 'healthy',
       timestamp: new Date().toISOString(),
       modules: {

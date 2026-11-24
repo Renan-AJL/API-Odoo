@@ -29,7 +29,7 @@ var { emitirNota } = require('./sieg-api');
 var config = require('../config');
 var { IeService } = require('./ie.service');
 var ibgeMunicipios = require('./ibge-municipios');
-var { agendarBoletosAutomaticos } = require('./boleto-auto');
+var { agendarBoletosAutomaticos, executarBoletosAutomaticos } = require('./boleto-auto');
 var { carregarCertificadoPorCnpj, certificadoParaEmitente } = require('./nfe-cert');
 var { aplicarCstIcmsManualLinhas, CSTS_SEM_DESTAQUE } = require('./cst-icms-manual');
 var _ieService = new IeService();
@@ -1759,20 +1759,17 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   await writeStatusSafe(client, db, uid, pwd, moveId, tipo, updateVals);
   console.log('[SIEG-EMIT] Fatura atualizada (' + (Date.now() - t0) + 'ms desde o inicio)');
 
-  // 12. Post XML + PDF to Chatter (moveName pode ter sido renomeado — usar o
-  // nome final para o anexo ficar consistente com o numero da NF)
   var faturaNameFinal = tipo === 'nfe' ? ('NFe ' + String(nextNum).padStart(8, '0')) : move.name;
-  await postChatterResult(client, db, uid, pwd, moveId, faturaNameFinal, tipo, info, resultado, xmlRetornoText);
 
-  // 13. AUTO-BOLETO (demanda AJL 22/10/2026): NF autorizada -> ja emite os
-  // boletos Itau da fatura (mesmo fluxo do botao manual /pagar: E+P, parcelas,
-  // guardas anti-duplicidade, PDFs, push Odoo). Fire-and-forget: falha de
-  // boleto NAO afeta a NF; resultado/erro vira nota no chatter da fatura.
-  // SO dispara quando a emissao veio do botao "Emitir NF e Boleto" (flag
-  // consumida no inicio de processOne) — o fluxo comum de NF fica intacto.
+  // 12-A. AUTO-BOLETO ANTES DA DANFE (AJL 25/11/2026 — "boletos no mesmo e-mail
+  // da DANFE"): quando a emissao veio do botao "Emitir NF e Boleto", os boletos
+  // Itau sao emitidos e anexados AGORA (await, antes do postChatterResult) para
+  // que a automacao 177 mande UM e-mail unico com DANFE + boletos. Sem boleto
+  // (forma PIX/cartao/a vista, kill-switch, boleto ja existente): o e-mail sai
+  // so com a DANFE, como antes. Falha de boleto NAO afeta a NF nem o e-mail.
   if (info.sucesso && tipo === 'nfe' && autoBoletoArmado && !isTransferencia && !isAvulsa) {
     try {
-      agendarBoletosAutomaticos({
+      await executarBoletosAutomaticos({
         moveId: moveId,
         faturaName: faturaNameFinal,
         formaPagamento: formaPagamento,
@@ -1797,9 +1794,15 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
         },
       });
     } catch (eAuto) {
-      console.warn('[SIEG-EMIT] Auto-boleto: falha ao agendar (NF segue OK): ' + eAuto.message);
+      console.warn('[SIEG-EMIT] Auto-boleto: falhou (NF segue OK; e-mail sai com a DANFE): ' + eAuto.message);
     }
   }
+
+  // 12. Post XML + PDF to Chatter (moveName pode ter sido renomeado — usar o
+  // nome final para o anexo ficar consistente com o numero da NF). Roda DEPOIS
+  // dos boletos: a chegada da DANFE dispara o e-mail ao cliente (automacao 177)
+  // ja com DANFE + boletos anexados.
+  await postChatterResult(client, db, uid, pwd, moveId, faturaNameFinal, tipo, info, resultado, xmlRetornoText);
 
   return {
     move_id: moveId, sucesso: info.sucesso, tipo: tipo,
