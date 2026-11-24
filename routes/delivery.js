@@ -9,6 +9,7 @@ const odooTe = require('../services/odoo-te');
 const Mapper = require('../services/mapper-te');
 const { apiKeyAuth } = require('../middleware/auth');
 const config = require('../config');
+const tePoll = require('../services/te-situation-poll');
 
 // Todas as rotas de delivery exigem API Key
 router.use(apiKeyAuth);
@@ -152,6 +153,24 @@ router.post('/deliveries/sync-unsynced', async (req, res, next) => {
   } catch (err) {
     console.error('[TE-DELIVERY] Erro sync-unsynced:', err.message);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// -------------------------------------------------------
+// GET /api/v1/te/poll-debug?orderID=NNNN — Diagnóstico do polling de situação
+// Resposta crua do TE para UM OrderID + resultado da última rodada do poll.
+// Somente leitura (não grava nada no Odoo).
+// -------------------------------------------------------
+router.get('/poll-debug', async (req, res) => {
+  try {
+    const orderID = String(req.query.orderID || '').trim();
+    if (!orderID) {
+      return res.status(400).json({ success: false, error: 'Informe ?orderID=' });
+    }
+    const info = await tePoll.debugOrderSituation(orderID);
+    res.json({ success: true, ...info });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message, lastPoll: tePoll.getLastRun() });
   }
 });
 

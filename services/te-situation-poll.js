@@ -27,6 +27,11 @@ const logger = require('../utils/logger');
 const odooTe = require('./odoo-te');
 const teApi = require('./tudoentregue');
 
+// Última rodada (p/ diagnóstico via /api/v1/te/poll-debug)
+var LAST_RUN = { ts: null, result: null, error: null };
+
+function getLastRun() { return LAST_RUN; }
+
 // Catálogo completo de códigos aceitos pela selection do Odoo
 const TE_SITUATION_CODES = ['0', '1', '3', '5', '6', '8', '9', '10', '11', '12'];
 // Situações terminais: quando o picking já está numa delas, para de ser pollado
@@ -69,7 +74,8 @@ function parseSituation(teResponse) {
  *     registra no chatter — as automações AJL propagam pro "Status da fabricação".
  */
 async function runTeSituationPoll() {
-  const res = { processados: 0, atualizados: 0, erros: 0, jaAtual: 0 };
+  const res = { processados: 0, atualizados: 0, erros: 0, jaAtual: 0, semSituacaoNoTe: 0 };
+  try {
 
   const pickings = await odooTe.searchRead(
     'stock.picking',
@@ -96,6 +102,12 @@ async function runTeSituationPoll() {
     try {
       const resp = await teApi.client.getOrderSituation({ orderType: 1, orderID: teOrderId });
       situ = parseSituation(resp);
+      if (!situ) {
+        res.semSituacaoNoTe++;
+        if (res.semSituacaoNoTe <= 3) {
+          logger.warn('[TE-POLL] TE sem situacao parseavel para OrderID ' + teOrderId + ' (shape: ' + JSON.stringify(Object.keys(resp || {})) + ')');
+        }
+      }
     } catch (err) {
       res.erros++;
       logger.warn('[TE-POLL] /orders/situation falhou para OrderID ' + teOrderId + ': ' + err.message);
@@ -136,11 +148,25 @@ async function runTeSituationPoll() {
   }
 
   return res;
+  } finally {
+    LAST_RUN = { ts: new Date().toISOString(), result: res, error: null };
+  }
+}
+
+/**
+ * Diagnóstico: chama /v1/orders/situation p/ UM OrderID e devolve a resposta
+ * crua + o resultado do parse + a última rodada do polling.
+ */
+async function debugOrderSituation(orderId) {
+  const raw = await teApi.client.getOrderSituation({ orderType: 1, orderID: String(orderId) });
+  return { orderID: String(orderId), parsed: parseSituation(raw), raw: raw, lastPoll: LAST_RUN };
 }
 
 module.exports = {
   runTeSituationPoll,
   parseSituation,
+  debugOrderSituation,
+  getLastRun,
   TE_SITUATION_CODES,
   TERMINAL_SITUATIONS,
 };
