@@ -88,7 +88,7 @@ app.get('/', (req, res) => res.redirect('/admin'));
 // AJL 04/11/2026: JSON de versao acessivel (o GET / redireciona ao painel e a
 // rota JSON da raiz era codigo morto — travava a conferencia de deploy).
 app.get('/version', (req, res) => {
-  res.json({ service: 'Odoo Middleware Unificado', version: '1.2.39-te-status-map', status: 'online' });
+  res.json({ service: 'Odoo Middleware Unificado', version: '1.2.40-entrada-trazer-pdf', status: 'online' });
 });
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/cnpj', cnpjRoutes);
@@ -105,6 +105,10 @@ app.use('/api/v1/consultflex', consultflexRoutes);
 app.use('/api/v1/cep', cepRoutes);
 app.use('/api/v1/itau/status', itauStatusRoutes);
 app.use('/api/v1/admin', odooAdminRoutes);
+// AJL 24/11/2026: botao "Trazer .pdf" do Odoo (entrada de NF) — webhook do Odoo
+// busca a NF no cofre SIEG pelo Numero do documento, gera DANFE e anexa no chatter
+const nfEntradaRoutes = require('./routes/nf-entrada');
+app.use('/api/v1/nf-entrada', nfEntradaRoutes);
 app.use('/api/v1/fabricacao', fabricacaoRoutes);
 app.use('/callback/sieg', siegRoutes);
 
@@ -112,7 +116,7 @@ app.use('/callback/sieg', siegRoutes);
 app.get('/', (req, res) => {
   res.json({
     service: 'Odoo Middleware Unificado',
-    version: '1.2.39-te-status-map',
+    version: '1.2.40-entrada-trazer-pdf',
     empresa: config.empresa.nome,
     status: 'online',
     odoo_push: config.odoo.enabled ? 'ATIVO' : 'DESATIVADO',
