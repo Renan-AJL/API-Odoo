@@ -101,6 +101,31 @@ check('terminais: 3/5/6/8/12 — 1/0/9/10/11 continuam sendo pollados', function
   });
 });
 
+console.log('== te-situation-poll.buildPollDomain (piso de datas) ==');
+check('dominio mantem sincronizados + | em andamento OU recentes', function() {
+  const d = tePoll.buildPollDomain();
+  const flat = JSON.stringify(d);
+  assert.ok(flat.indexOf('x_studio_te_order_id') !== -1, 'sem te_order_id');
+  assert.ok(flat.indexOf('x_studio_te_sync') !== -1, 'sem te_sync');
+  assert.ok(flat.indexOf('"|")') === -1, 'operador OU não pode virar string');
+  assert.ok(flat.indexOf('"|",') !== -1, 'falta o OU em-andamento/ recentes');
+  assert.ok(flat.indexOf('x_studio_te_situation') !== -1, 'sem filtro de situacao');
+  assert.ok(flat.indexOf('scheduled_date') !== -1, 'sem piso de scheduled_date');
+});
+check('ACTIVE_SITUATIONS = codigos nao-terminais do catalogo', function() {
+  assert.deepStrictEqual(tePoll.ACTIVE_SITUATIONS, ['0', '1', '9', '10', '11']);
+  tePoll.TERMINAL_SITUATIONS.forEach(function(t) {
+    assert.ok(tePoll.ACTIVE_SITUATIONS.indexOf(t) === -1,
+      'codigo terminal ' + t + ' nao pode estar em ACTIVE_SITUATIONS');
+  });
+});
+check('piso desativado (TE_SITUATION_POLL_FLOOR_DAYS=0) usa o dominio antigo', function() {
+  const src = fs.readFileSync(path.join(ROOT, 'services/te-situation-poll.js'), 'utf8');
+  assert.ok(src.indexOf("'not in', TERMINAL_SITUATIONS") !== -1,
+    'branch sem piso deve manter o dominio antigo (not in terminal)');
+  assert.ok(src.indexOf('TE_SITUATION_POLL_FLOOR_DAYS') !== -1);
+});
+
 console.log('== odoo-te (campos reais, verificados na base prod) ==');
 check('FIELDS: situation -> x_studio_te_situation nos 3 modelos', function() {
   assert.strictEqual(odooTe.FIELDS['sale.order'].teSituation, 'x_studio_te_situation');

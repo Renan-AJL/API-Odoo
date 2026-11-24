@@ -56,6 +56,11 @@ services:
       # --- TudoEntregue: polling de situacao (TE -> Odoo, Status da fabricacao) ---
       - key: TE_SITUATION_POLL_MS
         value: "300000"
+      # Piso de datas (dias): entregas sem situacao mais antigas que isso nao sao
+      # polladas (a API do TE so informa situacao apos atribuicao ao motorista).
+      # 0 desativa o piso (comportamento antigo).
+      - key: TE_SITUATION_POLL_FLOOR_DAYS
+        value: "7"
       # --- CNP Ja ---
       - key: CNPJA_API_TOKEN
         sync: false

@@ -16,6 +16,10 @@
  *
  * NÃO ALTERA nenhum fluxo existente (send-invoice, webhook, dashboard, Itaú,
  * SIEG): é um worker novo, próprio, controlado por TE_SITUATION_POLL_MS.
+ * Piso de datas (TE_SITUATION_POLL_FLOOR_DAYS, default 7): entregas SEM situação
+ * com scheduled_date mais antiga que a janela ficam fora da rodada — a API do
+ * TE só informa situação depois da atribuição ao motorista, então fila velha
+ * sem código é chamada desperdiçada (24/11/2026: 521 sincronizados, 100% vazios).
  *
  * Códigos TE (mesmos da selection x_studio_te_situation no Odoo):
  *   '0' Aguardando, '1' Em Rota, '3' Entregue, '5' Não Entregue,
@@ -36,10 +40,51 @@ function getLastRun() { return LAST_RUN; }
 const TE_SITUATION_CODES = ['0', '1', '3', '5', '6', '8', '9', '10', '11', '12'];
 // Situações terminais: quando o picking já está numa delas, para de ser pollado
 const TERMINAL_SITUATIONS = ['3', '5', '6', '8', '12'];
+// Situações em andamento: com um desses códigos o picking é SEMPRE acompanhado,
+// mesmo antigo (a entrega tá rodando — precisa chegar ao fim)
+const ACTIVE_SITUATIONS = ['0', '1', '9', '10', '11'];
 // Pausa entre chamadas ao TE (cortesia com rate limit da API)
 const GAP_BETWEEN_CALLS_MS = 800;
 // Limite de pickings por rodada (proteção contra rajadas após instabilidade)
 const MAX_PICKINGS_PER_RUN = 100;
+// Piso de datas (dias): entregas SEM situação cuja scheduled_date é mais antiga
+// que isso são IGNORADAS — a API /v1/orders/situation só devolve dados depois
+// que a entrega é atribuída a um motorista (especificação do TE), então
+// entregas antigas sem situação nunca teriam dado e só gastariam chamadas.
+// 521 pickings sincronizados estavam todos vazios em 24/11: sem o piso, cada
+// rodada queimava 100 chamadas no TE por nada. 0 desativa o piso.
+const FLOOR_DAYS = parseInt(process.env.TE_SITUATION_POLL_FLOOR_DAYS, 10) || 7;
+
+function floorCutoff() {
+  if (FLOOR_DAYS <= 0) return null;
+  return new Date(Date.now() - FLOOR_DAYS * 86400000)
+    .toISOString().replace('T', ' ').substring(0, 19);
+}
+
+/**
+ * Domínio da rodada: sincronizados + (em andamento | sem situação e recentes).
+ * O "|  " mantém em vôo as que já têm código de acompanhamento, e o piso só
+ * poda a fila de entregas antigas que o TE nunca pôde informar.
+ */
+function buildPollDomain() {
+  const cutoff = floorCutoff();
+  const base = [
+    ['x_studio_te_order_id', '!=', false],
+    ['x_studio_te_sync', '=', true],
+  ];
+  if (!cutoff) {
+    return base.concat([['x_studio_te_situation', 'not in', TERMINAL_SITUATIONS]]);
+  }
+  return base.concat([
+    ['|',
+      ['x_studio_te_situation', 'in', ACTIVE_SITUATIONS],
+      ['&',
+        ['x_studio_te_situation', '=', false],
+        ['scheduled_date', '>=', cutoff],
+      ],
+    ],
+  ]);
+}
 
 /**
  * Extrai a última situação de uma resposta de /v1/orders/situation.
@@ -74,16 +119,12 @@ function parseSituation(teResponse) {
  *     registra no chatter — as automações AJL propagam pro "Status da fabricação".
  */
 async function runTeSituationPoll() {
-  const res = { processados: 0, atualizados: 0, erros: 0, jaAtual: 0, semSituacaoNoTe: 0 };
+  const res = { processados: 0, atualizados: 0, erros: 0, jaAtual: 0, semSituacaoNoTe: 0, janelaDias: FLOOR_DAYS };
   try {
 
   const pickings = await odooTe.searchRead(
     'stock.picking',
-    [
-      ['x_studio_te_order_id', '!=', false],
-      ['x_studio_te_sync', '=', true],
-      ['x_studio_te_situation', 'not in', TERMINAL_SITUATIONS],
-    ],
+    buildPollDomain(),
     ['id', 'name', 'sale_id', 'x_studio_te_order_id', 'x_studio_te_situation'],
     MAX_PICKINGS_PER_RUN,
     0,
@@ -91,7 +132,8 @@ async function runTeSituationPoll() {
   );
   if (!pickings || !pickings.length) return res;
 
-  logger.info('[TE-POLL] ' + pickings.length + ' entrega(s) em acompanhamento');
+  logger.info('[TE-POLL] ' + pickings.length + ' entrega(s) em acompanhamento' +
+    (FLOOR_DAYS > 0 ? ' (janela ' + FLOOR_DAYS + 'd ou em andamento)' : ''));
 
   for (let i = 0; i < pickings.length; i++) {
     const picking = pickings[i];
@@ -188,6 +230,8 @@ module.exports = {
   parseSituation,
   debugOrderSituation,
   getLastRun,
+  buildPollDomain,
   TE_SITUATION_CODES,
   TERMINAL_SITUATIONS,
+  ACTIVE_SITUATIONS,
 };
