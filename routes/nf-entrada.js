@@ -122,6 +122,12 @@ function parseNfeXml(xmlStr) {
     serie: xt('serie'),
     emitente: xb('emit', 'xFant') || xb('emit', 'xNome') || '',
     cnpjEmitente: xb('emit', 'CNPJ') || xb('emit', 'CPF') || '',
+    // AJL 24/11 (v1.2.43): campos do espelho sieg_compras (painel de entradas)
+    destinatario: xb('dest', 'xNome') || '',
+    cnpjDestinatario: xb('dest', 'CNPJ') || xb('dest', 'CPF') || '',
+    cStat: xt('cStat'),
+    nProt: xt('nProt'),
+    xMotivo: xt('xMotivo'),
     vNF: parseFloat(xt('vNF') || '0') || 0,
     dhEmi: (xt('dhEmi') || xt('dEmi') || '').slice(0, 10),
   };
@@ -431,5 +437,199 @@ router.post('/ping', async function (req, res) {
     console.error('[NF-ENTRADA] ping falhou:', e.message);
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SIEG COMPRAS — espelho das NFs de ENTRADA no Odoo (modelo x_sieg_compras)
+// AJL 24/11 (v1.2.43): demanda do Compras. O cron roda AQUI (node) de 1 em 1
+// hora porque server action do Odoo nao faz HTTP (safe_eval bloqueia import/
+// urllib — provado 24/11). Varre o cofre SIEG desde 01/10/2026, compara com
+// as chaves ja salvas em x_sieg_compras e cria as linhas novas — cada uma com
+// o XML fiscal e o DANFE (PDF) anexados (ir.attachment res_model
+// =x_sieg_compras). Depois, quando o admin de compras preenche o Numero do
+// documento na entrada de NF, a automation do Odoo ('AJL · Compras: XML+PDF
+// do cofre sieg_compras') copia os dois anexos para a fatura e o fluxo atual
+// (automacao 160/1697 'Entrada de NF via XML') processa o XML como sempre.
+// Endpoints manuais: POST /sieg-compras-sync (forca 1 ciclo, p/ backfill) e
+// GET /sieg-compras-status (ultimo resumo / ciclo em andamento).
+// ═══════════════════════════════════════════════════════════════════════════
+var SYNC_INICIO = '2026-10';   // mes inicial do espelho (pedido do Compras)
+var SYNC_LIMITE_CICLO = 120;   // max de NFs novas por ciclo (Render free)
+var syncState = { rodando: false, ultima: null, ciclos: 0, iniciadoEm: null };
+
+function mesesDesde(inicioYYYYMM) {
+  var out = [];
+  var agora = new Date();
+  var y = parseInt(inicioYYYYMM.slice(0, 4));
+  var m = parseInt(inicioYYYYMM.slice(5, 7));
+  while (y < agora.getUTCFullYear() || (y === agora.getUTCFullYear() && m <= agora.getUTCMonth() + 1)) {
+    out.push(y + '-' + String(m).padStart(2, '0'));
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
+async function odooConnect() {
+  var cfg = config.odoo;
+  if (!cfg.url) throw new Error('ODOO_URL nao configurada na middleware');
+  var c = createClient(cfg.url);
+  var uid = await authenticate(c, cfg.db, cfg.user, cfg.password);
+  return {
+    cfg: cfg,
+    ekw: function (model, method, args, kwargs) {
+      return executeKw(c, cfg.db, uid, cfg.password, model, method, args, kwargs);
+    },
+  };
+}
+
+// Busca TODOS os XMLs do cofre nos meses informados (sem filtro de numero) —
+// espelho sieg_compras. Paginada Take 50 (limite SIEG) ate zip vazio/404,
+// max 20 paginas por mes (1000 docs). Reusa siegBaixarXmls (404/429/timeout).
+async function buscarCofreCompleto(meses) {
+  var docs = [];
+  var vistos = {};
+  var headers = await withTimeout(getAuthHeaders(), 15000);
+  for (var mi = 0; mi < meses.length; mi++) {
+    var mes = meses[mi];
+    for (var pg = 0; pg < 20; pg++) {
+      var body = {
+        TipoXml: 1, Take: 50, Skip: pg * 50,
+        DataEmissaoInicio: mes + '-01T00:00:00Z',
+        DataEmissaoFim: ultimoDia(mes) + 'T23:59:59Z',
+      };
+      var resp = await siegBaixarXmls(body, headers);
+      if (!resp || resp.__empty404) break;
+      var zip = new AdmZip(resp.data);
+      var entries = zip.getEntries();
+      console.log('[SIEG-COMPRAS] cofre', mes, 'p' + (pg + 1) + ':', entries.length, 'docs');
+      for (var ei = 0; ei < entries.length; ei++) {
+        if (entries[ei].isDirectory) continue;
+        var xmlStr = '';
+        try { xmlStr = zip.readAsText(entries[ei]); } catch (eZip) { continue; }
+        var reg;
+        try { reg = parseNfeXml(xmlStr); } catch (eParse) { continue; }
+        if (!reg.chave || vistos[reg.chave]) continue;
+        vistos[reg.chave] = true;
+        docs.push(reg);
+      }
+      if (entries.length < 50) break;
+    }
+  }
+  return docs;
+}
+
+// Um ciclo de sincronizacao: cofre -> x_sieg_compras + anexos XML/DANFE.
+async function sincronizarSiegCompras(limiteNovas) {
+  var t0 = Date.now();
+  var o = await odooConnect();
+  // chaves ja sincronizadas (paginado, teto 20k linhas)
+  var existentes = {};
+  var offset = 0;
+  while (true) {
+    var lote = await o.ekw('x_sieg_compras', 'search_read', [[], ['x_chave']], { limit: 1000, offset: offset });
+    for (var i = 0; i < lote.length; i++) existentes[lote[i].x_chave] = true;
+    offset += lote.length;
+    if (lote.length < 1000 || offset > 20000) break;
+  }
+  var meses = mesesDesde(SYNC_INICIO);
+  var docs = await buscarCofreCompleto(meses);
+  var novas = [];
+  for (var di = 0; di < docs.length; di++) if (!existentes[docs[di].chave]) novas.push(docs[di]);
+  var alvo = novas.slice(0, limiteNovas || SYNC_LIMITE_CICLO);
+  var criadas = 0, comPdf = 0, erros = [];
+  var agoraStr = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  for (var ni = 0; ni < alvo.length; ni++) {
+    var reg = alvo[ni];
+    try {
+      var pdfB64 = '';
+      try {
+        var pdfBuf = await gerarDanfePdf(reg.xml);
+        if (pdfBuf && pdfBuf.length) { pdfB64 = pdfBuf.toString('base64'); comPdf++; }
+      } catch (eDanfe) {
+        console.error('[SIEG-COMPRAS] DANFE falhou NF', reg.nNF, eDanfe.message);
+      }
+      var dhEmiTs = String(reg.dhEmi || '');
+      var vals = {
+        x_name: 'NF ' + (reg.nNF || '?') + (reg.serie ? ' s. ' + reg.serie : '') + ' — ' + (reg.emitente || '?'),
+        x_chave: reg.chave,
+        x_numero: reg.nNF || '',
+        x_serie: reg.serie || '',
+        x_emitente: reg.emitente || '',
+        x_cnpj_emitente: reg.cnpjEmitente || '',
+        x_destinatario: reg.destinatario || '',
+        x_cnpj_destinatario: reg.cnpjDestinatario || '',
+        x_data_emissao: dhEmiTs.length >= 19 ? dhEmiTs.replace('T', ' ').slice(0, 19) : false,
+        x_valor: reg.vNF || 0,
+        x_cstat: reg.cStat || '',
+        x_nprot: reg.nProt || '',
+        x_motivo: (reg.xMotivo || '').slice(0, 100),
+        x_pdf_disponivel: !!pdfB64,
+        x_sync_data: agoraStr,
+      };
+      var rid = await o.ekw('x_sieg_compras', 'create', [vals]);
+      await o.ekw('ir.attachment', 'create', [{
+        name: reg.chave + '.xml',
+        raw: Buffer.from(reg.xml, 'utf-8').toString('base64'),
+        res_model: 'x_sieg_compras', res_id: rid, mimetype: 'application/xml',
+      }]);
+      if (pdfB64) {
+        await o.ekw('ir.attachment', 'create', [{
+          name: 'DANFE_NF_' + (reg.nNF || reg.chave.slice(-8)) + '.pdf',
+          raw: pdfB64,
+          res_model: 'x_sieg_compras', res_id: rid, mimetype: 'application/pdf',
+        }]);
+      }
+      criadas++;
+    } catch (eRec) {
+      erros.push('NF ' + (reg.nNF || reg.chave) + ': ' + String(eRec.message).slice(0, 120));
+      console.error('[SIEG-COMPRAS] erro NF', reg.nNF, eRec.message);
+    }
+  }
+  var resumo = {
+    meses: meses.join(','), docsNoCofre: docs.length, novasPendentes: novas.length,
+    criadas: criadas, comPdf: comPdf, restantes: Math.max(0, novas.length - criadas),
+    erros: erros.slice(0, 5), nErros: erros.length,
+    duracaoSeg: Math.round((Date.now() - t0) / 1000),
+  };
+  try {
+    await odooLog(o.ekw, o.cfg, erros.length ? 'WARNING' : 'INFO',
+      'sieg_compras sync (' + (limiteNovas || SYNC_LIMITE_CICLO) + '): ' + JSON.stringify(resumo));
+  } catch (eLog) { /* log nao trava o ciclo */ }
+  return resumo;
+}
+
+function cicloSiegCompras(origem, limiteNovas) {
+  if (syncState.rodando) return false;
+  syncState.rodando = true;
+  syncState.iniciadoEm = new Date().toISOString();
+  console.log('[SIEG-COMPRAS] ciclo iniciado (' + origem + ')');
+  sincronizarSiegCompras(limiteNovas || SYNC_LIMITE_CICLO).then(function (r) {
+    syncState.ultima = r;
+    syncState.ciclos++;
+    console.log('[SIEG-COMPRAS] ciclo OK:', JSON.stringify(r));
+  }).catch(function (e) {
+    syncState.ultima = { erro: e.message };
+    console.error('[SIEG-COMPRAS] ciclo FALHOU:', e.message);
+  }).then(function () { syncState.rodando = false; });
+  return true;
+}
+
+// endpoints manuais (backfill + acompanhamento — mesma apiKeyAuth do router)
+router.post('/sieg-compras-sync', function (req, res) {
+  var limite = parseInt(req.body && req.body.limite, 10) || SYNC_LIMITE_CICLO;
+  var disparou = cicloSiegCompras('manual', limite);
+  res.json({ ok: disparou, limite: limite, status: syncState });
+});
+router.get('/sieg-compras-status', function (req, res) {
+  res.json(syncState);
+});
+
+// cron de 1 em 1 hora (+ 1a rodada ~4 min apos o start do servico).
+// Kill switch: env SIEG_COMPRAS_SYNC=off (se precisar desligar sem redeploy de codigo).
+if ((config.odoo && config.odoo.url) && process.env.SIEG_COMPRAS_SYNC !== 'off') {
+  setTimeout(function () { cicloSiegCompras('startup'); }, 4 * 60 * 1000);
+  setInterval(function () { cicloSiegCompras('cron-1h'); }, 60 * 60 * 1000);
+  console.log('[SIEG-COMPRAS] cron ativo: ciclo de 1h desde ' + SYNC_INICIO + ' (limite ' + SYNC_LIMITE_CICLO + ' NFs/ciclo)');
+}
 
 module.exports = router;
