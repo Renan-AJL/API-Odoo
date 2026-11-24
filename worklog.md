@@ -375,3 +375,11 @@ Stage Summary:
 - Validado na prod com a entrega real 261307 (GUID a852ab66, ENTREGUE 13/01/2026, motorista da operação normal — nada atribuído para teste): finish?OrderType+OrderID devolve EXATAMENTE 1 registro (o dela); finish?OrderID sem OrderType devolve 100 (filtro ignorado); partial=true devolve 0 (entrega finalizada — coerente); situation devolve 0
 - /v1/orders/finish responde ARRAY NU (não {Result:[...]}) — poll corrigido p/ aceitar ambos
 - Teste novo com o registro REAL como fixture: mapper.teToOdooPicking -> x_studio_te_situation '3' + ocorrência no texto; 30 checks OK; server v1.2.38-te-finish-array
+
+## 24/11/2026 — Falso alarme de deploy: /health stale (1.2.34) enquanto o código no ar já era v1.2.38
+- A checagem de deploy concluiu errado que o Render rodava a v1.2.34: o /api/v1/health não era bumado desde a v1.2.34 (health.js ficou para trás nas 1.2.35–38, que só bumparam server.js)
+- Prova ao vivo: GET /version (rota criada 04/11 justamente p/ conferência de deploy) = "1.2.38-te-finish-array" — o v1.2.38 JÁ ESTÁ EM PRODUÇÃO
+- E o polling confirma: /api/v1/te/poll-debug?orderID=261307 (read-only, header X-API-Key que o próprio Odoo usa nas server actions) retornou as variantes CAPITALIZADAS do finish (v1.2.37+) e lastPoll da rodada 09:21Z com processados=8, atualizados=0, erros=0, semSituacaoNoTe=0, janelaDias=7 — rodada limpa, domínio achatado OK, piso de datas OK (a fila velha de 521 pickings vazios ficou fora)
+- Fix: version do health.js sincronizada com server.js; regra dourada: bumpar health.js E server.js juntos em todo deploy
+- Pendência operacional (plano free da Render): o serviço suspende sem tráfego HTTP de entrada e o setInterval do poll não conta como tráfego — p/ o status fluir 24/7 precisa de monitor externo (UptimeRobot/cron-job.org, ping a cada ≤15 min em /version) ou plano pago; pings via agente (cron tool) ficam limitados a 3 execuções/dia, insuficientes
+- Status do TudoEntregue: CADEIA COMPLETA NO AR — quando o TE lançar ocorrência/motorista numa entrega nova (operação normal, sem teste com motorista real), o poll grava x_studio_te_situation no picking+pedido e as autos 260/261/263 propagam pro "Status da fabricação"
