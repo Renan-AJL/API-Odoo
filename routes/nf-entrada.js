@@ -134,6 +134,30 @@ function ultimoDia(mesYYYYMM) {
   return mesYYYYMM + '-' + String(d.getUTCDate()).padStart(2, '0');
 }
 
+// ── Chamada SIEG com retry (429 rate-limit e timeout de rede) ───────────
+// AJL 24/11 (v1.2.41): o cofre SIEG vem devolvendo 429/timeout em rajadas
+// (o painel usa a mesma conta) — 2 retries com backoff e erro explicativo.
+async function siegBaixarXmls(body, headers) {
+  var delays = [0, 5000, 10000];
+  var lastErr = null;
+  for (var i = 0; i < delays.length; i++) {
+    if (delays[i]) await new Promise(function (r) { setTimeout(r, delays[i]); });
+    try {
+      return await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
+        headers: headers, timeout: 15000, responseType: 'arraybuffer',
+      }), 20000);
+    } catch (e) {
+      lastErr = e;
+      var status = e && e.response && e.response.status;
+      var msg = String((e && e.message) || '');
+      var retriable = status === 429 || msg.indexOf('timeout') >= 0 || msg.indexOf('Timeout') >= 0;
+      if (!retriable) throw e;
+      console.log('[NF-ENTRADA] SIEG instavel (' + (status || msg.slice(0, 40)) + ') — retry ' + (i + 1));
+    }
+  }
+  throw new Error('SIEG instavel (limite de uso/tempo esgotado apos retries) — aguarde ~1 minuto e clique Trazer .pdf de novo');
+}
+
 // ── Busca no cofre SIEG: paginada (Take<=50 — limite SIEG v1.2.20) ───────
 // Estrategia: mes da data da fatura primeiro; com CNPJdest da empresa, depois
 // sem filtro; so entao mes anterior. Max 3 paginas por tentativa (150 docs).
@@ -155,9 +179,7 @@ async function buscarNfNoSieg(numero, meses, cnpjDest) {
         tentativas.push(mes + (usarCnpj ? '/cnpj' : '') + '/p' + (pg + 1));
         console.log('[NF-ENTRADA] SIEG busca:', JSON.stringify(body));
         var headers = await withTimeout(getAuthHeaders(), 15000);
-        var resp = await withTimeout(axios.post('https://api.sieg.com/api/v1/baixar-xmls', body, {
-          headers: headers, timeout: 15000, responseType: 'arraybuffer',
-        }), 20000);
+        var resp = await siegBaixarXmls(body, headers);
         var zip = new AdmZip(resp.data);
         var entries = zip.getEntries();
         console.log('[NF-ENTRADA] SIEG zip entries:', entries.length);
