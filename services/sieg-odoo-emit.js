@@ -1316,6 +1316,9 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
   // BCST/MVA/vICMSST destacados e vNF = vProd + vICMSST (seção 7 soma vSTSum).
   // Campo ST vazio -> nada aqui roda (emissão idêntica à de hoje). CST manual
   // sem-destaque (40/41/50) junto com ST = contradição -> erro claro, sem emitir.
+  // AJL 24/11 (v1.2.46): ST define também CFOP 5401/6401 e natOp 'Vendas de
+  // produto ST' — cópia fiel do modelo autorizado do antigo emissor (NF 62346).
+  var stNatOp = '';
   try {
     var mvSt = await executeKw(client, db, uid, pwd, 'account.move', 'read', [[moveId], [
       'x_studio_st_icms', 'x_studio_mva_st', 'x_studio_aliquota_st',
@@ -1329,8 +1332,9 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       var stRes = aplicarStManualLinhas(linesData, {
         mva: parseFloat((mvSt && mvSt[0] && mvSt[0].x_studio_mva_st) || 0),
         aliquotaSt: parseFloat((mvSt && mvSt[0] && mvSt[0].x_studio_aliquota_st) || 0),
-      });
-      console.log('[SIEG-EMIT] ST ICMS MANUAL aplicada em ' + linesData.length + ' linha(s): CST 10, DIFAL zerado, vNF = vProd + vICMSST (ST soma no valor da NF)');
+      }, { isInterstate: isInterstate });
+      stNatOp = stRes.natOpSt;
+      console.log('[SIEG-EMIT] ST ICMS MANUAL aplicada em ' + linesData.length + ' linha(s): CST 10, CFOP ' + stRes.cfopSt + ', natOp "' + stNatOp + '", DIFAL zerado, vNF = vProd + vICMSST (ST soma no valor da NF)');
     } else if (stVal) {
       console.log('[SIEG-EMIT] Campo ST "' + stVal + '" não é "10" — ignorado (fluxo automático)');
     }
@@ -1499,7 +1503,9 @@ async function processOne(client, db, uid, pwd, moveId, tipo) {
       // fixa 'Transferencia de mercadoria...' só vale para a transferência normal.
       // AJL 12/11 (v1.2.29): devolução usa o nome do tipo SEM prefixo numérico
       // (opTypeNameNatOp); os demais ramos ficam exatamente como antes.
-      natOp: (isTransferencia && !isDevolucaoTransf) ? 'Transferencia de mercadoria adquirida/recebida de' : ((isDevolucaoTransf && opTypeNameNatOp) ? opTypeNameNatOp : (opTypeName || 'Venda de Mercadoria')),
+      // AJL 24/11 (v1.2.46): fatura com ST (campo 10) sai com natOp 'Vendas de
+      // produto ST' — cópia fiel do modelo autorizado do antigo emissor (62346).
+      natOp: stNatOp || ((isTransferencia && !isDevolucaoTransf) ? 'Transferencia de mercadoria adquirida/recebida de' : ((isDevolucaoTransf && opTypeNameNatOp) ? opTypeNameNatOp : (opTypeName || 'Venda de Mercadoria'))),
       mod: tipo === 'nfe' ? '55' : '01',
       // AJL 27/10/2026: transporte da NF — modFrete/transporta/veicTransp/volumes
       // lidos da fatura (3d). Fatura sem frete/transportadora = 9/sem transporta

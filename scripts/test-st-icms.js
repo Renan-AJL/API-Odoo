@@ -109,6 +109,20 @@ check('XML: vNF 1635.00 (ST somada)', /<vNF>1635\.00<\/vNF>/.test(xml2));
 check('XML: ordem XSD ICMS10 (modBCST antes de pMVAST antes de vBCST)',
   xml2.indexOf('<modBCST>') < xml2.indexOf('<pMVAST>') && xml2.indexOf('<pMVAST>') < xml2.indexOf('<vBCST>'));
 
+console.log('=== 2b) CFOP 5401/6401 e natOp "Vendas de produto ST" (modelo NF 62346, v1.2.46) ===');
+var l2b = linhasSt();
+var r2b = aplicarStManualLinhas(l2b, { mva: 95.39, aliquotaSt: 19.5 }, { isInterstate: false });
+check('CFOP interno com ST = 5401 (modelo 62346)', l2b[0].cfop === '5401', String(l2b[0].cfop));
+check('natOp com ST = "Vendas de produto ST"', r2b.natOpSt === 'Vendas de produto ST', String(r2b.natOpSt));
+check('CFOP sai no XML do det', /<CFOP>5401<\/CFOP>/.test(gerarXmlNFe(base(l2b, 1296.58))));
+var l2bi = linhasSt();
+var r2bi = aplicarStManualLinhas(l2bi, { mva: 95.39, aliquotaSt: 19.5 }, { isInterstate: true });
+check('CFOP interestadual com ST = 6401', l2bi[0].cfop === '6401', String(l2bi[0].cfop));
+check('XML interestadual com CFOP 6401', /<CFOP>6401<\/CFOP>/.test(gerarXmlNFe(base(l2bi, 1296.58))));
+var l2bs = linhasSt(); // sem opts (compat): CFOP default interno
+aplicarStManualLinhas(l2bs, { mva: 95.39, aliquotaSt: 19.5 });
+check('sem opts -> CFOP interno 5401 (compat)', l2bs[0].cfop === '5401', String(l2bs[0].cfop));
+
 console.log('=== 3) Variante preço 2 casas (43.22×30=1296.60): daria 1635.03 ===');
 console.log('      (por isso a linha da #5975 foi ajustada para 43.2193 = vUnCom da tabela)');
 var l3 = linhasPreco2Casas();

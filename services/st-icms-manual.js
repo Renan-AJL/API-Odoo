@@ -26,12 +26,13 @@ var round2 = function (v) { return Math.round((v + Number.EPSILON) * 100) / 100;
 /**
  * Aplica a ST por linha (vProd intocado, ST somada no total). st = {
  *   mva: 95.39, aliquotaSt: 19.5,
- * }
- * Retorna { vProdTotal, vICMSTotal, vBCSTTotal, vICMSSTTotal } — o chamador
- * soma vICMSSTTotal no vNF (seção 7 do emit / ICMSTot do XML).
+ * } opts = { isInterstate: bool } — CFOP 5401 (interno) / 6401 (interestadual),
+ * modelo AJL NF 62346 (venda de produto ST do antigo emissor; AJL 24/11, v1.2.46).
+ * Retorna { vProdTotal, vICMSTotal, vBCSTTotal, vICMSSTTotal, natOpSt } — o chamador
+ * soma vICMSSTTotal no vNF (seção 7 do emit / ICMSTot do XML) e usa natOpSt na natOp.
  * Lança Erro com mensagem de negócio se faltar dado (emissão NÃO sai errada).
  */
-function aplicarStManualLinhas(linesData, st) {
+function aplicarStManualLinhas(linesData, st, opts) {
   var mva = parseFloat(st.mva);
   var pSTpct = parseFloat(st.aliquotaSt);
   if (!(mva > 0) || !(pSTpct > 0)) {
@@ -41,6 +42,8 @@ function aplicarStManualLinhas(linesData, st) {
   }
   var mvaDec = mva / 100;
   var pST = pSTpct / 100;
+  var cfopSt = (opts && opts.isInterstate) ? '6401' : '5401';
+  var natOpSt = 'Vendas de produto ST';
   var vProdTotal = 0, vICMSTotal = 0, vBCSTTotal = 0, vICMSSTTotal = 0;
   for (var i = 0; i < linesData.length; i++) {
     var ld = linesData[i];
@@ -55,6 +58,7 @@ function aplicarStManualLinhas(linesData, st) {
     ld.modbcst = '4';
     ld.mod_bc = '3';
     ld.cst_icms = '10';
+    ld.cfop = cfopSt;
     ld.difal = 0;
     vProdTotal += vProd;
     vICMSTotal += vicms;
@@ -69,8 +73,9 @@ function aplicarStManualLinhas(linesData, st) {
     + ' | ICMS próprio=' + vICMSTotal.toFixed(2)
     + ' | BCST=' + vBCSTTotal.toFixed(2) + ' (MVA ' + mva + '%)'
     + ' | vICMSST=' + vICMSSTTotal.toFixed(2) + ' (alíq ' + pSTpct + '%)'
-    + ' | vNF = vProd + vICMSST = ' + round2(vProdTotal + vICMSSTTotal).toFixed(2));
-  return { vProdTotal: vProdTotal, vICMSTotal: vICMSTotal, vBCSTTotal: vBCSTTotal, vICMSSTTotal: vICMSSTTotal };
+    + ' | vNF = vProd + vICMSST = ' + round2(vProdTotal + vICMSSTTotal).toFixed(2)
+    + ' | CFOP ' + cfopSt + " | natOp '" + natOpSt + "'");
+  return { vProdTotal: vProdTotal, vICMSTotal: vICMSTotal, vBCSTTotal: vBCSTTotal, vICMSSTTotal: vICMSSTTotal, cfopSt: cfopSt, natOpSt: natOpSt };
 }
 
 module.exports = { aplicarStManualLinhas, round2 };
