@@ -454,6 +454,12 @@ router.post('/ping', async function (req, res) {
 // ═══════════════════════════════════════════════════════════════════════════
 var SYNC_INICIO = '2026-10';   // mes inicial do espelho (pedido do Compras)
 var SYNC_LIMITE_CICLO = 120;   // max de NFs novas por ciclo (Render free)
+// AJL 25/11 (v1.2.48): rajada de ate 40 paginas sem pausa estoura o limite de
+// uso da SIEG (429) e o ciclo inteiro morre sem criar nada (ciclo 02:01Z 25/11
+// perdeu tudo) — pausa configuravel entre paginas (default 2s,
+// env SIEG_COMPRAS_PAGE_DELAY_MS para ajustar sem redeploy).
+var COFRE_PAGE_DELAY_MS = parseInt(process.env.SIEG_COMPRAS_PAGE_DELAY_MS, 10);
+if (isNaN(COFRE_PAGE_DELAY_MS) || COFRE_PAGE_DELAY_MS < 0) COFRE_PAGE_DELAY_MS = 2000;
 var syncState = { rodando: false, ultima: null, ciclos: 0, iniciadoEm: null };
 
 function mesesDesde(inicioYYYYMM) {
@@ -497,7 +503,16 @@ async function buscarCofreCompleto(meses) {
         DataEmissaoInicio: mes + '-01T00:00:00Z',
         DataEmissaoFim: ultimoDia(mes) + 'T23:59:59Z',
       };
-      var resp = await siegBaixarXmls(body, headers);
+      var resp;
+      try {
+        resp = await siegBaixarXmls(body, headers);
+      } catch (ePag) {
+        // v1.2.48: pagina com 429/timeout apos retries NAO descarta o ciclo —
+        // segue com o que ja buscou (progresso parcial; dedup por chave garante
+        // que o proximo ciclo completa o resto)
+        console.error('[SIEG-COMPRAS] cofre', mes, 'p' + (pg + 1), 'falhou:', ePag.message, '— progresso parcial mantido');
+        break;
+      }
       if (!resp || resp.__empty404) break;
       var zip = new AdmZip(resp.data);
       var entries = zip.getEntries();
@@ -513,6 +528,7 @@ async function buscarCofreCompleto(meses) {
         docs.push(reg);
       }
       if (entries.length < 50) break;
+      if (COFRE_PAGE_DELAY_MS > 0) await new Promise(function (rs) { setTimeout(rs, COFRE_PAGE_DELAY_MS); });
     }
   }
   return docs;
