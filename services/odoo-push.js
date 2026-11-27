@@ -144,7 +144,32 @@ async function pushBoletosToOdoo(pushData) {
       console.log('[ODOO-PUSH] Processando boleto', (i + 1) + '/' + boletos.length, '- PDF:', pdfB64 ? (pdfB64.length / 1024).toFixed(0) + 'KB' : 'AUSENTE');
 
       if (!pdfB64) {
-        console.warn('[ODOO-PUSH]   PDF ausente, pulando boleto', (i + 1));
+        // AJL 28/11/2026 — fix boletos faltantes: NAO pular silenciosamente.
+        // Postar aviso no chatter da fatura identificando o boleto sem PDF,
+        // para o financeiro saber qual boleto precisa ser reanexado.
+        console.warn('[ODOO-PUSH]   PDF ausente para boleto', (i + 1), '- postando aviso no chatter');
+        try {
+          var _p = bol.parcela || (i + 1);
+          var _t = bol.total_parcelas || boletos.length;
+          var _nn = bol.nosso_numero || '(sem NN)';
+          var _vd = bol.valor_titulo || 'N/A';
+          var _vc = bol.data_vencimento || 'N/A';
+          var _ld = bol.linha_digitavel || '';
+          var warnBody = '<b style="color:#b45309">Boleto sem PDF anexado — Parcela ' + _p + '/' + _t + '</b><br/>' +
+            'Nosso Numero: ' + _nn + '<br/>' +
+            'Valor: R$ ' + _vd + '<br/>' +
+            'Vencimento: ' + _vc + '<br/>' +
+            (_ld ? 'Linha Digitavel: <code>' + _ld + '</code><br/>' : '') +
+            '<i>Os dados do boleto foram registrados no Itau, mas o PDF nao foi anexado automaticamente. ' +
+            'Use o botao de boleto manual na fatura para reanexar, ou baixe via /api/v1/itau/boletos/pdf/nn/' + _nn + '</i>';
+          await executeKw(client, odooConfig.db, uid, odooConfig.password, 'account.move', 'message_post', [[recordId]], {
+            body: warnBody,
+            message_type: 'comment',
+            subtype_xmlid: 'mail.mt_note',
+          });
+        } catch (warnErr) {
+          console.error('[ODOO-PUSH]   Falha ao postar aviso de PDF ausente:', warnErr.message);
+        }
         continue;
       }
 

@@ -10,6 +10,7 @@ const router = express.Router();
 const { apiKeyAuth } = require('../middleware/auth');
 const { emitirBoleto, parseFormaPagamento, consultarBoletoPorNossoNumero, cancelarBoleto } = require('../services/itau-boleto');
 const { storeBoleto, generatePdf, generatePdfFromFields } = require('../services/pdf-boleto');
+const { retry } = require('../utils/retry');
 const { pushBoletosToOdoo, pushPixToOdoo, pushPixToSaleOrder, pushBoletoHtmlToSaleOrder } = require('../services/odoo-push');
 const { criarLinkPagamento } = require('../services/itau-link-pagamento');
 const { criarCobrancaPix, consultarCobrancaPix, cancelarCobrancaPix } = require('../services/itau-pix');
@@ -913,16 +914,69 @@ router.post('/pagar', apiKeyAuth, async function(req, res) {
       });
     }
 
-    // Gerar PDFs imediatamente
+    // Gerar PDFs com RETRY + FALLBACK (AJL 28/11/2026 — fix boletos faltantes)
+    // Causa raiz: generatePdf(txid) lia de um cache em memoria (Map) que podia
+    // nao ter o boleto (renicializacao, race, dados incompletos do Itau). Sem retry,
+    // o PDF era empurrado como null e o push Odoo pulava o boleto — só a última
+    // parcela chegava. Agora: retry 3x com backoff exponencial + fallback via
+    // generatePdfFromFields (gera direto dos campos, sem depender do cache).
     var pdfsBase64 = [];
     for (var i = 0; i < pagamentos.length; i++) {
+      var p = pagamentos[i];
+      var pdfB64 = null;
+
+      // Estrategia 1: generatePdf do cache em memoria, com retry + backoff
       try {
-        var pdfBuf = await generatePdf(pagamentos[i].txid);
-        pdfsBase64.push(pdfBuf.toString('base64'));
-      } catch (pdfErr) {
-        console.error('[API]   PDF', i + 1, 'ERRO:', pdfErr.message);
-        pdfsBase64.push(null);
+        var pdfBuf = await retry(function () { return generatePdf(p.txid); }, {
+          maxRetries: 3, baseDelay: 1500,
+          label: '[API] PDF ' + (i + 1) + '/' + pagamentos.length + ' (cache)',
+          shouldRetry: function (err) {
+            var msg = String(err && err.message || '');
+            // "Boleto expirado" = nao esta no cache — retry pode pegar dados recem-storeBoleto
+            // erros de buildPdfBuffer (ex: bwipjs/biblioteca) — retry pode acertar
+            return msg.indexOf('Boleto expirado') >= 0 || msg.indexOf('Cannot') >= 0 ||
+                   msg.indexOf('undefined') >= 0 || msg.indexOf('null') >= 0;
+          }
+        });
+        pdfB64 = pdfBuf.toString('base64');
+        console.log('[API]   PDF', (i + 1) + '/' + pagamentos.length, 'OK via cache (retry)');
+      } catch (cacheErr) {
+        console.warn('[API]   PDF', (i + 1) + '/' + pagamentos.length, 'cache falhou:', cacheErr.message);
       }
+
+      // Estrategia 2 (fallback): generatePdfFromFields com dados do pagamentos[i]
+      // Gera o PDF direto dos campos retornados pelo Itau, sem depender do cache.
+      if (!pdfB64) {
+        try {
+          var dadosFields = {
+            txid: p.txid || '',
+            nosso_numero: p.nosso_numero || '',
+            linha_digitavel: p.linha_digitavel || '',
+            codigo_barras: p.codigo_barras || '',
+            data_vencimento: p.data_vencimento || '',
+            valor_titulo: p.valor_titulo || '0',
+            pix_copia_cola: p.pix_copia_cola || '',
+            nome_pagador: basePayload.nomePagador || '',
+            cpf_cnpj_pagador: basePayload.cpfCnpjPagador || '',
+            logradouro: basePayload.logradouro || '',
+            cidade: basePayload.cidade || '',
+            estado: basePayload.estado || '',
+            cep: basePayload.cep || '',
+            seu_numero: basePayload.numeroPedido
+              ? (basePayload.numeroPedido + (totalP > 1 ? sufixoParcela(p.parcela, totalP) : ''))
+              : '',
+            parcela: p.parcela || 1,
+            total_parcelas: p.total_parcelas || 1,
+          };
+          var pdfBuf2 = await generatePdfFromFields(dadosFields);
+          pdfB64 = pdfBuf2.toString('base64');
+          console.log('[API]   PDF', (i + 1) + '/' + pagamentos.length, 'OK via fallback generatePdfFromFields');
+        } catch (fbErr) {
+          console.error('[API]   PDF', (i + 1) + '/' + pagamentos.length, 'FALHOU (cache + fallback):', fbErr.message);
+        }
+      }
+
+      pdfsBase64.push(pdfB64); // null se ambas estrategias falharam
     }
 
     // Push Odoo
