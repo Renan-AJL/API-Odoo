@@ -1732,7 +1732,13 @@ router.get('/cancelar/web', async function(req, res) {
   }
 
   if (!odooId || !oc || !oc.enabled || !oc.url || !oc.db || !oc.user || !oc.password) {
-    return res.redirect(returnUrl);
+    // DEBUG 28/11: motivo no corpo em vez de redirect silencioso (temporario)
+    var miss = ['odooId','oc','enabled','url','db','user','password'].filter(function(k){
+      if (k==='odooId') return !odooId;
+      if (k==='oc') return !oc;
+      return !oc || !oc[k];
+    }).join(', ');
+    return res.status(500).send('CANCELAR-WEB DEBUG: config ausente -> ' + miss);
   }
 
   try {
@@ -1808,8 +1814,8 @@ router.get('/cancelar/web', async function(req, res) {
     res.redirect(returnUrl);
   } catch (err) {
     console.error('[CANCELAR-WEB] ERRO:', err.message);
-    try { await postChatter(odooId, '<b>Cancelar Boleto</b><br/><span style="color:red">Erro: ' + err.message + '</span>'); } catch(e) {}
-    res.redirect(returnUrl);
+    // DEBUG 28/11: erro+stack no corpo (temporario)
+    return res.status(500).send('CANCELAR-WEB ERRO: ' + err.message + '\nSTACK:\n' + (err.stack || ''));
   }
 });
 
