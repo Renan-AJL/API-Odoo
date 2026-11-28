@@ -294,6 +294,23 @@ function parseFormaPagamento(forma) {
 }
 
 /**
+ * DAC modulo 10 (padrao FEBRABAN/Itau): pesos 2,1 alternados da direita
+ * p/ esquerda, soma dos digitos dos produtos, DAC = complemento a 10.
+ * AJL 28/11: conferido contra o codigo de barras oficial da NF 74548
+ * (nn 78668645 -> DAC 1 ✓, impresso pelo proprio banco no campo livre).
+ */
+function dacMod10(str) {
+  var soma = 0;
+  var peso = 2;
+  for (var i = str.length - 1; i >= 0; i--) {
+    var p = parseInt(str[i], 10) * peso;
+    soma += p > 9 ? p - 9 : p;
+    peso = peso === 2 ? 1 : 2;
+  }
+  return String((10 - (soma % 10)) % 10);
+}
+
+/**
  * Cancela um boleto no BoleCode Itau
  * Endpoint: PUT /boletos_pix/cancelamento
  * @param {string} nossoNumero - Nosso numero do boleto a cancelar
@@ -310,8 +327,14 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
   }
 
   // === METODO 1: Cash Management API (PATCH /boletos/{idBoleto}/baixa) ===
-  // idBoleto = Agencia(4) + ContaCorrenteComDAC(7) + Carteira(3) + NossoNumero(8) = 22 chars
-  // Conta <dash> DAC: e.g. 22338-9 -> contaCorrente=022338 + DAC=9 -> codConta=0223389
+  // === AJL 28/11: idBoleto OFICIAL = 23 ou 31 chars — o banco REJEITOU o
+  // formato de 22 (ag4+conta7+cart3+nn8) com erro 400 "Tamanho do Id Boleto
+  // deve ter 23 ou 31 caracteres" (teste real NF 74548, NN 78668645).
+  // Composicao confirmada pelo CAMPO LIVRE do codigo de barras impresso
+  // pelo proprio banco (NF 74548: 109|78668645|1|7764|223389|000):
+  //   carteira(3) + nn(8) + dacNN(1) + agencia(4) + conta(7) = 23 chars
+  // DAC do nosso numero = modulo 10 do nn (pesos 2,1 da direita) — conferido
+  // contra o barcode: 78668645 -> DAC 1 ✓. Conta: 22338-9 -> 0223389 (7).
   var agencia = (config.banco.agencia || '7764').padStart(4, '0');
   var contaRaw = (config.banco.conta || '22338-9').replace(/-/g, ''); // "223389"
   var dac = contaRaw.length > 5 ? contaRaw.slice(-1) : '9'; // Ultimo digito e o DAC
@@ -319,24 +342,39 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
   var codConta = (contaPadded + dac).padStart(7, '0'); // "0223389" (7 chars, DAC ja incluido)
   var carteira = (config.banco.codigoCarteira || '109').padStart(3, '0');
   var nn = String(nossoNumero).padStart(8, '0');
-  // FIX: DAC ja esta em codConta (ultimo digito) — nao somar de novo
-  var idBoleto = agencia + codConta + carteira + nn;
-  // Formato: 4+7+3+8 = 22 caracteres
-  console.log('[BOLETO] idBoleto:', idBoleto, '(ag=' + agencia + ' conta=' + codConta + ' cart=' + carteira + ' nn=' + nn + ' len=' + idBoleto.length + ')');
+  var dacNN = dacMod10(nn);
+  // Candidatos de 23 chars. 1o = ag(4)+conta(7)+nn(8)+cart(3)+dacNN(1) —
+  // a UNICA composicao que tambem da 31 chars com nn de 16 (doc oficial:
+  // "NN 8 ou 16 caracteres -> 23 ou 31"). Depois: ordem do barcode e
+  // variantes. Tenta na ordem ate o banco aceitar.
+  var candidatosIdBoleto = [
+    agencia + codConta + nn + carteira + dacNN, // ag+conta+nn+cart+dac (23/31 doc)
+    carteira + nn + dacNN + agencia + codConta, // ordem do codigo de barras
+    agencia + codConta + carteira + nn + dacNN, // antigo 22 + dac no fim
+    (carteira + nn + dacNN + agencia + contaRaw.padStart(7, '0')).substring(0, 23), // barcode literal 23
+  ];
+  console.log('[BOLETO] idBoleto candidatos (23):', candidatosIdBoleto.join(' / '), '(dacNN=' + dacNN + ' ag=' + agencia + ' conta=' + codConta + ' cart=' + carteira + ' nn=' + nn + ')');
 
   var erroMetodo1 = '';
-  try {
-    var baixaPayload = {
-      motivo_baixa: 'CANCELAMENTO',
-    };
-    var response = await callCashManagementPatch(accessToken, '/boletos/' + idBoleto + '/baixa', baixaPayload);
-    console.log('[BOLETO] Cancelamento (CashMgmt PATCH) OK:', JSON.stringify(response));
-    return { sucesso: true, dados: response, metodo: 'cash_management_patch', idBoleto: idBoleto };
-  } catch (cmError) {
-    erroMetodo1 = cmError.message;
-    console.warn('[BOLETO] Cash Management PATCH falhou:', cmError.message);
-    console.log('[BOLETO] Tentando metodo alternativo (BoleCode PUT /cancelamento)...');
+  var baixaPayload = {
+    motivo_baixa: 'CANCELAMENTO',
+  };
+  for (var c = 0; c < candidatosIdBoleto.length; c++) {
+    var idCand = candidatosIdBoleto[c];
+    try {
+      var response = await callCashManagementPatch(accessToken, '/boletos/' + idCand + '/baixa', baixaPayload);
+      console.log('[BOLETO] Cancelamento (CashMgmt PATCH) OK com idBoleto:', idCand, JSON.stringify(response));
+      return { sucesso: true, dados: response, metodo: 'cash_management_patch', idBoleto: idCand };
+    } catch (cmError) {
+      erroMetodo1 = 'idBoleto ' + idCand + ' -> ' + cmError.message;
+      console.warn('[BOLETO] Cash Management PATCH falhou:', erroMetodo1);
+      // Erro de formato -> tenta a proxima composicao; erro de negocio
+      // (boleto inexistente etc) -> nao adianta trocar formato, para.
+      if (cmError.message && cmError.message.indexOf('Tamanho do Id Boleto') >= 0) continue;
+      break;
+    }
   }
+  console.log('[BOLETO] Tentando metodo alternativo (BoleCode PUT /cancelamento)...');
 
   // === METODO 2 (fallback): BoleCode PUT /boletos_pix/cancelamento ===
   var payload = {
