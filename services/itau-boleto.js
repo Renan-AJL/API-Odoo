@@ -327,32 +327,29 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
   }
 
   // === METODO 1: Cash Management API (PATCH /boletos/{idBoleto}/baixa) ===
-  // === AJL 28/11: idBoleto OFICIAL = 23 ou 31 chars — o banco REJEITOU o
-  // formato de 22 (ag4+conta7+cart3+nn8) com erro 400 "Tamanho do Id Boleto
-  // deve ter 23 ou 31 caracteres" (teste real NF 74548, NN 78668645).
-  // Composicao confirmada pelo CAMPO LIVRE do codigo de barras impresso
-  // pelo proprio banco (NF 74548: 109|78668645|1|7764|223389|000):
-  //   carteira(3) + nn(8) + dacNN(1) + agencia(4) + conta(7) = 23 chars
-  // DAC do nosso numero = modulo 10 do nn (pesos 2,1 da direita) — conferido
-  // contra o barcode: 78668645 -> DAC 1 ✓. Conta: 22338-9 -> 0223389 (7).
+  // === AJL 28/11: idBoleto OFICIAL = 23 ou 31 chars. Evolucao dos testes
+  // reais (NF 74548, NN 78668645):
+  //   1) 22 chars (ag4+conta7+cart3+nn8) -> 400 "Tamanho ... 23 ou 31";
+  //   2) candidatos com conta "0223389" (zero errado) -> 400 "Conjunto
+  //      agencia/conta/DAC invalido" — o banco PARSEA o id e valida ag/conta.
+  // A conta certa esta no id_beneficiario oficial 776400223389 =
+  // ag(4) + conta(7) + DAC(1) = "7764" + "0022338" + "9".
+  // Composicao que fecha 23 E 31: idBoleto = id_beneficiario(12) +
+  // nosso numero(8|16) + carteira(3) -> 23 com nn 8, 31 com nn 16 (doc).
   var agencia = (config.banco.agencia || '7764').padStart(4, '0');
   var contaRaw = (config.banco.conta || '22338-9').replace(/-/g, ''); // "223389"
   var dac = contaRaw.length > 5 ? contaRaw.slice(-1) : '9'; // Ultimo digito e o DAC
-  var contaPadded = contaRaw.slice(0, -1).padStart(6, '0'); // "022338"
-  var codConta = (contaPadded + dac).padStart(7, '0'); // "0223389" (7 chars, DAC ja incluido)
+  var benId = agencia + contaRaw.slice(0, -1).padStart(7, '0') + dac; // "776400223389" (12)
+  var codConta = contaRaw.slice(0, -1).padStart(7, '0') + dac; // "00223389" (conta 7 + DAC)
   var carteira = (config.banco.codigoCarteira || '109').padStart(3, '0');
   var nn = String(nossoNumero).padStart(8, '0');
   var dacNN = dacMod10(nn);
-  // Candidatos de 23 chars. 1o = ag(4)+conta(7)+nn(8)+cart(3)+dacNN(1) —
-  // a UNICA composicao que tambem da 31 chars com nn de 16 (doc oficial:
-  // "NN 8 ou 16 caracteres -> 23 ou 31"). Depois: ordem do barcode e
-  // variantes. Tenta na ordem ate o banco aceitar.
+  // Candidatos: estruturas validas de 23 (12+3+8 / 12+8+3) e fallback.
   var candidatosIdBoleto = [
-    agencia + codConta + nn + carteira + dacNN, // ag+conta+nn+cart+dac (23/31 doc)
-    carteira + nn + dacNN + agencia + codConta, // ordem do codigo de barras
-    agencia + codConta + carteira + nn + dacNN, // antigo 22 + dac no fim
-    (carteira + nn + dacNN + agencia + contaRaw.padStart(7, '0')).substring(0, 23), // barcode literal 23
-  ];
+    benId + carteira + nn,                    // benId+cart+nn = 23 (31 c/ nn16)
+    benId + nn + carteira,                    // benId+nn+cart = 23
+    carteira + nn + dacNN + agencia + contaRaw.slice(0, -1).padStart(7, '0'), // fallback barcode c/ conta certa
+  ].filter(function(s) { return s.length === 23 || s.length === 31; });
   console.log('[BOLETO] idBoleto candidatos (23):', candidatosIdBoleto.join(' / '), '(dacNN=' + dacNN + ' ag=' + agencia + ' conta=' + codConta + ' cart=' + carteira + ' nn=' + nn + ')');
 
   var erroMetodo1 = '';
@@ -366,7 +363,8 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
       console.log('[BOLETO] Cancelamento (CashMgmt PATCH) OK com idBoleto:', idCand, JSON.stringify(response));
       return { sucesso: true, dados: response, metodo: 'cash_management_patch', idBoleto: idCand };
     } catch (cmError) {
-      erroMetodo1 = 'idBoleto ' + idCand + ' -> ' + cmError.message;
+      // Agrega TODOS os erros de candidatos (nao sobrescrever) p/ ver no chatter
+      erroMetodo1 += (erroMetodo1 ? ' | ' : '') + 'idBoleto ' + idCand + ' -> ' + cmError.message;
       console.warn('[BOLETO] Cash Management PATCH falhou:', erroMetodo1);
       // 401/403 = auth/escopo, independe do formato -> para. Qualquer outro
       // (400 tamanho, 404 nao encontrado...) -> testa a proxima composicao.
