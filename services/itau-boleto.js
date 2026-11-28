@@ -324,6 +324,7 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
   // Formato: 4+7+3+8 = 22 caracteres
   console.log('[BOLETO] idBoleto:', idBoleto, '(ag=' + agencia + ' conta=' + codConta + ' cart=' + carteira + ' nn=' + nn + ' len=' + idBoleto.length + ')');
 
+  var erroMetodo1 = '';
   try {
     var baixaPayload = {
       motivo_baixa: 'CANCELAMENTO',
@@ -332,6 +333,7 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
     console.log('[BOLETO] Cancelamento (CashMgmt PATCH) OK:', JSON.stringify(response));
     return { sucesso: true, dados: response, metodo: 'cash_management_patch', idBoleto: idBoleto };
   } catch (cmError) {
+    erroMetodo1 = cmError.message;
     console.warn('[BOLETO] Cash Management PATCH falhou:', cmError.message);
     console.log('[BOLETO] Tentando metodo alternativo (BoleCode PUT /cancelamento)...');
   }
@@ -366,7 +368,8 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
       }
     }
     console.error('[BOLETO] Erro ao cancelar boleto:', error.message);
-    throw error;
+    // AJL 28/11: reporta os DOIS metodos p/ diagnostico no chatter
+    throw new Error('[1] CashMgmt PATCH api.itau.com.br: ' + erroMetodo1 + ' | [2] BoleCode PUT: ' + error.message);
   }
 }
 
