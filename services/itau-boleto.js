@@ -368,10 +368,10 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
     } catch (cmError) {
       erroMetodo1 = 'idBoleto ' + idCand + ' -> ' + cmError.message;
       console.warn('[BOLETO] Cash Management PATCH falhou:', erroMetodo1);
-      // Erro de formato -> tenta a proxima composicao; erro de negocio
-      // (boleto inexistente etc) -> nao adianta trocar formato, para.
-      if (cmError.message && cmError.message.indexOf('Tamanho do Id Boleto') >= 0) continue;
-      break;
+      // 401/403 = auth/escopo, independe do formato -> para. Qualquer outro
+      // (400 tamanho, 404 nao encontrado...) -> testa a proxima composicao.
+      if (cmError.message && (cmError.message.indexOf('401') >= 0 || cmError.message.indexOf('403') >= 0)) break;
+      continue;
     }
   }
   console.log('[BOLETO] Tentando metodo alternativo (BoleCode PUT /cancelamento)...');
