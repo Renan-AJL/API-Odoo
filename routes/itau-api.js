@@ -1792,10 +1792,17 @@ router.get('/cancelar/web', async function(req, res) {
 
     await postChatter(odooId, chatBody);
 
-    try {
-      await odooRpc('account.move', 'write', [[parseInt(odooId)], { 'x_studio_boleto_cancelado': true }]);
-    } catch (wErr) {
-      console.warn('[CANCELAR-WEB] Aviso:', wErr.message);
+    // === AJL 28/11/2026: so marca cancelado no Odoo se TODOS os boletos ===
+    // Antes: marcava x_studio_boleto_cancelado=true mesmo com falha (caso
+    // NFe 00074548/NN 78668645: baixa 403 no Itau e flag marcado — com o
+    // boleto vivo no banco, o checkBoletoAtivo deixaria emitir outro =
+    // risco de pagamento duplo). Agora: flag so com baixa total confirmada.
+    if (falha === 0) {
+      try {
+        await odooRpc('account.move', 'write', [[parseInt(odooId)], { 'x_studio_boleto_cancelado': true, 'x_studio_itau_situacao': 'cancelado' }]);
+      } catch (wErr) {
+        console.warn('[CANCELAR-WEB] Aviso:', wErr.message);
+      }
     }
 
     res.redirect(returnUrl);
