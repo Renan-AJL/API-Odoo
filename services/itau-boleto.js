@@ -8,7 +8,7 @@
  * =============================================
  */
 const { getAccessToken, invalidateToken } = require('./itau-auth');
-const { callBolecode, callBolecodeGet, callBolecodePut, callCashManagementPatch } = require('./itau-api');
+const { callBolecode, callBolecodeGet, callBolecodePut, callGetAt, callCashManagementPatch } = require('./itau-api');
 const config = require('../config');
 
 /**
@@ -374,6 +374,11 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
  * Consulta boleto por nosso_numero no BoleCode Itau
  * Quando o middleware reinicia (Render sleep), a memoria e zerada.
  * Esta funcao consulta o Itaú diretamente para recuperar os dados do boleto.
+ * === AJL 28/11/2026: endpoint OFICIAL da colecao Bolecode (Postman) ===
+ *   GET https://secure.api.cloud.itau.com.br/boletoscash/v2/boletos
+ *       ?id_beneficiario=..&codigo_carteira=..&nosso_numero=..&view=specific
+ * O caminho antigo (/boletos_pix?beneficiario=..) no secure.api.itau dava 404.
+ * Fallback mantido p/ transicao.
  */
 async function consultarBoletoPorNossoNumero(nossoNumero, beneficiaryId) {
   console.log('[BOLETO] Consultando boleto por nosso_numero:', nossoNumero);
@@ -383,15 +388,52 @@ async function consultarBoletoPorNossoNumero(nossoNumero, beneficiaryId) {
   } catch (err) {
     throw new Error('Falha na autenticacao Itau: ' + err.message);
   }
+  var idBenef = beneficiaryId || config.banco.idBeneficiario || '776400223389';
+  var carteira = (config.banco.codigoCarteira || '109').padStart(3, '0');
+  var nn = String(nossoNumero);
+
+  // 1) OFICIAL: boletoscash v2 (host proprio)
   try {
-    var endpoint = '/boletos_pix?beneficiario=' + (beneficiaryId || config.banco.idBeneficiario || '776400223389') + '&nosso_numero=' + nossoNumero;
-    var response = await callBolecodeGet(accessToken, endpoint);
-    console.log('[BOLETO] Boleto encontrado por nosso_numero:', JSON.stringify(response).substring(0, 500));
-    return { sucesso: true, dados: response };
+    var endpoint = '/boletos?id_beneficiario=' + idBenef + '&codigo_carteira=' + carteira +
+      '&nosso_numero=' + nn + '&view=specific';
+    var response = await callGetAt(accessToken, endpoint, config.itau.boletosConsultaBaseUrl);
+    console.log('[BOLETO] Boleto encontrado (boletoscash v2):', JSON.stringify(response).substring(0, 500));
+    return { sucesso: true, dados: response, metodo: 'boletoscash_v2' };
+  } catch (error) {
+    console.warn('[BOLETO] boletoscash v2 falhou:', error.message, '— tentando caminho legado');
+  }
+
+  // 2) LEGADO: GET antigo no base da emissao (transicao)
+  try {
+    var endpointOld = '/boletos_pix?beneficiario=' + idBenef + '&nosso_numero=' + nn;
+    var response = await callBolecodeGet(accessToken, endpointOld);
+    console.log('[BOLETO] Boleto encontrado (legado):', JSON.stringify(response).substring(0, 500));
+    return { sucesso: true, dados: response, metodo: 'legado' };
   } catch (error) {
     console.error('[BOLETO] Erro ao consultar por nosso_numero:', error.message);
     throw error;
   }
 }
 
-module.exports = { emitirBoleto, cancelarBoleto, consultarBoleto, consultarBoletoPorNossoNumero, montaPayloadBolecode, parseFormaPagamento };
+/**
+ * AJL 28/11/2026: extrai situacao_boleto de qualquer forma de resposta
+ * (boletoscash v2 e legado podem virar objetos ou listas em niveis difs).
+ * Retorna string lowercase ('', 'em_aberto', 'baixado', 'pago', ...).
+ */
+function extrairSituacaoBoleto(dados) {
+  if (!dados) return '';
+  var d = (dados.data !== undefined) ? dados.data : dados;
+  var pegar = function(obj) {
+    if (!obj) return '';
+    if (obj.dado_boleto && obj.dado_boleto.situacao_boleto) return String(obj.dado_boleto.situacao_boleto);
+    if (obj.situacao_boleto) return String(obj.situacao_boleto);
+    return '';
+  };
+  if (Array.isArray(d)) {
+    var primeiroBoleto = d.find(function(x) { return pegar(x); }) || d[0];
+    return pegar(primeiroBoleto).toLowerCase();
+  }
+  return pegar(d).toLowerCase();
+}
+
+module.exports = { emitirBoleto, cancelarBoleto, consultarBoleto, consultarBoletoPorNossoNumero, extrairSituacaoBoleto, montaPayloadBolecode, parseFormaPagamento };

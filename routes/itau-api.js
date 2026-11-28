@@ -8,7 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const { apiKeyAuth } = require('../middleware/auth');
-const { emitirBoleto, parseFormaPagamento, consultarBoletoPorNossoNumero, cancelarBoleto } = require('../services/itau-boleto');
+const { emitirBoleto, parseFormaPagamento, consultarBoletoPorNossoNumero, cancelarBoleto, extrairSituacaoBoleto } = require('../services/itau-boleto');
 const { storeBoleto, generatePdf, generatePdfFromFields } = require('../services/pdf-boleto');
 const { retry } = require('../utils/retry');
 const { pushBoletosToOdoo, pushPixToOdoo, pushPixToSaleOrder, pushBoletoHtmlToSaleOrder } = require('../services/odoo-push');
@@ -137,16 +137,16 @@ async function checkBoletoAtivo(faturaId, faturaName) {
 
         if (consultaResult && consultaResult.dados) {
           var dados = consultaResult.dados;
-          // Verificar situacao do boleto no Itau
-          var situacaoItau = '';
-          if (dados.data && dados.data.dado_boleto) {
-            situacaoItau = (dados.data.dado_boleto.situacao_boleto || '').toLowerCase();
-          }
-          console.log('[BOLETO-CHECK] Itau situacao_boleto: ' + situacaoItau);
+          // AJL 28/11/2026: extrator entende resposta da API nova (boletoscash
+          // v2, que pode virar lista/objeto em niveis diferentes) e a legada
+          var situacaoItau = extrairSituacaoBoleto(dados);
+          console.log('[BOLETO-CHECK] Itau situacao_boleto (' + (consultaResult.metodo || '?') + '): ' + situacaoItau);
 
-          // Se boleto esta ativo (em_aberto, registrado, etc), BLOQUEAR
+          // Se boleto esta ativo (em_aberto, registrado, etc), BLOQUEAR.
+          // Situacao desconhecida ('') tb bloqueia — por seguranca.
           if (situacaoItau === 'em_aberto' || situacaoItau === 'registrado' ||
-              situacaoItau === '' && dados.data) {
+              situacaoItau === 'aberto' || situacaoItau === 'efetivado' ||
+              situacaoItau === 'normal' || situacaoItau === '') {
             return {
               podeEmitir: false,
               motivo: 'Primeiro, cancele o boleto no Itaú para nova emissão. Nosso Número: ' + nnFirst,

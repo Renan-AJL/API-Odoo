@@ -123,6 +123,15 @@ async function callBolecodeGet(accessToken, endpoint) {
 }
 
 /**
+ * GET em base EXPLICITA (AJL 28/11/2026: a consulta oficial usa host
+ * proprio secure.api.cloud.itau.com.br/boletoscash/v2 — colecao Bolecode
+ * do Postman). fallbackBase opcional reusa a mesma rota na outra base.
+ */
+async function callGetAt(accessToken, endpoint, primaryBase, fallbackBase) {
+  return _comFallback('BoletosCash', 'GET', primaryBase, fallbackBase || null, endpoint, null, null, accessToken);
+}
+
+/**
  * PUT/GET request ao PIX Itau (para cobranca PIX, webhook, etc.)
  */
 async function callPix(method, endpoint, payload) {
@@ -139,4 +148,4 @@ async function callCashManagementPatch(accessToken, endpoint, body) {
   return _comFallback('CashMgmt', 'PATCH', config.itau.cashManagementBaseUrl, config.itau.cashManagementBaseUrlFallback, endpoint, body, { 'x-itau-flowID': 'boleto-baixa' }, accessToken);
 }
 
-module.exports = { callBolecode, callBolecodeGet, callBolecodePut, callPix, callCashManagementPatch };
+module.exports = { callBolecode, callBolecodeGet, callBolecodePut, callGetAt, callPix, callCashManagementPatch };
