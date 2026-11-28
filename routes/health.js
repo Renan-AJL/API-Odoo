@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
     res.json({
       success: true,
       service: 'odoo-middleware-unified',
-      version: '1.2.48-compras-cofre-throttle',
+      version: '1.2.49-itau-v3-gateway',
       status: 'healthy',
       timestamp: new Date().toISOString(),
       modules: {

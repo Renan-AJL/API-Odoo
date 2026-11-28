@@ -8,7 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const { apiKeyAuth } = require('../middleware/auth');
-const { emitirBoleto, parseFormaPagamento, consultarBoletoPorNossoNumero, cancelarBoleto } = require('../services/itau-boleto');
+const { emitirBoleto, parseFormaPagamento, consultarBoletoPorNossoNumero, cancelarBoleto, extrairSituacaoBoleto } = require('../services/itau-boleto');
 const { storeBoleto, generatePdf, generatePdfFromFields } = require('../services/pdf-boleto');
 const { retry } = require('../utils/retry');
 const { pushBoletosToOdoo, pushPixToOdoo, pushPixToSaleOrder, pushBoletoHtmlToSaleOrder } = require('../services/odoo-push');
@@ -137,16 +137,16 @@ async function checkBoletoAtivo(faturaId, faturaName) {
 
         if (consultaResult && consultaResult.dados) {
           var dados = consultaResult.dados;
-          // Verificar situacao do boleto no Itau
-          var situacaoItau = '';
-          if (dados.data && dados.data.dado_boleto) {
-            situacaoItau = (dados.data.dado_boleto.situacao_boleto || '').toLowerCase();
-          }
-          console.log('[BOLETO-CHECK] Itau situacao_boleto: ' + situacaoItau);
+          // AJL 28/11/2026: extrator entende resposta da API nova (boletoscash
+          // v2, que pode virar lista/objeto em niveis diferentes) e a legada
+          var situacaoItau = extrairSituacaoBoleto(dados);
+          console.log('[BOLETO-CHECK] Itau situacao_boleto (' + (consultaResult.metodo || '?') + '): ' + situacaoItau);
 
-          // Se boleto esta ativo (em_aberto, registrado, etc), BLOQUEAR
+          // Se boleto esta ativo (em_aberto, registrado, etc), BLOQUEAR.
+          // Situacao desconhecida ('') tb bloqueia — por seguranca.
           if (situacaoItau === 'em_aberto' || situacaoItau === 'registrado' ||
-              situacaoItau === '' && dados.data) {
+              situacaoItau === 'aberto' || situacaoItau === 'efetivado' ||
+              situacaoItau === 'normal' || situacaoItau === '') {
             return {
               podeEmitir: false,
               motivo: 'Primeiro, cancele o boleto no Itaú para nova emissão. Nosso Número: ' + nnFirst,
@@ -1640,20 +1640,56 @@ router.get('/pix/status/:txid', async function(req, res) {
 // Cancela um boleto no Itau (baixa por cancelamento)
 router.post('/cancelar', apiKeyAuth, async function(req, res) {
   try {
-    var nn = req.body.nosso_numero || '';
-    if (!nn) {
+    var nnRaw = String(req.body.nosso_numero || '').trim();
+    if (!nnRaw) {
       return res.status(400).json({ success: false, message: 'nosso_numero obrigatorio' });
+    }
+    // === AJL 28/11/2026: cancelamento MULTI-BOLETO ===
+    // Regra do Marcus: uma fatura pode ter VARIOS boletos emitidos e o
+    // cancelamento precisa baixar TODOS. Aceita 'NN1 | NN2 | NN3'
+    // (mesmo formato de x_studio_itau_nosso_numero no Odoo).
+    var lista = nnRaw.split('|').map(function(s) { return s.trim(); }).filter(Boolean);
+    if (lista.length === 0) {
+      return res.status(400).json({ success: false, message: 'nosso_numero invalido' });
     }
     // SMART (29/10/2026): TXID de PIX = 25-26 alfanumerico maiusculo (ex. 02B8E53F747D4D73B44CE89C05)
     // nao e nosso numero de boleto — roteia p/ cancelamento de cobranca PIX
-    if (/^[A-Z0-9]{25,26}$/.test(String(nn).trim().toUpperCase())) {
-      console.log('[API/CANCELAR] TXID PIX detectado em /cancelar:', nn);
-      var resPix = await cancelarCobrancaPix(String(nn).trim().toUpperCase());
+    if (lista.length === 1 && /^[A-Z0-9]{25,26}$/.test(lista[0].toUpperCase())) {
+      console.log('[API/CANCELAR] TXID PIX detectado em /cancelar:', lista[0]);
+      var resPix = await cancelarCobrancaPix(lista[0].trim().toUpperCase());
       return res.json({ success: true, message: 'PIX cancelado com sucesso', tipo: 'pix', dados: resPix });
     }
-    console.log('[API/CANCELAR] Cancelando boleto NN:', nn);
-    var resultado = await cancelarBoleto(nn);
-    res.json({ success: true, message: 'Boleto cancelado com sucesso', dados: resultado.dados, metodo: resultado.metodo, idBoleto: resultado.idBoleto || undefined });
+    console.log('[API/CANCELAR] Cancelando', lista.length, 'boleto(s):', lista.join(', '));
+    var resultados = [];
+    for (var i = 0; i < lista.length; i++) {
+      try {
+        var resultado = await cancelarBoleto(lista[i]);
+        resultados.push({ nn: lista[i], ok: true, metodo: resultado.metodo, idBoleto: resultado.idBoleto || undefined, dados: resultado.dados });
+      } catch (errNN) {
+        console.error('[API/CANCELAR] Falha NN ' + lista[i] + ':', errNN.message);
+        resultados.push({ nn: lista[i], ok: false, erro: errNN.message });
+      }
+    }
+    var okCount = resultados.filter(function(r) { return r.ok; }).length;
+    if (okCount === resultados.length) {
+      // Compat: single-NN mantem as chaves de antes (metodo/idBoleto no topo)
+      return res.json({
+        success: true,
+        message: okCount + ' boleto(s) cancelado(s) com sucesso',
+        metodo: resultados[0].metodo,
+        idBoleto: resultados[0].idBoleto,
+        resultados: resultados,
+      });
+    }
+    var falhaCount = resultados.length - okCount;
+    var hint = 'Cash Management API pode requerer credenciais separadas (clientId/cert) distintas do BoleCode/PIX. Verifique com o Itau se o escopo cash_management esta habilitado no seu registro.';
+    return res.status(okCount > 0 ? 207 : 500).json({
+      success: okCount > 0,
+      partial: okCount > 0 && falhaCount > 0,
+      message: okCount + ' cancelado(s), ' + falhaCount + ' falha(s)',
+      resultados: resultados,
+      hint: okCount === 0 ? hint : undefined,
+    });
   } catch (err) {
     console.error('[API/CANCELAR] ERRO:', err.message);
     // Retorna detalhes do erro para diagnostico
@@ -1756,10 +1792,17 @@ router.get('/cancelar/web', async function(req, res) {
 
     await postChatter(odooId, chatBody);
 
-    try {
-      await odooRpc('account.move', 'write', [[parseInt(odooId)], { 'x_studio_boleto_cancelado': true }]);
-    } catch (wErr) {
-      console.warn('[CANCELAR-WEB] Aviso:', wErr.message);
+    // === AJL 28/11/2026: so marca cancelado no Odoo se TODOS os boletos ===
+    // Antes: marcava x_studio_boleto_cancelado=true mesmo com falha (caso
+    // NFe 00074548/NN 78668645: baixa 403 no Itau e flag marcado — com o
+    // boleto vivo no banco, o checkBoletoAtivo deixaria emitir outro =
+    // risco de pagamento duplo). Agora: flag so com baixa total confirmada.
+    if (falha === 0) {
+      try {
+        await odooRpc('account.move', 'write', [[parseInt(odooId)], { 'x_studio_boleto_cancelado': true, 'x_studio_itau_situacao': 'cancelado' }]);
+      } catch (wErr) {
+        console.warn('[CANCELAR-WEB] Aviso:', wErr.message);
+      }
     }
 
     res.redirect(returnUrl);

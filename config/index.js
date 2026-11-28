@@ -27,14 +27,36 @@ const config = {
   debug: process.env.DEBUG === 'true',
 
   // --- Itau (URLs identicas ao itau-odoo original) ---
+  // === AJL 28/11/2026 (v1.2.49-itau-v3-gateway): CAUSA RAIZ RESOLVIDA ===
+  // Colecao OFICIAL do Itau no Postman (workspace publico red-meteor-871001/
+  // itau, colecao "Bolecode") mostra que a familia Bolecode usa TRES hosts:
+  //   Emissao : https://secure.api.itau/pix_recebimentos_conciliacoes/v2/boletos_pix
+  //   Baixa   : https://api.itau.com.br/cash_management/v2/boletos/{id_boleto}/baixa
+  //   Consulta: https://secure.api.cloud.itau.com.br/boletoscash/v2/boletos
+  //             ?id_beneficiario=..&codigo_carteira=..&nosso_numero=..&view=specific
+  // A middleware usava secure.api.itau para TUDO -> baixa 403 ("rota filter
+  // failed") e consulta 404, mesmo com a credencial atual (gerente Itau
+  // confirma: cancelamento e parte do Bolecode, sem chave separada).
   itau: {
     clientId: process.env.ITAU_CLIENT_ID || '',
     clientSecret: process.env.ITAU_CLIENT_SECRET || '',
     tokenUrl: process.env.ITAU_TOKEN_URL || process.env.ITAU_TOKEN_PRODUCAO_URL || 'https://sts.itau.com.br/api/oauth/token',
+    // EMISSAO: host legado EXATAMENTE como producao usa hoje (nao mexer no
+    // caminho do dinheiro). Fallback = gateway novo p/ credencial futura.
     bolecodeBaseUrl: process.env.ITAU_BOLECODE_URL || process.env.ITAU_PRODUCAO_URL || 'https://secure.api.itau/pix_recebimentos_conciliacoes/v2',
+    bolecodeBaseUrlFallback: process.env.ITAU_BOLECODE_URL_V3 || (process.env.ITAU_API_BASE_V3 || 'https://api.gateway.itau.com.br') + '/pix_recebimentos_conciliacoes/v2',
     pixBaseUrl: process.env.ITAU_PIX_URL || process.env.ITAU_PIX_BASE_URL || 'https://secure.api.itau/pix_recebimentos/',
+    pixBaseUrlFallback: process.env.ITAU_PIX_URL_V3 || (process.env.ITAU_API_BASE_V3 || 'https://api.gateway.itau.com.br') + '/pix_recebimentos/',
+    // BAIXA: host OFICIAL da colecao (api.itau.com.br). Fallback = legado.
+    cashManagementBaseUrl: process.env.ITAU_CM_URL_V3 || 'https://api.itau.com.br/cash_management/v2',
+    cashManagementBaseUrlFallback: process.env.ITAU_CASH_MANAGEMENT_URL || 'https://secure.api.itau/cash_management/v2',
+    // CONSULTA: host OFICIAL boletoscash v2.
+    boletosConsultaBaseUrl: process.env.ITAU_CONSULTA_URL || 'https://secure.api.cloud.itau.com.br/boletoscash/v2',
     pixChave: process.env.ITAU_PIX_CHAVE || process.env.ITAU_PIX_KEY || '',
-    cashManagementBaseUrl: process.env.ITAU_CASH_MANAGEMENT_URL || 'https://secure.api.itau/cash_management/v2',
+    // Etapa do boleto: 'Efetivacao' (producao, registra titulo) ou
+    // 'Simulacao' (consome como TESTE, nao registra). Env permite trocar
+    // sem deploy durante a homologacao da nova API.
+    etapaBoleto: process.env.ITAU_ETAPA_BOLETO || 'Efetivacao',
   },
 
   banco: {
