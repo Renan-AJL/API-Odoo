@@ -27,14 +27,30 @@ const config = {
   debug: process.env.DEBUG === 'true',
 
   // --- Itau (URLs identicas ao itau-odoo original) ---
+  // === AJL 28/11/2026 (migracao credencial nova — v1.2.49-itau-v3-gateway) ===
+  // E-mail Itau IT-000267855 (23/11): nova credencial roda no gateway novo
+  // api.gateway.itau.com.br (emissao/consulta/alteracao/instrucao de baixa)
+  // + boletos.cloud.itau.com.br (webhook cobranca v3). Os antigos env vars
+  // ITAU_BOLECODE_URL/ITAU_PRODUCAO_URL/ITAU_PIX_URL/ITAU_CASH_MANAGEMENT_URL
+  // viram o FALLBACK do transport (itau-api.js) durante a transicao.
   itau: {
     clientId: process.env.ITAU_CLIENT_ID || '',
     clientSecret: process.env.ITAU_CLIENT_SECRET || '',
     tokenUrl: process.env.ITAU_TOKEN_URL || process.env.ITAU_TOKEN_PRODUCAO_URL || 'https://sts.itau.com.br/api/oauth/token',
-    bolecodeBaseUrl: process.env.ITAU_BOLECODE_URL || process.env.ITAU_PRODUCAO_URL || 'https://secure.api.itau/pix_recebimentos_conciliacoes/v2',
-    pixBaseUrl: process.env.ITAU_PIX_URL || process.env.ITAU_PIX_BASE_URL || 'https://secure.api.itau/pix_recebimentos/',
+    // PRIMARY: gateway novo (credencial nova). Env V3 tem precedencia.
+    bolecodeBaseUrl: process.env.ITAU_BOLECODE_URL_V3 || (process.env.ITAU_API_BASE_V3 || 'https://api.gateway.itau.com.br') + '/pix_recebimentos_conciliacoes/v2',
+    pixBaseUrl: process.env.ITAU_PIX_URL_V3 || (process.env.ITAU_API_BASE_V3 || 'https://api.gateway.itau.com.br') + '/pix_recebimentos/',
+    cashManagementBaseUrl: process.env.ITAU_CM_URL_V3 || (process.env.ITAU_API_BASE_V3 || 'https://api.gateway.itau.com.br') + '/cash_management/v2',
     pixChave: process.env.ITAU_PIX_CHAVE || process.env.ITAU_PIX_KEY || '',
-    cashManagementBaseUrl: process.env.ITAU_CASH_MANAGEMENT_URL || 'https://secure.api.itau/cash_management/v2',
+    // FALLBACK: host legado (env antigo ou default) — transport tenta se o
+    // gateway novo recusar (403/404) ou cair (conexao), ponte da transicao.
+    bolecodeBaseUrlFallback: process.env.ITAU_BOLECODE_URL || process.env.ITAU_PRODUCAO_URL || 'https://secure.api.itau/pix_recebimentos_conciliacoes/v2',
+    pixBaseUrlFallback: process.env.ITAU_PIX_URL || process.env.ITAU_PIX_BASE_URL || 'https://secure.api.itau/pix_recebimentos/',
+    cashManagementBaseUrlFallback: process.env.ITAU_CASH_MANAGEMENT_URL || 'https://secure.api.itau/cash_management/v2',
+    // Etapa do boleto: 'Efetivacao' (producao, registra titulo) ou
+    // 'Simulacao' (consome como TESTE, nao registra). Env permite trocar
+    // sem deploy durante a homologacao da nova API.
+    etapaBoleto: process.env.ITAU_ETAPA_BOLETO || 'Efetivacao',
   },
 
   banco: {

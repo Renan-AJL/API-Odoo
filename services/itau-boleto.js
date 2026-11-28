@@ -80,8 +80,10 @@ function montaPayloadBolecode(dadosBoleto) {
     }
   }
 
-  // Etapa: Simulacao (homologacao) ou Efetivacao (producao)
-  const etapa = dadosBoleto.etapa || 'Efetivacao';
+  // Etapa: Simulacao (homologacao/teste) ou Efetivacao (producao).
+  // AJL 28/11/2026: env ITAU_ETAPA_BOLETO permite trocar sem deploy
+  // durante a homologacao da credencial nova (Simulacao -> Efetivacao).
+  const etapa = dadosBoleto.etapa || config.itau.etapaBoleto || 'Efetivacao';
 
   // Determina tipo pessoa (F ou J) baseado no CPF/CNPJ
   const cpfCnpjRaw = dadosBoleto.cpfCnpjPagador || '';
