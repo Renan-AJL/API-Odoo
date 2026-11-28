@@ -364,7 +364,8 @@ async function cancelarBoleto(nossoNumero, beneficiaryId) {
         return { sucesso: true, dados: response, metodo: 'bolecode_put_retry' };
       } catch (retryError) {
         console.error('[BOLETO] Falha na 2a tentativa de cancelamento:', retryError.message);
-        throw retryError;
+        // AJL 28/11: reporta os DOIS metodos p/ diagnostico no chatter
+        throw new Error('[1] CashMgmt PATCH api.itau.com.br: ' + erroMetodo1 + ' | [2] BoleCode PUT: ' + retryError.message);
       }
     }
     console.error('[BOLETO] Erro ao cancelar boleto:', error.message);
