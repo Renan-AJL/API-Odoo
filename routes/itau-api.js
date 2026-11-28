@@ -1796,6 +1796,11 @@ router.get('/cancelar/web', async function(req, res) {
     }
     chatBody += '<br/><small>NN: ' + nossoNumeros.join(', ') + '</small>';
 
+    // AJL 28/11: respostas do Itau podem vir com HTML/bytes nao-XML (WAF,
+    // pagina de erro) e quebram a serializacao XML-RPC do chatter (Odoo
+    // responde pagina HTML -> "Unknown XML-RPC tag TITLE"). Sanitiza.
+    chatBody = chatBody.replace(/[^\x20-\x7E\u00A0-\u00FF]/g, ' ').substring(0, 1800);
+
     await postChatter(odooId, chatBody);
 
     // === AJL 28/11/2026: so marca cancelado no Odoo se TODOS os boletos ===
@@ -1814,8 +1819,12 @@ router.get('/cancelar/web', async function(req, res) {
     res.redirect(returnUrl);
   } catch (err) {
     console.error('[CANCELAR-WEB] ERRO:', err.message);
-    // DEBUG 28/11: erro+stack no corpo (temporario)
-    return res.status(500).send('CANCELAR-WEB ERRO: ' + err.message + '\nSTACK:\n' + (err.stack || ''));
+    // DEBUG 28/11: erro + o chatBody que falhou (se existir) no corpo, p/ ver
+    // a resposta do Itau mesmo quando o chatter nao sobe (temporario)
+    var dbg = 'CANCELAR-WEB ERRO: ' + err.message;
+    if (typeof chatBody !== 'undefined') dbg += '\n\nCHATBODY:\n' + chatBody;
+    dbg += '\nSTACK:\n' + (err.stack || '');
+    return res.status(500).send(dbg.replace(/[^\x20-\x7E\u00A0-\u00FF\n]/g, ' '));
   }
 });
 
